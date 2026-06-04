@@ -66,12 +66,25 @@ def _pose(name: str) -> Pose:
     raise ValueError(f"Taught pose {name!r} must have 3 or 6 values, got {len(vals)}")
 
 
-def build_forward_moves() -> list[Move]:
-    return [
+def build_forward_moves(repeat: int = 0) -> list[Move]:
+    """Build the three forward moves, offset in Z for stacking.
+
+    ``repeat`` is the 0-based pass index. Each move's src and dst Z are
+    shifted by ``repeat * cfg.Z_STEP_PER_REPEAT[label]`` so the source stack
+    shrinks and the target stack grows across repeats. Pose objects are
+    freshly constructed here, so mutating them is safe.
+    """
+    moves = [
         Move("case", _pose("CASE_PICK"), _pose("CASE_PLACE_R")),
         Move("battery_1", _pose("BAT_SRC_1"), _pose("BAT_SLOT_1")),
         Move("battery_2", _pose("BAT_SRC_2"), _pose("BAT_SLOT_2")),
     ]
+    if repeat:
+        for m in moves:
+            src_dz, dst_dz = cfg.Z_STEP_PER_REPEAT.get(m.label, (0.0, 0.0))
+            m.src.pos[2] += repeat * src_dz
+            m.dst.pos[2] += repeat * dst_dz
+    return moves
 
 
 class TaskOrchestrator:
@@ -103,11 +116,11 @@ class TaskOrchestrator:
         logger.info("[{}] done", move.label)
         return True
 
-    def run_forward(self) -> bool:
-        for move in build_forward_moves():
+    def run_forward(self, repeat: int = 0) -> bool:
+        for move in build_forward_moves(repeat):
             if not self._execute(move):
                 return False
-        logger.info("Forward sequence complete.")
+        logger.info("Forward sequence complete (repeat={}).", repeat)
         return True
 
     def run_undo(self) -> bool:

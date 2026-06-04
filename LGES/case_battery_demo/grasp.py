@@ -279,6 +279,32 @@ class SuctionMover:
         self._move_to_joints(q_target, duration)
         return ok
 
+    def _cartesian_z_to(self, target_z: float, rpy) -> None:
+        """Step the EE straight to *target_z* in Cartesian space (up or down).
+
+        Unlike ``_move_ee_to`` (which interpolates in joint space and can let
+        the EE dip then rise on a long descent because the elbow swings), this
+        steps the cup tip monotonically along Z while keeping x, y and the
+        commanded rpy fixed. Use it for hover-descent legs so the user never
+        sees an unintended pre-descent lift caused by joint-space interp.
+        """
+        import time
+        cur_pos, _ = self.current_ee_pose()
+        target_z = float(target_z)
+        if abs(target_z - cur_pos[2]) < 1e-4:
+            return
+        direction = 1.0 if target_z > cur_pos[2] else -1.0
+        configuration = self._fresh_configuration()
+        step_pos = cur_pos.copy()
+        while (direction > 0 and step_pos[2] < target_z) or \
+              (direction < 0 and step_pos[2] > target_z):
+            remaining = target_z - step_pos[2]
+            step = direction * min(cfg.LIFT_STEP_M, abs(remaining))
+            step_pos[2] += step
+            q_step, _ = self._solve_ik(configuration, step_pos, rpy)
+            self._arm.set_joint_pos(self._arm_joints_from_q(q_step))
+            time.sleep(cfg.DESCENT_DT_S)
+
     # ------------------------------------------------------------------
     # Public primitives
     # ------------------------------------------------------------------
@@ -289,8 +315,23 @@ class SuctionMover:
         hover_pos[2] += cfg.HOVER_HEIGHT_M
         rpy = pose.rpy
 
+        # Two-leg approach: first travel sideways at SAFE_TRANSPORT_Z, then
+        # drop straight down to hover_z. Avoids the cup sweeping diagonally
+        # through the box rim or an adjacent stack.
+        if cfg.SAFE_TRANSPORT_Z is not None:
+            transit = np.array([hover_pos[0], hover_pos[1], cfg.SAFE_TRANSPORT_Z])
+            logger.info(
+                "[Mover] pick: transit ({:.3f}, {:.3f}) @ z={:.3f}",
+                transit[0], transit[1], transit[2],
+            )
+            self._move_ee_to(transit, rpy, cfg.MOVE_DURATION_S)
+
         logger.info("[Mover] pick: hover at ({:.3f}, {:.3f}, {:.3f})", *hover_pos)
-        self._move_ee_to(hover_pos, rpy, cfg.MOVE_DURATION_S)
+        # Cartesian Z descent so the EE moves monotonically down to hover_z.
+        # Joint-space interp here can let the elbow swing and the tip dip
+        # below hover_z then rise back up, which looks like a "lift" right
+        # before the descent loop starts.
+        self._cartesian_z_to(hover_pos[2], rpy)
 
         suction_io.suction_on()
         vac = suction_io.VacuumMonitor()
@@ -328,13 +369,43 @@ class SuctionMover:
         target = np.array([pose.pos[0], pose.pos[1], cfg.SAFE_TRANSPORT_Z])
         logger.info("[Mover] move_to ({:.3f}, {:.3f}) @ transport z", target[0], target[1])
         self._move_ee_to(target, pose.rpy, cfg.MOVE_DURATION_S)
+        self._wait_until_arrived(target, cfg.MOVE_ARRIVAL_TOL_M, cfg.MOVE_ARRIVAL_TIMEOUT_S)
+
+    def _wait_until_arrived(self, target_pos, tol_m: float, timeout_s: float) -> None:
+        """Block until the live EE position is within *tol_m* of *target_pos*.
+
+        Position-mode commands are accepted asynchronously, so the arm can
+        still be settling toward the target after our smoothstep loop
+        finishes. Subsequent legs (e.g. the vertical descent in pick/place)
+        must not start until the sideways travel has actually completed,
+        otherwise the cup descends from the wrong (x, y).
+        """
+        import time
+        target = np.asarray(target_pos, dtype=float)
+        deadline = time.time() + float(timeout_s)
+        last_err = None
+        while time.time() < deadline:
+            err = float(np.linalg.norm(self._current_ee_pos() - target))
+            last_err = err
+            if err <= tol_m:
+                return
+            time.sleep(0.02)
+        logger.warning(
+            "[Mover] move_to: arrival not confirmed within {:.1f}s "
+            "(remaining error {:.4f}m, tol {:.4f}m)",
+            timeout_s, last_err if last_err is not None else float("nan"), tol_m,
+        )
 
     def place(self, pose: Pose) -> None:
         """Descend to the taught place z, release, then retract to transport z."""
         # Approach hover just above the place target.
         hover = pose.pos.copy()
         hover[2] += cfg.HOVER_HEIGHT_M
-        self._move_ee_to(hover, pose.rpy, cfg.MOVE_DURATION_S)
+        # The orchestrator's preceding move_to() already left us at
+        # (x, y, SAFE_TRANSPORT_Z). This is the vertical-only descent leg
+        # to hover_z — same two-leg pattern used in pick().
+        logger.info("[Mover] place: hover at ({:.3f}, {:.3f}, {:.3f})", *hover)
+        self._move_ee_to(hover, pose.rpy, cfg.APPROACH_DESCENT_S)
 
         # Re-tare the wrench while hovering with the battery still attached.
         # Without this, the force baseline left over from the empty-cup tare
@@ -363,6 +434,15 @@ class SuctionMover:
 
         # Controlled descent to the taught seat height with a hard-force guard.
         self._descend_to(pose.pos, pose.rpy)
+
+        # Small pre-release lift so the cup is clear of the placed object
+        # before the blow pulse fires — prevents sticking and avoids
+        # blowback pushing the part sideways.
+        if cfg.RELEASE_PRELIFT_M and cfg.RELEASE_PRELIFT_M > 0.0:
+            cur_pos, _ = self.current_ee_pose()
+            prelift_z = float(cur_pos[2]) + float(cfg.RELEASE_PRELIFT_M)
+            logger.info("[Mover] pre-release lift +{:.0f}mm", cfg.RELEASE_PRELIFT_M * 1000)
+            self.lift(prelift_z)
 
         suction_io.release()
 
@@ -518,17 +598,25 @@ class SuctionMover:
                                      cfg.PLACE_DESCENT_MAX_STEP_M))
             step = min(raw_step, current_z - goal_z)
             phase = 2 * np.pi * step_count * cfg.PLACE_DESCENT_DT_S * cfg.JITTER_FREQ_HZ
-            step_pos[0] = base_x + cfg.JITTER_AMPLITUDE_M * np.sin(phase)
-            step_pos[1] = base_y + cfg.JITTER_AMPLITUDE_M * np.cos(phase)
+            # Ramp jitter amplitude in from 0 over the first JITTER_RAMP_S
+            # seconds of descent so the Y/roll/pitch terms (which use cos /
+            # sin(+π/2) and start at full amplitude) don't snap on step 0.
+            # Without this ramp the cup visibly flicks at the start of every
+            # place descent because the commanded orientation jumps
+            # discontinuously from the hover pose.
+            ramp_s = max(cfg.JITTER_RAMP_S, 1e-6)
+            ramp = min(1.0, step_count * cfg.PLACE_DESCENT_DT_S / ramp_s)
+            step_pos[0] = base_x + ramp * cfg.JITTER_AMPLITUDE_M * np.sin(phase)
+            step_pos[1] = base_y + ramp * cfg.JITTER_AMPLITUDE_M * np.cos(phase)
             step_pos[2] = current_z - step
             # Same-frequency yaw wobble so the cup wiggles slightly while it
             # descends, helping the battery seat into the slot if X/Y jitter
             # alone isn't enough to clear a tight fit. Roll/pitch are added
             # at phase offsets so the cup nutates instead of just twisting.
             step_rpy = np.array(rpy, dtype=float, copy=True)
-            step_rpy[0] += cfg.JITTER_ROLL_AMPLITUDE_RAD * np.cos(phase)
-            step_rpy[1] += cfg.JITTER_PITCH_AMPLITUDE_RAD * np.sin(phase + np.pi / 2)
-            step_rpy[2] += cfg.JITTER_YAW_AMPLITUDE_RAD * np.sin(phase)
+            step_rpy[0] += ramp * cfg.JITTER_ROLL_AMPLITUDE_RAD * np.cos(phase)
+            step_rpy[1] += ramp * cfg.JITTER_PITCH_AMPLITUDE_RAD * np.sin(phase + np.pi / 2)
+            step_rpy[2] += ramp * cfg.JITTER_YAW_AMPLITUDE_RAD * np.sin(phase)
             q_step, _ = self._solve_ik(configuration, step_pos, step_rpy)
             self._arm.set_joint_pos(self._arm_joints_from_q(q_step))
             current_z = step_pos[2]

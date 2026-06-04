@@ -66,9 +66,9 @@ def blow_off() -> None:
 
 def release() -> None:
     """Release a held object: suction off, then a short blow pulse."""
-    blow_on()
-    time.sleep(1.5)
     suction_off()
+    blow_on()
+    time.sleep(2)
     logger.info("[Suction] released")
 
 

@@ -73,8 +73,8 @@ SUCTION_BASE_URL: str = f"http://{SUCTION_HOST}/api/dc/weblogic"
 # weblogic program IDs (from suction/test_suction.py)
 SUCTION_ON_ID: int = 3587
 SUCTION_OFF_ID: int = 763
-BLOW_ON_ID: int = 7381
-BLOW_OFF_ID: int = 5484
+BLOW_ON_ID: int = 963
+BLOW_OFF_ID: int = 5089
 
 # Suction seal detection.
 # Primary signal is DI0 (dInput[0]) over the controller's socketio stream:
@@ -89,7 +89,7 @@ BLOW_OFF_ID: int = 5484
 # Physical suction tube length from EE origin to cup tip (m).
 SUCTION_LENGTH_M: float = 0.25
 # Height the cup tip hovers above a target before activating suction (m).
-HOVER_HEIGHT_M: float = 0.15
+HOVER_HEIGHT_M: float = 0.10
 
 # ---------------------------------------------------------------------------
 # Descent (pick) — descend until vacuum seal / contact, like suction_grasp.py
@@ -109,19 +109,28 @@ PLACE_DESCENT_DT_S: float = 0.05
 
 MAX_DESCENT_M: float = 0.40         # safety: stop after 40 cm of descent
 PLACE_Z_BUFFER_M: float = 0.01      # stop placing when within 10 mm of target z
-LIFT_STEP_M: float = 0.005          # 5 mm per step (lift: ~100 mm/s)
+LIFT_STEP_M: float = 0.005          # 5 mm per step (lift: ~50 mm/s)
+# Small upward jog performed *before* the blow/suction-off pulse, so the cup
+# breaks contact with the placed object cleanly (no sticking, no blowback
+# pushing the part). Set to 0.0 to disable.
+RELEASE_PRELIFT_M: float = 0.018    # 18 mm pre-release lift
 JITTER_AMPLITUDE_M: float = 0.003   # ±3 mm sinusoidal X/Y jitter during place descent
 JITTER_FREQ_HZ: float = 3.0         # jitter cycles per second
 JITTER_YAW_AMPLITUDE_RAD: float = np.deg2rad(2.0)    # ±2° yaw wobble in sync with X/Y jitter
 JITTER_ROLL_AMPLITUDE_RAD: float = np.deg2rad(1.0)   # ±1° roll wobble (cos-phase)
 JITTER_PITCH_AMPLITUDE_RAD: float = np.deg2rad(1.0)  # ±1° pitch wobble (sin-phase, offset)
+# Linearly ramp jitter amplitude from 0 -> 1 (× the configured amplitudes
+# above) over the first JITTER_RAMP_S seconds of place descent. Without this
+# the cos-phase / sin(+π/2) terms snap to full amplitude on step 0 and the
+# cup visibly flicks at the start of the descent.
+JITTER_RAMP_S: float = 0.5
 
 # ---------------------------------------------------------------------------
 # Contact detection (wrist wrench, via grasp_box/read_force.py)
 # ---------------------------------------------------------------------------
 FORCE_CONTACT_THRESHOLD_N: float = 2.0
-FORCE_HARD_LIMIT_N: float = 25.0          # pick(): empty cup, low baseline noise
-FORCE_HARD_LIMIT_PLACE_N: float = 20.0    # place(): cup carrying battery — kept
+FORCE_HARD_LIMIT_N: float = 15.0          # pick(): empty cup, low baseline noise
+FORCE_HARD_LIMIT_PLACE_N: float = 10.0    # place(): cup carrying battery — kept
                                           # tight to protect the battery from
                                           # being crushed if the seat is wrong.
                                           # If this trips on noise, the tared
@@ -133,6 +142,19 @@ VACUUM_SEAL_TIMEOUT_S: float = 5.0  # wait for seal after contact before failing
 # Gross motion
 # ---------------------------------------------------------------------------
 MOVE_DURATION_S: float = 3.0       # travel time to a hover pose
+# Sideways move_to() arrival check: after the joint trajectory finishes,
+# poll the live EE pose until it's within MOVE_ARRIVAL_TOL_M of the
+# (x, y, SAFE_TRANSPORT_Z) target before returning, capped at
+# MOVE_ARRIVAL_TIMEOUT_S. Prevents the next pick/place from starting
+# while the arm is still settling under position-mode lag.
+MOVE_ARRIVAL_TOL_M: float = 0.005      # 5 mm
+MOVE_ARRIVAL_TIMEOUT_S: float = 2.0
+# Time for the vertical descent leg from SAFE_TRANSPORT_Z down to the
+# per-target hover_z (i.e. pose.z + HOVER_HEIGHT_M). The approach is split
+# into two legs so the cup never sweeps diagonally through the workspace:
+#   leg 1: (current) -> (x, y, SAFE_TRANSPORT_Z)  via MOVE_DURATION_S
+#   leg 2: (x, y, SAFE_TRANSPORT_Z) -> (x, y, hover_z)  via APPROACH_DESCENT_S
+APPROACH_DESCENT_S: float = 1.0
 # Base-frame Z the cup tip is raised to for collision-free sideways transport.
 # Must clear the source stack and both box walls.
 # TODO: set from the teach step.
@@ -153,10 +175,35 @@ SAFE_TRANSPORT_Z: float = 1.15  # 10 mm above max recorded hover Z (1.190 m, lin
 #   BAT_SLOT_1/2  the two battery seats inside the moved case (right box)
 # ---------------------------------------------------------------------------
 TAUGHT_POSES: dict[str, tuple[float, ...]] = {
-    "CASE_PICK":    (0.701310,  0.509836,  0.865208, -3.141523, -0.000023,  1.920076),
-    "CASE_PLACE_R": (0.776267,  0.084816,  0.917752, -3.141531,  0.000216,  1.919917),
-    "BAT_SRC_1":    (0.688931,  0.359726,  0.90, -3.141483,  0.000227,  1.919921),
-    "BAT_SLOT_1":   (0.763274, -0.064724,  0.900000,  3.141523,  0.000298,  1.919760),
-    "BAT_SRC_2":    (0.688875,  0.534910,  0.90,  3.141340, -0.000154,  1.919955),
-    "BAT_SLOT_2":   (0.763807,  0.106673,  0.900000,  3.141363,  0.000238,  1.920136),
+    "CASE_PICK":    (0.701310,  0.509836,  0.9353, -3.141523, -0.000023,  1.920076),
+    "CASE_PLACE_R": (0.776267,  0.084816,  0.8449, -3.141531,  0.000216,  1.919917),
+    "BAT_SRC_1":    (0.688931,  0.359726,  0.9300, -3.141483,  0.000227,  1.919921),
+    "BAT_SLOT_1":   (0.763274, -0.064724,  0.8561,  3.141523,  0.000298,  1.919760),
+    "BAT_SRC_2":    (0.688875,  0.534910,  0.9300,  3.141340, -0.000154,  1.919955),
+    "BAT_SLOT_2":   (0.763807,  0.106673,  0.8561,  3.141363,  0.000238,  1.920136),
+}
+
+# ---------------------------------------------------------------------------
+# Forward-only stacking
+# ---------------------------------------------------------------------------
+# Number of forward passes to chain into a single stacking sequence. Each pass
+# is offset in Z by repeat_index * Z_STEP_PER_REPEAT[label] — the source
+# stack shrinks (negative src_dz) and the target stack grows (positive dst_dz)
+# as repeats progress. Undo is intentionally not stack-aware; use forward-only
+# when this is > 1.
+FORWARD_REPEATS: int = 5
+
+# Per-move (src_dz, dst_dz) in metres. Applied as:
+#     pose.z += repeat_index * dz       (repeat_index starts at 0)
+# Tune to the actual case/battery height. Defaults assume ~20 mm case stack
+# pitch and ~15 mm battery stack pitch — measure and adjust.
+Z_STEP_PER_REPEAT: dict[str, tuple[float, float]] = {
+    # label:        (src_dz,  dst_dz)
+    # Measured from pass1→pass2 deltas: src drops ~14 mm/repeat, dst rises
+    # ~16–18 mm/repeat. Bias dst slightly UP (safe — cup releases a hair
+    # high) and src slightly DOWN in magnitude (descent finds contact in
+    # budget). Re-measure after a few repeats and tune.
+    "case":         (-0.015,  0.018),
+    "battery_1":    (-0.015,  0.018),
+    "battery_2":    (-0.015,  0.018),
 }

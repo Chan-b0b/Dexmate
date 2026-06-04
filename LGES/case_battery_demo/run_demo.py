@@ -31,6 +31,7 @@ from .grasp import SuctionMover
 from .home_pose import go_to_default_pose
 from .sequence import TaskOrchestrator
 from . import suction_io
+from . import config as cfg
 
 
 def main(undo: bool = False, loop: bool = False, skip_confirmation: bool = False) -> bool:
@@ -86,8 +87,16 @@ def main(undo: bool = False, loop: bool = False, skip_confirmation: bool = False
                     # each forward choreography.
                     go_to_default_pose(bot)
 
-                    if not orch.run_forward():
-                        logger.error("Forward sequence failed — leaving robot where it stopped.")
+                    repeats = max(1, int(getattr(cfg, "FORWARD_REPEATS", 1)))
+                    forward_ok = True
+                    for k in range(repeats):
+                        if repeats > 1:
+                            logger.info("--- Forward pass {}/{} (repeat={}) ---", k + 1, repeats, k)
+                        if not orch.run_forward(repeat=k):
+                            logger.error("Forward sequence failed at pass {} — leaving robot where it stopped.", k + 1)
+                            forward_ok = False
+                            break
+                    if not forward_ok:
                         return False
                     if undo:
                         if not orch.run_undo():
