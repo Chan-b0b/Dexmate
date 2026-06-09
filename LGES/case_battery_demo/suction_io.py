@@ -23,10 +23,10 @@ from . import config as cfg
 def _run(program_id: int) -> None:
     """Stop running programs, then trigger weblogic program *program_id*."""
     r_stop = requests.post(f"{cfg.SUCTION_BASE_URL}/stop", timeout=5.0)
-    logger.debug("[Suction] stop → {} {}", r_stop.status_code, r_stop.text[:80])
+    # logger.debug("[Suction] stop → {} {}", r_stop.status_code, r_stop.text[:80])
     time.sleep(0.5)
     r_run = requests.post(f"{cfg.SUCTION_BASE_URL}/run/{program_id}", timeout=5.0)
-    logger.debug("[Suction] run/{} → {} {}", program_id, r_run.status_code, r_run.text[:80])
+    # logger.debug("[Suction] run/{} → {} {}", program_id, r_run.status_code, r_run.text[:80])
 
 
 # Tracks whether *we* have commanded suction ON. The toolA reading alone can't
@@ -44,23 +44,23 @@ def suction_on() -> None:
     global _suction_commanded_on
     _run(cfg.SUCTION_ON_ID)
     _suction_commanded_on = True
-    logger.info("[Suction] ON (id={})", cfg.SUCTION_ON_ID)
+    # logger.info("[Suction] ON (id={})", cfg.SUCTION_ON_ID)
 
 
 def suction_off() -> None:
     global _suction_commanded_on
     _run(cfg.SUCTION_OFF_ID)
     _suction_commanded_on = False
-    logger.info("[Suction] OFF (id={})", cfg.SUCTION_OFF_ID)
+    # logger.info("[Suction] OFF (id={})", cfg.SUCTION_OFF_ID)
 
 
 def blow_on() -> None:
-    logger.info("[Suction] BLOW ON (id={})", cfg.BLOW_ON_ID)
+    # logger.info("[Suction] BLOW ON (id={})", cfg.BLOW_ON_ID)
     _run(cfg.BLOW_ON_ID)
 
 
 def blow_off() -> None:
-    logger.info("[Suction] BLOW OFF (id={})", cfg.BLOW_OFF_ID)
+    # logger.info("[Suction] BLOW OFF (id={})", cfg.BLOW_OFF_ID)
     _run(cfg.BLOW_OFF_ID)
 
 
@@ -69,7 +69,7 @@ def release() -> None:
     suction_off()
     blow_on()
     time.sleep(2)
-    logger.info("[Suction] released")
+    # logger.info("[Suction] released")
 
 
 # ---------------------------------------------------------------------------
@@ -149,13 +149,13 @@ class VacuumMonitor:
 
     def _run(self) -> None:
         try:
-            logger.info("[VacuumMonitor] Connecting to http://{}/socket.io", self._host)
+            # logger.info("[VacuumMonitor] Connecting to http://{}/socket.io", self._host)
             self._sio.connect(
                 f"http://{self._host}",
                 transports=["websocket", "polling"],
                 socketio_path="socket.io",
             )
-            logger.info("[VacuumMonitor] ✓ Connected! Watching DI0 for seal...")
+            # logger.info("[VacuumMonitor] ✓ Connected! Watching DI0 for seal...")
             self._sio.wait()
         except Exception as exc:  # noqa: BLE001
             logger.error("[VacuumMonitor] ✗ Connection failed: {}", exc)

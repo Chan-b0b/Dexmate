@@ -28,6 +28,13 @@ URDF_PATH: str = (
     "robots/humanoid/vega_1p/vega_1p_gripper.urdf"
 )
 
+# Per-tick motion trace. When enabled, every set_joint_pos call appends a row
+# (timestamp, leg label, commanded 7 joints, actual 7 joints) to TRACE_PATH so
+# a jerk can be localized to a specific joint + leg, and commanded-vs-actual
+# tells us whether we command the discontinuity or it's servo tracking.
+TRACE_ENABLED: bool = True
+TRACE_PATH: str = "/tmp/cns_trace.csv"
+
 IK_DT: float = 0.01
 IK_MAX_ITERS: int = 500
 # Combined position+orientation twist-norm tolerance. A soft posture task adds
@@ -41,7 +48,7 @@ PREFERRED_QP_SOLVER: str = "daqp"
 # redundant DOF for a full 6-DOF target; the posture task pulls that DOF toward
 # the joint mid-ranges (auto-computed from URDF limits) to keep joints away
 # from their motor stops. Set to 0.0 to disable centering entirely.
-POSTURE_COST: float = 1e-2
+POSTURE_COST: float = 1e-3
 # Levenberg-Marquardt damping on the EE task — stabilizes solves near
 # singularities (trades a little tracking error for a lot of stability).
 IK_LM_DAMPING: float = 1e-6
@@ -70,6 +77,14 @@ YAW_OFFSET_DEG: float = 110
 SUCTION_HOST: str = "192.168.5.1"
 SUCTION_BASE_URL: str = f"http://{SUCTION_HOST}/api/dc/weblogic"
 
+# ---------------------------------------------------------------------------
+# Cognex barcode reader (DataMan, DMCC over telnet). The dashboard pulls the
+# last captured frame with ``||>IMAGE.SEND`` (image-only — it never triggers a
+# read, so it can't fight the demo's own scanning).
+# ---------------------------------------------------------------------------
+BCR_HOST: str = "192.168.50.101"
+BCR_PORT: int = 23
+
 # weblogic program IDs (from suction/test_suction.py)
 SUCTION_ON_ID: int = 3587
 SUCTION_OFF_ID: int = 763
@@ -94,31 +109,42 @@ HOVER_HEIGHT_M: float = 0.10
 # ---------------------------------------------------------------------------
 # Descent (pick) — descend until vacuum seal / contact, like suction_grasp.py
 # ---------------------------------------------------------------------------
-DESCENT_MAX_STEP_M: float = 0.0015   # max step size (far from target, ~200 mm/s)
-DESCENT_MIN_STEP_M: float = 0.0004   # min step size (at target, ~20 mm/s)
+DESCENT_MAX_STEP_M: float = 0.005   # max step size, far from target (0.004/DT=80 mm/s).
+                                     # Only caps the SAFE upper region: the hover-leg
+                                     # speed is derived from this (pick() ties them so the
+                                     # handoff stays matched) and the descent loop's
+                                     # far-from-target traverse. Contact gentleness is set
+                                     # by DESCENT_MIN_STEP_M + the KP ramp, not this.
+DESCENT_MIN_STEP_M: float = 0.0002   # min step size (at target, ~20 mm/s)
 DESCENT_KP: float = 0.1            # step = clip(dist_to_target * KP, min, max)
 DESCENT_DT_S: float = 0.05          # 50 ms between steps
 
 # Place descent runs slower than pick: the cup is carrying a battery, the seat
 # tolerance is tight, and we want the impact (if any) to be gentle. Halving
 # the step caps gives ~10 cm/s peak / ~4 mm/s near goal at the same 50 ms tick.
-PLACE_DESCENT_MAX_STEP_M: float = 0.0015
-PLACE_DESCENT_MIN_STEP_M: float = 0.0002
+PLACE_DESCENT_MAX_STEP_M: float = 0.002
+PLACE_DESCENT_MIN_STEP_M: float = 0.0001
 PLACE_DESCENT_KP: float = 0.05
 PLACE_DESCENT_DT_S: float = 0.05
 
 MAX_DESCENT_M: float = 0.40         # safety: stop after 40 cm of descent
-PLACE_Z_BUFFER_M: float = 0.01      # stop placing when within 10 mm of target z
+PLACE_Z_BUFFER_M: float = 0.1      # stop placing when within 10 mm of target z
 LIFT_STEP_M: float = 0.005          # 5 mm per step (lift: ~50 mm/s)
 # Small upward jog performed *before* the blow/suction-off pulse, so the cup
 # breaks contact with the placed object cleanly (no sticking, no blowback
 # pushing the part). Set to 0.0 to disable.
 RELEASE_PRELIFT_M: float = 0.018    # 18 mm pre-release lift
-JITTER_AMPLITUDE_M: float = 0.003   # ±3 mm sinusoidal X/Y jitter during place descent
+# Jitter DISABLED: at the far cross-body place reach the IK is ill-conditioned,
+# so this small Cartesian wobble (esp. the angular terms) was amplified into
+# erratic 10 rad/s joint commands — the place-descent jerk (confirmed via the
+# motion trace: pick descent, identical but jitterless, is dead smooth). Re-
+# enable a SMALL amount only if a battery actually fails to seat without it,
+# and prefer X/Y over the angular terms (orientation wobble is the worst).
+JITTER_AMPLITUDE_M: float = 0.001     # ±X/Y sinusoidal jitter during place descent
 JITTER_FREQ_HZ: float = 3.0         # jitter cycles per second
-JITTER_YAW_AMPLITUDE_RAD: float = np.deg2rad(2.0)    # ±2° yaw wobble in sync with X/Y jitter
-JITTER_ROLL_AMPLITUDE_RAD: float = np.deg2rad(1.0)   # ±1° roll wobble (cos-phase)
-JITTER_PITCH_AMPLITUDE_RAD: float = np.deg2rad(1.0)  # ±1° pitch wobble (sin-phase, offset)
+JITTER_YAW_AMPLITUDE_RAD: float = np.deg2rad(0.0)    # yaw wobble in sync with X/Y jitter
+JITTER_ROLL_AMPLITUDE_RAD: float = np.deg2rad(0.0)   # roll wobble (cos-phase)
+JITTER_PITCH_AMPLITUDE_RAD: float = np.deg2rad(0.0)  # pitch wobble (sin-phase, offset)
 # Linearly ramp jitter amplitude from 0 -> 1 (× the configured amplitudes
 # above) over the first JITTER_RAMP_S seconds of place descent. Without this
 # the cos-phase / sin(+π/2) terms snap to full amplitude on step 0 and the
@@ -141,14 +167,38 @@ VACUUM_SEAL_TIMEOUT_S: float = 5.0  # wait for seal after contact before failing
 # ---------------------------------------------------------------------------
 # Gross motion
 # ---------------------------------------------------------------------------
-MOVE_DURATION_S: float = 3.0       # travel time to a hover pose
+MOVE_DURATION_S: float = 2.0      # travel time to a hover pose
+
+# ---- Trajectory smoothing (sideways travel + vertical lift) --------------
+# When True, _move_ee_to() interpolates the EE pose linearly in Cartesian
+# space with a smoothstep time profile and warm-started per-substep IK,
+# instead of doing a single IK solve to the target and smoothstepping in
+# joint space. Gives a straight EE path with ease-in / ease-out velocity
+# and avoids elbow swings between distant configurations. Set False to
+# A/B against the original joint-space interp.
+USE_CARTESIAN_INTERP: bool = True
+# Substep period for the Cartesian-interpolated travel. 50 Hz matches the
+# control loop the arm already runs at.
+EE_TRAVEL_DT_S: float = 0.02
+# Smoothstep "easing strength" for sideways travel and lift:
+#   "cubic"   -> 3t² - 2t³  (C¹ continuous, zero velocity at endpoints)
+#   "quintic" -> 6t⁵ - 15t⁴ + 10t³ (C² continuous, also zero accel at endpoints)
+# Quintic is gentler on the motors (no jerk spike at start/stop); cubic is
+# what the original _move_to_joints used.
+SMOOTH_PROFILE: str = "quintic"
+# Lift / vertical Cartesian Z is duration-driven rather than constant-step,
+# so the speed cap doubles as the slope of the smoothstep ramp. Peak speed
+# of a smoothstep at midpoint is ~1.5× (cubic) / ~1.875× (quintic) the
+# average; size this so the peak stays within the arm's comfortable range.
+LIFT_AVG_SPEED_M_S: float = 0.15   # 15 cm/s average -> ~28 cm/s peak (quintic)
+LIFT_MIN_DURATION_S: float = 0.4   # never shorter than this, even for tiny lifts
 # Sideways move_to() arrival check: after the joint trajectory finishes,
 # poll the live EE pose until it's within MOVE_ARRIVAL_TOL_M of the
 # (x, y, SAFE_TRANSPORT_Z) target before returning, capped at
 # MOVE_ARRIVAL_TIMEOUT_S. Prevents the next pick/place from starting
 # while the arm is still settling under position-mode lag.
 MOVE_ARRIVAL_TOL_M: float = 0.005      # 5 mm
-MOVE_ARRIVAL_TIMEOUT_S: float = 2.0
+MOVE_ARRIVAL_TIMEOUT_S: float = 1.0
 # Time for the vertical descent leg from SAFE_TRANSPORT_Z down to the
 # per-target hover_z (i.e. pose.z + HOVER_HEIGHT_M). The approach is split
 # into two legs so the cup never sweeps diagonally through the workspace:
@@ -158,7 +208,7 @@ APPROACH_DESCENT_S: float = 1.0
 # Base-frame Z the cup tip is raised to for collision-free sideways transport.
 # Must clear the source stack and both box walls.
 # TODO: set from the teach step.
-SAFE_TRANSPORT_Z: float = 1.15  # 10 mm above max recorded hover Z (1.190 m, line 15 of taught_ee_poses.txt)
+SAFE_TRANSPORT_Z: float = 1.05  # 10 mm above max recorded hover Z (1.190 m, line 15 of taught_ee_poses.txt)
 
 # ---------------------------------------------------------------------------
 # Taught poses in base_link frame. Each entry is either:
@@ -175,12 +225,12 @@ SAFE_TRANSPORT_Z: float = 1.15  # 10 mm above max recorded hover Z (1.190 m, lin
 #   BAT_SLOT_1/2  the two battery seats inside the moved case (right box)
 # ---------------------------------------------------------------------------
 TAUGHT_POSES: dict[str, tuple[float, ...]] = {
-    "CASE_PICK":    (0.701310,  0.509836,  0.9353, -3.141523, -0.000023,  1.920076),
-    "CASE_PLACE_R": (0.776267,  0.084816,  0.8449, -3.141531,  0.000216,  1.919917),
-    "BAT_SRC_1":    (0.688931,  0.359726,  0.9300, -3.141483,  0.000227,  1.919921),
-    "BAT_SLOT_1":   (0.763274, -0.064724,  0.8561,  3.141523,  0.000298,  1.919760),
-    "BAT_SRC_2":    (0.688875,  0.534910,  0.9300,  3.141340, -0.000154,  1.919955),
-    "BAT_SLOT_2":   (0.763807,  0.106673,  0.8561,  3.141363,  0.000238,  1.920136),
+    "CASE_PICK":    (0.701310,  0.539836,  0.8215, -3.141523, -0.000023,  1.920076),
+    "CASE_PLACE_R": (0.776267,  0.114816,  0.7309, -3.141531,  0.000216,  1.919917),
+    "BAT_SRC_1":    (0.688931,  0.389726,  0.8160, -3.141483,  0.000227,  1.919921),
+    "BAT_SLOT_1":   (0.763274, -0.034724,  0.7421,  3.141523,  0.000298,  1.919760),
+    "BAT_SRC_2":    (0.688875,  0.564910,  0.8160,  3.141340, -0.000154,  1.919955),
+    "BAT_SLOT_2":   (0.763807,  0.136673,  0.7421,  3.141363,  0.000238,  1.920136),
 }
 
 # ---------------------------------------------------------------------------

@@ -124,9 +124,31 @@ class TaskOrchestrator:
         return True
 
     def run_undo(self) -> bool:
-        """Undo every successfully executed move, most-recent first."""
-        for move in reversed(self._done):
-            if not self._execute(move.reversed()):
+        """Undo every successfully executed move, most-recent first.
+
+        If no moves have been recorded in this process (e.g. when invoked via
+        ``--undo-only`` without a prior forward run), fall back to the taught
+        poses and walk the full forward stack in reverse: for each repeat
+        index from ``FORWARD_REPEATS - 1`` down to ``0`` we take the reversed
+        forward moves for that pass. That way each undo place lands at
+        ``src + k * src_dz`` (and pick comes from ``dst + k * dst_dz``)
+        instead of releasing every item at the bare taught src z, which
+        would otherwise be too high after several stacking repeats.
+        """
+        if self._done:
+            moves_to_undo = [m.reversed() for m in reversed(self._done)]
+        else:
+            repeats = max(1, int(getattr(cfg, "FORWARD_REPEATS", 1)))
+            logger.info(
+                "No recorded moves — undoing from taught poses across {} repeat(s).",
+                repeats,
+            )
+            moves_to_undo = []
+            for k in range(repeats - 1, -1, -1):
+                for m in reversed(build_forward_moves(repeat=k)):
+                    moves_to_undo.append(m.reversed())
+        for move in moves_to_undo:
+            if not self._execute(move):
                 return False
         # Clear so a follow-up forward run starts with a fresh history (used by
         # --loop to alternate forward/undo repeatedly).

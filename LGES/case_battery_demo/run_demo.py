@@ -4,11 +4,13 @@ Run from the LGES directory so the package import resolves:
 
     python -m case_battery_demo.run_demo                 # forward only
     python -m case_battery_demo.run_demo --undo          # forward then undo
-    python -m case_battery_demo.run_demo --undo-only     # undo a prior run*
+    python -m case_battery_demo.run_demo --undo-only     # undo from taught poses
     python -m case_battery_demo.run_demo --loop          # forward+undo, repeat
+    python -m case_battery_demo.run_demo --dashboard          # forward+undo, repeat
 
-(*--undo-only requires the forward moves to have been recorded; in a single
-process that means running forward first. It is provided mainly for clarity.)
+``--undo-only`` does not require a prior forward run in this process; it
+builds the undo sequence directly from the taught poses (so place z falls
+back to the taught src z rather than a recorded pick z).
 """
 
 from __future__ import annotations
@@ -34,17 +36,25 @@ from . import suction_io
 from . import config as cfg
 
 
-def main(undo: bool = False, loop: bool = False, skip_confirmation: bool = False) -> bool:
+def main(undo: bool = False, undo_only: bool = False, loop: bool = False, skip_confirmation: bool = False, dashboard: bool = False) -> bool:
     """Run the forward choreography, optionally followed by the undo.
 
     Args:
         undo: If True, replay the sequence in reverse after the forward run.
+        undo_only: If True, skip the forward run and only execute the undo
+            sequence derived from the taught poses.
         loop: If True, repeat forward + undo indefinitely until Ctrl-C.
             Implies --undo.
         skip_confirmation: Skip the interactive safety prompt.
+        dashboard: If True, spool live camera/joints/EE/wrench for the web
+            viewer (run ``python -m case_battery_demo.dashboard.server``
+            in a separate terminal to watch it).
     """
     if loop:
         undo = True
+    if undo_only and loop:
+        logger.error("--undo-only is incompatible with --loop.")
+        return False
     logger.warning("=" * 60)
     logger.warning("About to move the REAL robot arm with suction.")
     logger.warning("Ensure the workspace is clear and the e-stop is reachable.")
@@ -56,7 +66,17 @@ def main(undo: bool = False, loop: bool = False, skip_confirmation: bool = False
             logger.info("Cancelled.")
             return False
 
-    with Robot() as bot:
+    # The head camera is disabled in the default robot config, so the dashboard
+    # gets no frames unless we explicitly enable it (joints/EE/wrench come from
+    # motor components, which is why those show up but the image stays blank).
+    robot_configs = None
+    if dashboard:
+        from dexcontrol.core.config import get_robot_config
+        robot_configs = get_robot_config()
+        robot_configs.enable_sensor("head_camera")
+        robot_configs.sensors["head_camera"].transport = "zenoh"
+
+    with Robot(configs=robot_configs) as bot:
         # Start with suction off so we never grab during the approach.
         suction_io.suction_off()
         with SuctionMover(bot) as mover:
@@ -75,6 +95,11 @@ def main(undo: bool = False, loop: bool = False, skip_confirmation: bool = False
             # Tilt the head down to 30° so cameras see the workspace.
             set_head_pitch(bot, pitch_deg=30.0)
 
+            publisher = None
+            if dashboard:
+                from .dashboard.publisher import DashboardPublisher
+                publisher = DashboardPublisher(bot).start()
+
             orch = TaskOrchestrator(mover)
             iteration = 0
             try:
@@ -87,18 +112,19 @@ def main(undo: bool = False, loop: bool = False, skip_confirmation: bool = False
                     # each forward choreography.
                     go_to_default_pose(bot)
 
-                    repeats = max(1, int(getattr(cfg, "FORWARD_REPEATS", 1)))
-                    forward_ok = True
-                    for k in range(repeats):
-                        if repeats > 1:
-                            logger.info("--- Forward pass {}/{} (repeat={}) ---", k + 1, repeats, k)
-                        if not orch.run_forward(repeat=k):
-                            logger.error("Forward sequence failed at pass {} — leaving robot where it stopped.", k + 1)
-                            forward_ok = False
-                            break
-                    if not forward_ok:
-                        return False
-                    if undo:
+                    if not undo_only:
+                        repeats = max(1, int(getattr(cfg, "FORWARD_REPEATS", 1)))
+                        forward_ok = True
+                        for k in range(repeats):
+                            if repeats > 1:
+                                logger.info("--- Forward pass {}/{} (repeat={}) ---", k + 1, repeats, k)
+                            if not orch.run_forward(repeat=k):
+                                logger.error("Forward sequence failed at pass {} — leaving robot where it stopped.", k + 1)
+                                forward_ok = False
+                                break
+                        if not forward_ok:
+                            return False
+                    if undo or undo_only:
                         if not orch.run_undo():
                             logger.error("Undo sequence failed — leaving robot where it stopped.")
                             return False
@@ -107,6 +133,9 @@ def main(undo: bool = False, loop: bool = False, skip_confirmation: bool = False
             except KeyboardInterrupt:
                 logger.warning("Loop interrupted by user after {} iteration(s).", iteration)
                 return True
+            finally:
+                if publisher is not None:
+                    publisher.stop()
     return True
 
 
