@@ -1,17 +1,24 @@
-"""Single-arm suction pick-and-place mover (base_link frame).
+"""IK-driven arm movers (base_link frame).
 
-Adapts the proven vacuum-seal descent loop from battery_pick/suction_grasp.py
-into a pose-driven primitive:
+``ArmMover`` is the arm-agnostic core: it loads a per-arm reduced
+URDF/pinocchio model (torso locked at its live angle) and provides Cartesian
+EE moves (straight-line travel, vertical lift, joint-space jogs) with
+smoothstep velocity profiles and warm-started IK.
+
+``SuctionMover(ArmMover)`` adds the suction pick/place primitives — the proven
+vacuum-seal descent loop from battery_pick/suction_grasp.py:
 
     mover.pick(pose)      # hover -> suction on -> descend until seal/contact
     mover.lift()          # raise straight up to SAFE_TRANSPORT_Z
     mover.move_to(pose)   # travel sideways to above a place pose
     mover.place(pose)     # controlled descent to taught z -> release -> retract
 
-All poses are cup-tip [x, y, z] targets in the robot base_link frame; the
-arm's down-pointing approach orientation comes from cfg.GRASP_ORIENTATION_RPY.
-The taught z only needs to be approximately right for picks — the vacuum seal
-stops the descent.
+``GripperMover(ArmMover)`` drives the right arm's Robotiq gripper: a Cartesian
+side-approach grip (used to take a suction-held battery at the transport pose)
+and a taught joint-pose place.
+
+All poses are EE-frame [x, y, z] targets in the robot base_link frame; the
+down-pointing approach orientation comes from cfg.GRASP_ORIENTATION_RPY.
 """
 
 from __future__ import annotations
@@ -31,12 +38,13 @@ from scipy.spatial.transform import Rotation
 
 from . import config as cfg
 from . import suction_io
+from .robotiq import RobotiqGripper
 
 # read_force lives in grasp_box/
 _GRASP_BOX_DIR = os.path.join(os.path.dirname(__file__), "..", "..", "grasp_box")
 if _GRASP_BOX_DIR not in sys.path:
     sys.path.insert(0, _GRASP_BOX_DIR)
-from read_force import get_force, tare_force  # noqa: E402
+from read_force import get_vertical_force, tare_force  # noqa: E402
 
 
 # ---------------------------------------------------------------------------
@@ -106,38 +114,37 @@ def _shortest_rpy_delta(a: np.ndarray, b: np.ndarray) -> np.ndarray:
 
 
 # ---------------------------------------------------------------------------
-# Mover
+# Arm-agnostic mover (IK + Cartesian moves)
 # ---------------------------------------------------------------------------
 
-class SuctionMover:
-    """IK-driven suction pick-and-place for a single arm.
+class ArmMover:
+    """IK-driven Cartesian mover for a single arm.
 
-    The URDF/pinocchio model is loaded once in ``__init__``. Use as a context
-    manager so suction is always turned off on teardown.
+    The URDF/pinocchio model is loaded once in ``__init__`` for the given arm
+    (``side`` in {"left", "right"}, ``ee_frame`` the URDF EE frame). Use as a
+    context manager so subclass teardown (e.g. suction off) always runs.
     """
 
-    def __init__(self, robot) -> None:
+    def __init__(self, robot, side: str, ee_frame: str, trace: bool = False) -> None:
         self._robot = robot
+        self._side = side
+        self._ee_frame = ee_frame
         self._setup_ik()
         self._trace_file = None
-        if getattr(cfg, "TRACE_ENABLED", False):
+        if trace:
             self._open_trace()
 
     # ------------------------------------------------------------------
     # Context manager
     # ------------------------------------------------------------------
 
-    def __enter__(self) -> "SuctionMover":
+    def __enter__(self) -> "ArmMover":
         return self
 
     def __exit__(self, *_) -> None:
         self.close()
 
     def close(self) -> None:
-        try:
-            suction_io.suction_off()
-        except Exception:  # noqa: BLE001
-            pass
         if getattr(self, "_trace_file", None) is not None:
             try:
                 self._trace_file.close()
@@ -168,7 +175,7 @@ class SuctionMover:
         for k, i in enumerate(self._arm_indices):
             q[self._model.idx_qs[i]] = arm_q[k]
         pin.framesForwardKinematics(self._model, self._data, q)
-        return self._data.oMf[self._model.getFrameId(cfg.EE_FRAME)].translation.copy()
+        return self._data.oMf[self._model.getFrameId(self._ee_frame)].translation.copy()
 
     def _trace(self, leg: str, commanded_arm_q) -> None:
         """Append one row: time, leg, commanded 7 joints, actual 7 joints, and
@@ -198,16 +205,16 @@ class SuctionMover:
         return bool(estop is not None and estop.is_software_estop_enabled())
 
     def enable_position_mode(self) -> None:
-        """Put the suction arm into position control mode.
+        """Put this arm into position control mode.
 
         Robot() init only does this if the software E-Stop was clear at
         startup, so call it after releasing the E-Stop (or any time the arm
         may have been left disabled)."""
         self._arm.set_modes(["position"] * 7)
-        logger.info("[Mover] {} arm set to position mode", cfg.ARM_SIDE)
+        logger.info("[Mover] {} arm set to position mode", self._side)
 
     def ensure_ready(self, release_estop: bool = False) -> bool:
-        """Make the suction arm ready to accept motion commands.
+        """Make this arm ready to accept motion commands.
 
         Returns True if ready. If the software E-Stop is active the arm cannot
         move; with release_estop=True it is deactivated first (caller is
@@ -242,14 +249,14 @@ class SuctionMover:
         )
         full_model = robot_pin.model
 
-        # Reduce the model to ONLY the 7 suction-arm joints: lock every other
-        # joint (torso, head, other arm, hands). The torso is locked at its live
+        # Reduce the model to ONLY this arm's 7 joints: lock every other joint
+        # (torso, head, other arm, hands). The torso is locked at its live
         # (held-fixed) angles since it moves the arm base; the rest don't affect
         # this arm's EE so they're locked at neutral (harmless). Result: every IK
         # solution is exactly achievable by the arm alone — the solver can't
         # reduce EE error using DOFs we never command (which previously let the
         # cup drift off vertical).
-        arm_prefix = "R" if cfg.ARM_SIDE == "right" else "L"
+        arm_prefix = "R" if self._side == "right" else "L"
         arm_names = {f"{arm_prefix}_arm_j{j + 1}" for j in range(7)}
         q_ref = pin.neutral(full_model)
         torso_q = self._robot.torso.get_joint_pos().astype(float)
@@ -265,7 +272,7 @@ class SuctionMover:
 
         # FrameTask with no root => target in world (base_link) frame.
         self._ee_task = FrameTask(
-            cfg.EE_FRAME, position_cost=2.0, orientation_cost=1.0, lm_damping=cfg.IK_LM_DAMPING
+            self._ee_frame, position_cost=2.0, orientation_cost=1.0, lm_damping=cfg.IK_LM_DAMPING
         )
         # Nullspace centering: pull the redundant DOF toward joint mid-ranges
         # (auto-computed from URDF limits) so joints stay away from motor stops.
@@ -281,13 +288,13 @@ class SuctionMover:
         preferred = cfg.PREFERRED_QP_SOLVER
         self._solver = preferred if preferred in _qp.available_solvers else _qp.available_solvers[0]
         logger.info(
-            "[Mover] IK ready — EE={}, solver={}, arm-only DOFs={} (torso locked)",
-            cfg.EE_FRAME, self._solver, self._model.nq,
+            "[Mover] IK ready — side={}, EE={}, solver={}, arm-only DOFs={} (torso locked)",
+            self._side, self._ee_frame, self._solver, self._model.nq,
         )
 
     @property
     def _arm(self):
-        return self._robot.right_arm if cfg.ARM_SIDE == "right" else self._robot.left_arm
+        return getattr(self._robot, f"{self._side}_arm")
 
     def _fresh_configuration(self) -> pink.Configuration:
         """Build a pink.Configuration seeded from the live arm state (torso locked)."""
@@ -327,9 +334,22 @@ class SuctionMover:
         """Live EE pose in base_link: (position [x,y,z], rpy [r,p,y])."""
         cfg_now = self._fresh_configuration()
         pin.framesForwardKinematics(self._model, self._data, cfg_now.q)
-        T = self._data.oMf[self._model.getFrameId(cfg.EE_FRAME)]
+        T = self._data.oMf[self._model.getFrameId(self._ee_frame)]
         rpy = Rotation.from_matrix(T.rotation).as_euler("xyz")
         return T.translation.copy(), rpy
+
+    def _ee_rotation(self) -> np.ndarray:
+        """Live rotation matrix of the EE frame in base_link (R_base_ee).
+
+        Used to project the wrist wrench (reported in the sensor frame, which we
+        treat as the EE frame — they share a vertical z-axis when the cup points
+        down, so the vertical component is unaffected by any yaw offset between
+        them) onto the base-frame vertical for orientation-robust contact
+        detection. See read_force.get_vertical_force.
+        """
+        cfg_now = self._fresh_configuration()
+        pin.framesForwardKinematics(self._model, self._data, cfg_now.q)
+        return self._data.oMf[self._model.getFrameId(self._ee_frame)].rotation.copy()
 
     def goto(self, pos, rpy, step_duration: float = 1.0) -> tuple[np.ndarray, np.ndarray]:
         """Move the EE to an absolute base_link pose (pos [m], rpy [rad]).
@@ -344,7 +364,7 @@ class SuctionMover:
         """Cup-tip... actually EE-frame position in base_link, from live FK."""
         cfg_now = self._fresh_configuration()
         pin.framesForwardKinematics(self._model, self._data, cfg_now.q)
-        fid = self._model.getFrameId(cfg.EE_FRAME)
+        fid = self._model.getFrameId(self._ee_frame)
         return self._data.oMf[fid].translation.copy()
 
     def _move_to_joints(self, target_q: np.ndarray, duration: float) -> None:
@@ -359,6 +379,25 @@ class SuctionMover:
             cmd = current_q + alpha * (target_arm_q - current_q)
             self._arm.set_joint_pos(cmd)
             self._trace("move_joints", cmd)
+            time.sleep(cfg.CONTROL_DT)
+
+    def move_arm_joints(self, target_joints, duration: float = 4.0) -> None:
+        """Smoothstep the arm directly to a raw 7-joint target (no IK).
+
+        Used for taught joint poses (e.g. the gripper's lower-right place),
+        mirroring home_pose.go_to_default_pose.
+        """
+        import time
+        target = np.asarray(target_joints, dtype=float)
+        start = self._arm.get_joint_pos().astype(float)
+        n_steps = max(1, int(duration / cfg.CONTROL_DT))
+        profile = getattr(cfg, "SMOOTH_PROFILE", "cubic")
+        for step in range(n_steps):
+            t = (step + 1) / n_steps
+            alpha = _ease(t, profile)
+            cmd = start + alpha * (target - start)
+            self._arm.set_joint_pos(cmd)
+            self._trace("arm_joints", cmd)
             time.sleep(cfg.CONTROL_DT)
 
     def _move_ee_cartesian(self, target_pos, target_rpy, duration: float) -> bool:
@@ -403,7 +442,7 @@ class SuctionMover:
         # not place the EE on target — i.e. the pose is unreachable. Plain
         # settle lag does NOT trip this.
         pin.framesForwardKinematics(self._model, self._data, q_step)
-        cmd_pos = self._data.oMf[self._model.getFrameId(cfg.EE_FRAME)].translation
+        cmd_pos = self._data.oMf[self._model.getFrameId(self._ee_frame)].translation
         cmd_err = float(np.linalg.norm(cmd_pos - target_pos))
         if cmd_err > 0.01:
             logger.warning(
@@ -517,61 +556,6 @@ class SuctionMover:
         finally:
             self._posture_task.set_target(prev_posture)
 
-    # ------------------------------------------------------------------
-    # Public primitives
-    # ------------------------------------------------------------------
-
-    def pick(self, pose: Pose) -> PickResult:
-        """Hover above *pose*, activate suction, descend until seal/contact."""
-        hover_pos = pose.pos.copy()
-        hover_pos[2] += cfg.HOVER_HEIGHT_M
-        rpy = pose.rpy
-
-        # Two-leg approach: first travel sideways at SAFE_TRANSPORT_Z, then
-        # drop straight down to hover_z. Avoids the cup sweeping diagonally
-        # through the box rim or an adjacent stack.
-        if cfg.SAFE_TRANSPORT_Z is not None:
-            transit = np.array([hover_pos[0], hover_pos[1], cfg.SAFE_TRANSPORT_Z])
-            logger.info(
-                "[Mover] pick: transit ({:.3f}, {:.3f}) @ z={:.3f}",
-                transit[0], transit[1], transit[2],
-            )
-            self._move_ee_to(transit, rpy, cfg.MOVE_DURATION_S)
-            # Position-mode commands are async: wait for the sideways travel to
-            # actually reach transit before descending, so the hover drop starts
-            # from the right (x, y) at SAFE_TRANSPORT_Z.
-            self._wait_until_arrived(transit, cfg.MOVE_ARRIVAL_TOL_M, cfg.MOVE_ARRIVAL_TIMEOUT_S)
-
-        logger.info("[Mover] pick: hover at ({:.3f}, {:.3f}, {:.3f})", *hover_pos)
-        # Z-only descent from SAFE_TRANSPORT_Z down to hover_z. Use ease_in
-        # so the EE accelerates from rest at transport z and is still moving
-        # at hover_z, blending into the contact-search descent loop without
-        # decelerating to a full stop and re-accelerating.
-        #
-        # Match the velocity at handoff to what _descent_loop is willing to
-        # command on its very first tick: DESCENT_MAX_STEP_M / DESCENT_DT_S.
-        # Ease_in's terminal velocity is 2× the average, so size the average
-        # at half the descent loop's velocity cap. Without this match the
-        # hover descent arrives ~5× faster than the descent loop allows and
-        # the first descent tick is felt as a hard deceleration.
-        descent_v_cap = cfg.DESCENT_MAX_STEP_M / max(cfg.DESCENT_DT_S, 1e-3)
-        hover_avg_speed = 0.5 * descent_v_cap
-        self._cartesian_z_to(
-            hover_pos[2], rpy,
-            profile="ease_in", avg_speed=hover_avg_speed,
-        )
-
-        suction_io.suction_on()
-        vac = suction_io.VacuumMonitor()
-        vac.start()
-        tare_force(cfg.ARM_SIDE, self._robot)  # hands free at hover
-
-        result = self._descent_loop(hover_pos, pose.pos[2], rpy, vac)
-        vac.stop()
-        if not result.success:
-            suction_io.suction_off()
-        return result
-
     def lift(self, z: float | None = None) -> None:
         """Raise the EE straight up to *z*, holding x, y and orientation fixed.
 
@@ -592,7 +576,7 @@ class SuctionMover:
             np.array([cur_pos[0], cur_pos[1], target_z]),
             cfg.MOVE_ARRIVAL_TOL_M, cfg.MOVE_ARRIVAL_TIMEOUT_S,
         )
-        
+
     def move_to(self, pose: Pose) -> None:
         """Travel sideways to hover above *pose* at SAFE_TRANSPORT_Z."""
         if cfg.SAFE_TRANSPORT_Z is None:
@@ -643,6 +627,91 @@ class SuctionMover:
             timeout_s, last_err, tol_m,
         )
 
+
+# ---------------------------------------------------------------------------
+# Suction pick-and-place mover
+# ---------------------------------------------------------------------------
+
+class SuctionMover(ArmMover):
+    """Suction pick/place primitives on the suction arm (cfg.ARM_SIDE)."""
+
+    def __init__(self, robot) -> None:
+        super().__init__(
+            robot,
+            side=cfg.ARM_SIDE,
+            ee_frame=cfg.EE_FRAME,
+            trace=getattr(cfg, "TRACE_ENABLED", False),
+        )
+
+    def close(self) -> None:
+        try:
+            suction_io.suction_off()
+        except Exception:  # noqa: BLE001
+            pass
+        super().close()
+
+    # ------------------------------------------------------------------
+    # Public primitives
+    # ------------------------------------------------------------------
+
+    def pick(self, pose: Pose, near_target_callback=None) -> PickResult:
+        """Hover above *pose*, activate suction, descend until seal/contact.
+
+        ``near_target_callback``: optional no-arg callable fired once when the
+        commanded EE z drops within ``cfg.BCR_SCAN_Z_THRESHOLD_M`` of the target
+        z. Use this to start the barcode scanner only in the final centimetres
+        of descent rather than from the beginning of the approach.
+        """
+        hover_pos = pose.pos.copy()
+        hover_pos[2] += cfg.HOVER_HEIGHT_M
+        rpy = pose.rpy
+
+        # Two-leg approach: first travel sideways at SAFE_TRANSPORT_Z, then
+        # drop straight down to hover_z. Avoids the cup sweeping diagonally
+        # through the box rim or an adjacent stack.
+        if cfg.SAFE_TRANSPORT_Z is not None:
+            transit = np.array([hover_pos[0], hover_pos[1], cfg.SAFE_TRANSPORT_Z])
+            logger.info(
+                "[Mover] pick: transit ({:.3f}, {:.3f}) @ z={:.3f}",
+                transit[0], transit[1], transit[2],
+            )
+            self._move_ee_to(transit, rpy, cfg.MOVE_DURATION_S)
+            # Position-mode commands are async: wait for the sideways travel to
+            # actually reach transit before descending, so the hover drop starts
+            # from the right (x, y) at SAFE_TRANSPORT_Z.
+            self._wait_until_arrived(transit, cfg.MOVE_ARRIVAL_TOL_M, cfg.MOVE_ARRIVAL_TIMEOUT_S)
+
+        logger.info("[Mover] pick: hover at ({:.3f}, {:.3f}, {:.3f})", *hover_pos)
+        # Z-only descent from SAFE_TRANSPORT_Z down to hover_z. Use ease_in
+        # so the EE accelerates from rest at transport z and is still moving
+        # at hover_z, blending into the contact-search descent loop without
+        # decelerating to a full stop and re-accelerating.
+        #
+        # Match the velocity at handoff to what _descent_loop is willing to
+        # command on its very first tick: DESCENT_MAX_STEP_M / DESCENT_DT_S.
+        # Ease_in's terminal velocity is 2× the average, so size the average
+        # at half the descent loop's velocity cap. Without this match the
+        # hover descent arrives ~5× faster than the descent loop allows and
+        # the first descent tick is felt as a hard deceleration.
+        descent_v_cap = cfg.DESCENT_MAX_STEP_M / max(cfg.DESCENT_DT_S, 1e-3)
+        hover_avg_speed = 0.5 * descent_v_cap
+        self._cartesian_z_to(
+            hover_pos[2], rpy,
+            profile="ease_in", avg_speed=hover_avg_speed,
+        )
+
+        suction_io.suction_on()
+        vac = suction_io.VacuumMonitor()
+        vac.start()
+        tare_force(cfg.ARM_SIDE, self._robot, rotation=self._ee_rotation())  # hands free at hover
+
+        result = self._descent_loop(hover_pos, pose.pos[2], rpy, vac,
+                                    near_target_callback=near_target_callback)
+        vac.stop()
+        if not result.success:
+            suction_io.suction_off()
+        return result
+
     def place(self, pose: Pose) -> None:
         """Descend to the taught place z, release, then retract to transport z."""
         # Approach hover just above the place target.
@@ -668,22 +737,22 @@ class SuctionMover:
         # has been carrying a battery the whole sequence).
         import time
 
-        tare_force(cfg.ARM_SIDE, self._robot)
+        tare_force(cfg.ARM_SIDE, self._robot, rotation=self._ee_rotation())
         # Sanity-check: immediately after tare with no contact, force should
         # read close to zero. If it doesn't, the tare didn't take and the
         # next descent step will trip the hard-force limit on the first
         # sample. Surface that explicitly so it's diagnosable from logs.
-        f_after_tare = get_force(cfg.ARM_SIDE, self._robot)
+        f_after_tare = get_vertical_force(cfg.ARM_SIDE, self._robot, self._ee_rotation())
         if f_after_tare is None:
             logger.warning("[Mover] place: wrench sensor unavailable after tare")
         elif f_after_tare > cfg.FORCE_CONTACT_THRESHOLD_N:
             logger.warning(
-                "[Mover] place: post-tare force is {:.1f}N (expected ~0). "
+                "[Mover] place: post-tare push force is {:.1f}N (expected ~0). "
                 "Wrench baseline may be unstable; descent may abort early.",
                 f_after_tare,
             )
         else:
-            logger.info("[Mover] place: post-tare force {:.2f}N (baseline ok)", f_after_tare)
+            logger.info("[Mover] place: post-tare push force {:.2f}N (baseline ok)", f_after_tare)
 
         # Controlled descent to the taught seat height with a hard-force guard.
         self._descend_to(pose.pos, pose.rpy)
@@ -706,7 +775,8 @@ class SuctionMover:
     # Descent helpers
     # ------------------------------------------------------------------
 
-    def _descent_loop(self, hover_pos, target_z: float, rpy, vac: suction_io.VacuumMonitor) -> PickResult:
+    def _descent_loop(self, hover_pos, target_z: float, rpy, vac: suction_io.VacuumMonitor,
+                      near_target_callback=None) -> PickResult:
         """Step down from hover until vacuum seal (primary) or force (fallback).
 
         Empirical toolA profile (from monitor_current.py traces):
@@ -730,6 +800,8 @@ class SuctionMover:
         # vertical.
         current_pos = np.asarray(hover_pos, dtype=float).copy()
         descended = 0.0
+        _near_target_fired = False
+        _scan_threshold = float(target_z) + getattr(cfg, "BCR_SCAN_Z_THRESHOLD_M", 0.05)
         _live0 = self._current_ee_pos()
         logger.info(
             "[Mover] descent_loop start: live=({:.4f}, {:.4f}, {:.4f}) -> target_z={:.4f}",
@@ -764,6 +836,12 @@ class SuctionMover:
             self._trace("descent", cmd)
             time.sleep(cfg.DESCENT_DT_S)
 
+            # Fire near-target callback once when commanded z enters the scan window.
+            if near_target_callback and not _near_target_fired and current_pos[2] <= _scan_threshold:
+                logger.debug("[Mover] near-target callback fired at z={:.4f}", current_pos[2])
+                near_target_callback()
+                _near_target_fired = True
+
             tool_a = vac.get_tool_current()
 
             # PRIMARY: vacuum seal detected by VacuumMonitor (DI0 == T while
@@ -777,12 +855,12 @@ class SuctionMover:
                 )
                 return PickResult(True, live_pos, "vacuum")
 
-            force = get_force(cfg.ARM_SIDE, self._robot)
+            force = get_vertical_force(cfg.ARM_SIDE, self._robot, self._ee_rotation())
             if force is None:
                 continue
             if force > cfg.FORCE_HARD_LIMIT_N:
                 _halt()
-                logger.warning("[Mover] hard force limit {:.1f}N — aborting", force)
+                logger.warning("[Mover] hard push limit {:.1f}N — aborting", force)
                 return PickResult(False, current_pos.copy(), "force_limit")
             if force > cfg.FORCE_CONTACT_THRESHOLD_N:
                 # Cup is touching but not yet sealed — STOP descent and hold
@@ -801,9 +879,9 @@ class SuctionMover:
                     if vac.is_sealed():
                         sealed = True
                         break
-                    f = get_force(cfg.ARM_SIDE, self._robot)
+                    f = get_vertical_force(cfg.ARM_SIDE, self._robot, self._ee_rotation())
                     if f is not None and f > cfg.FORCE_HARD_LIMIT_N:
-                        logger.warning("[Mover] hard force {:.1f}N during seal wait — aborting", f)
+                        logger.warning("[Mover] hard push {:.1f}N during seal wait — aborting", f)
                         return PickResult(False, current_pos.copy(), "force_limit")
                     time.sleep(0.05)
 
@@ -930,7 +1008,7 @@ class SuctionMover:
             step_count += 1
             time.sleep(cfg.PLACE_DESCENT_DT_S)
 
-            force = get_force(cfg.ARM_SIDE, self._robot)
+            force = get_vertical_force(cfg.ARM_SIDE, self._robot, self._ee_rotation())
             if force is None:
                 continue
             if force > f_max_seen:
@@ -938,7 +1016,7 @@ class SuctionMover:
             if force > cfg.FORCE_HARD_LIMIT_PLACE_N:
                 _halt()
                 logger.warning(
-                    "[Mover] place: hard force {:.1f}N at z={:.4f} "
+                    "[Mover] place: hard push {:.1f}N at z={:.4f} "
                     "(descended {:.3f}m, peak {:.1f}N) — emergency stop",
                     force, current_z, descended, f_max_seen,
                 )
@@ -959,3 +1037,54 @@ class SuctionMover:
             "(current z={:.4f}, peak force seen {:.1f}N)",
             goal_z, current_z, f_max_seen,
         )
+
+
+# ---------------------------------------------------------------------------
+# Robotiq gripper mover (right arm)
+# ---------------------------------------------------------------------------
+
+class GripperMover(ArmMover):
+    """Right-arm mover that drives the Robotiq gripper.
+
+    ``grip_at`` takes a suction-held battery at the transport pose with a
+    horizontal side approach; ``place_joints`` releases it at a taught joint
+    pose (the lower-right drop).
+    """
+
+    def __init__(self, robot) -> None:
+        super().__init__(robot, side="right", ee_frame=cfg.GRIPPER_EE_FRAME, trace=False)
+        self.gripper = RobotiqGripper(robot, side="right")
+
+    def grip_at(self, pos, rpy=None) -> bool:
+        """Side-approach grasp at base-frame *pos*; return True if an object was gripped.
+
+        Opens, backs off along the approach axis by GRIPPER_PREGRASP_STANDOFF_M,
+        moves there, then moves straight in to *pos* and closes.
+        """
+        grasp_pos = np.asarray(pos, dtype=float)
+        rpy = np.asarray(cfg.GRIPPER_GRASP_RPY if rpy is None else rpy, dtype=float)
+        self.gripper.open()
+        # Approach axis = the gripper's local +z (tool pointing) expressed in
+        # base_link; stand off behind the grasp, then move in along it.
+        approach = _rpy_to_matrix(*rpy)[:, 2]
+        pre = grasp_pos - cfg.GRIPPER_PREGRASP_STANDOFF_M * approach
+        logger.info("[Gripper] pre-grasp standoff -> grasp")
+        self._move_ee_to(pre, rpy, cfg.HANDOFF_GRIP_DURATION_S)
+        self._wait_until_arrived(pre, cfg.MOVE_ARRIVAL_TOL_M, cfg.MOVE_ARRIVAL_TIMEOUT_S)
+        self._move_ee_to(grasp_pos, rpy, cfg.HANDOFF_GRIP_DURATION_S)
+        self._wait_until_arrived(grasp_pos, cfg.MOVE_ARRIVAL_TOL_M, cfg.MOVE_ARRIVAL_TIMEOUT_S)
+        self.gripper.close()
+        gripped = self.gripper.is_object_grasped()
+        logger.info("[Gripper] grip_at -> {}", "GRIPPED" if gripped else "no object")
+        return gripped
+
+    def place_joints(self, joints) -> None:
+        """Move the right arm to a taught joint pose and open the gripper."""
+        if joints is None:
+            raise ValueError(
+                "PLACE_LOWER_RIGHT_JOINTS is not set — teach it with "
+                "`python -m case_battery_demo.teach_joint_pose --side right`"
+            )
+        logger.info("[Gripper] place at taught lower-right joint pose")
+        self.move_arm_joints(joints, duration=4.0)
+        self.gripper.open()

@@ -29,14 +29,14 @@ if _LGES_DIR not in sys.path:
     sys.path.insert(0, _LGES_DIR)
 from utils import set_head_pitch  # noqa: E402
 
-from .grasp import SuctionMover
+from .grasp import GripperMover, SuctionMover
 from .home_pose import go_to_default_pose
 from .sequence import TaskOrchestrator
 from . import suction_io
 from . import config as cfg
 
 
-def main(undo: bool = False, undo_only: bool = False, loop: bool = False, skip_confirmation: bool = False, dashboard: bool = False) -> bool:
+def main(undo: bool = False, undo_only: bool = False, loop: bool = False, skip_confirmation: bool = False, dashboard: bool = True, record: bool = True, record_dir: str = "recordings", instruction: str = "") -> bool:
     """Run the forward choreography, optionally followed by the undo.
 
     Args:
@@ -49,6 +49,11 @@ def main(undo: bool = False, undo_only: bool = False, loop: bool = False, skip_c
         dashboard: If True, spool live camera/joints/EE/wrench for the web
             viewer (run ``python -m case_battery_demo.dashboard.server``
             in a separate terminal to watch it).
+        record: If True, enable the episode recorder (implies the dashboard
+            spool). Press SPACE in this terminal — or the dashboard's Record
+            button — to start/stop a take, then y/n to keep or discard it.
+        record_dir: Where kept takes are written (one dir per episode).
+        instruction: Language instruction stored in each take's meta.json.
     """
     if loop:
         undo = True
@@ -70,7 +75,7 @@ def main(undo: bool = False, undo_only: bool = False, loop: bool = False, skip_c
     # gets no frames unless we explicitly enable it (joints/EE/wrench come from
     # motor components, which is why those show up but the image stays blank).
     robot_configs = None
-    if dashboard:
+    if dashboard or record:
         from dexcontrol.core.config import get_robot_config
         robot_configs = get_robot_config()
         robot_configs.enable_sensor("head_camera")
@@ -95,12 +100,33 @@ def main(undo: bool = False, undo_only: bool = False, loop: bool = False, skip_c
             # Tilt the head down to 30° so cameras see the workspace.
             set_head_pitch(bot, pitch_deg=30.0)
 
-            publisher = None
-            if dashboard:
-                from .dashboard.publisher import DashboardPublisher
-                publisher = DashboardPublisher(bot).start()
+            # Right-arm Robotiq gripper for the barcode-matched battery handoff.
+            # If its EE pass-through isn't available, the demo falls back to the
+            # original suction-only behaviour (no scanning, no diversion).
+            gripper = GripperMover(bot)
+            gripper.ensure_ready(release_estop=release)
+            if gripper.gripper.available and gripper.gripper.activate():
+                logger.info("Right Robotiq gripper ready.")
+            else:
+                logger.warning("Right gripper unavailable — barcode handoff disabled.")
+                gripper = None
 
-            orch = TaskOrchestrator(mover)
+            publisher = None
+            recorder = None
+            keys = None
+            if dashboard or record:
+                from .dashboard.publisher import DEFAULT_SPOOL_DIR, DashboardPublisher
+                sink = None
+                if record:
+                    from .dashboard.recorder import KeyListener, RecordController
+                    recorder = RecordController(
+                        out_dir=record_dir, spool_dir=DEFAULT_SPOOL_DIR, instruction=instruction
+                    ).start()
+                    sink = recorder.feed
+                    keys = KeyListener(recorder).start()
+                publisher = DashboardPublisher(bot, on_sample=sink).start()
+
+            orch = TaskOrchestrator(mover, gripper)
             iteration = 0
             try:
                 while True:
@@ -134,6 +160,10 @@ def main(undo: bool = False, undo_only: bool = False, loop: bool = False, skip_c
                 logger.warning("Loop interrupted by user after {} iteration(s).", iteration)
                 return True
             finally:
+                if keys is not None:
+                    keys.stop()
+                if recorder is not None:
+                    recorder.stop()
                 if publisher is not None:
                     publisher.stop()
     return True

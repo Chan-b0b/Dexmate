@@ -1,22 +1,17 @@
 #!/usr/bin/env bash
-# One-shot launcher for the case + battery dashboard demo.
+# Start the dashboard background services (camera, web server, detector).
+# The demo is run separately in another terminal:
 #
-# Brings up, in order:
-#   1. the head-camera dexsensor on the nano (over SSH, best-effort)
-#   2. the dashboard web server          (background)
-#   3. the bin-detection overlay         (background)
-#   4. the demo itself, with --dashboard (foreground — interactive)
+#   Terminal 1:  ./run_dashboard_demo.sh
+#   Terminal 2:  cd LGES && python -m case_battery_demo.run_demo [--dashboard] [flags]
 #
-# The demo runs in the foreground so you can answer its safety / E-stop
-# prompts and watch its logs; Ctrl-C (or the demo finishing) tears the
-# background services back down. Run it from anywhere — it cd's to its own
-# directory (LGES/) so `python -m case_battery_demo…` resolves.
+# Pass --dashboard to the demo if you want live joints/EE/wrench/camera in
+# the viewer; omit it if you just want the robot to run without data spooling.
 #
-#   ./run_dashboard_demo.sh                 # forward only
-#   ./run_dashboard_demo.sh --loop          # pass extra demo flags through
 #   PORT=9090 SPOOL=/tmp/foo ./run_dashboard_demo.sh
 #
 # Then open http://<robot-ip>:8080/ in a browser.
+# Ctrl-C here tears down the background services.
 set -uo pipefail
 
 cd "$(dirname "$0")"                       # LGES/ — package import root
@@ -50,7 +45,12 @@ echo "[run_all] starting bin detector…"
 python -m case_battery_demo.dashboard.detector --spool "$SPOOL" &
 pids+=($!)
 
-# 4) The demo, in the foreground. Any extra args ("$@") pass straight through
-#    (e.g. --loop, --undo, --skip-confirmation).
-echo "[run_all] starting demo — answer the safety prompt below (Ctrl-C to stop all)."
-python -m case_battery_demo.run_demo --dashboard "$@"
+# 4) Barcode reader image feed (IMAGE.SEND at 1 Hz — never triggers a read).
+echo "[run_all] starting barcode image publisher…"
+python -m case_battery_demo.dashboard.barcode --spool "$SPOOL" &
+pids+=($!)
+
+echo "[run_all] Dashboard services running. Start the demo in another terminal:"
+echo "  cd $(pwd) && python -m case_battery_demo.run_demo [--dashboard] [flags]"
+echo "Ctrl-C to stop services."
+wait

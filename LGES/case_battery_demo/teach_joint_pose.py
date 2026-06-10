@@ -4,7 +4,8 @@ Enables compliant (admittance) control on the left arm so you can physically
 guide it to a pose, then press SPACE to record the 7 joint angles. Recorded
 poses are appended to a JSON file on disk (default: taught_joint_poses.json).
 
-    python -m case_battery_demo.teach_joint_pose
+    python -m case_battery_demo.teach_joint_pose                # default side (cfg.ARM_SIDE)
+    python -m case_battery_demo.teach_joint_pose --side right   # e.g. the gripper's lower-right place pose
 
 Controls:
     SPACE : record current joint positions
@@ -28,6 +29,7 @@ import tty
 from pathlib import Path
 
 import numpy as np
+import tyro
 from dexcomm.utils import RateLimiter
 from loguru import logger
 
@@ -76,9 +78,9 @@ def _joint_force_from_current(
     return np.where(np.abs(offset) < FORCE_THRESHOLDS, 0.0, -offset)
 
 
-def main() -> None:
+def main(side: str = cfg.ARM_SIDE) -> None:
     logger.warning("=" * 70)
-    logger.warning("SAFETY: Left arm will become COMPLIANT (lead-through).")
+    logger.warning("SAFETY: {} arm will become COMPLIANT (lead-through).", side)
     logger.warning("It stays actively controlled — never goes limp.")
     logger.warning("Move slowly and keep the e-stop within reach!")
     logger.warning("=" * 70)
@@ -95,7 +97,7 @@ def main() -> None:
     alpha = np.exp(-dt / BASELINE_TAU)
 
     with Robot() as bot:
-        arm = getattr(bot, f"{cfg.ARM_SIDE}_arm")
+        arm = getattr(bot, f"{side}_arm")
 
         baseline = np.array(arm.get_joint_current())
         rate = RateLimiter(rate_hz=CONTROL_HZ)
@@ -129,4 +131,4 @@ def main() -> None:
 
 
 if __name__ == "__main__":
-    main()
+    tyro.cli(main)

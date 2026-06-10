@@ -7,7 +7,7 @@ end-effector in base_link XYZ while the orientation is *held* at the target
 fine-tune true vertical. Record prints the full pose to paste into
 config.TAUGHT_POSES.
 
-    python -m case_battery_demo.teach_pose --step-m 0.005 --move-time 4.0
+    python -m case_battery_demo.teach_pose [--side left|right] --step-m 0.005 --move-time 4.0
 
 Position keys (base frame):
     w / s : +x / -x      a / d : +y / -y      r / f : +z / -z
@@ -34,10 +34,7 @@ from loguru import logger
 
 from dexcontrol.robot import Robot
 
-_POSE_FILE  = Path(__file__).parent / "taught_ee_poses.txt"
-_JOINT_FILE = Path(__file__).parent / "taught_joint_poses.txt"
-
-from .grasp import SuctionMover
+from .grasp import ArmMover
 from . import config as cfg
 
 # key -> (vector index, sign); position in metres, orientation in radians
@@ -56,15 +53,24 @@ def _get_key() -> str:
     return ch
 
 
-def main(step_m: float = 0.01, move_time: float = 1.0, ostep_deg: float = 5.0) -> None:
+def main(side: str = cfg.ARM_SIDE, step_m: float = 0.01, move_time: float = 1.0, ostep_deg: float = 5.0) -> None:
     """Cartesian-jog teach tool that holds a vertical approach orientation.
 
     Args:
+        side: Which arm to jog ("left" or "right"). Defaults to the suction arm
+            (cfg.ARM_SIDE); pass "right" to teach the gripper arm.
         step_m: Initial position jog distance per keypress (m).
         move_time: Seconds per move. Larger = slower (velocity ~= step / move_time).
         ostep_deg: Initial orientation jog per keypress (degrees).
     """
-    logger.warning("Be ready to press the e-stop. Arm WILL reorient to vertical on start.")
+    # Suction arm keeps the original EE frame + filenames; any other arm uses
+    # the gripper EE frame and side-suffixed files so poses don't intermix.
+    ee_frame = cfg.EE_FRAME if side == cfg.ARM_SIDE else cfg.GRIPPER_EE_FRAME
+    suffix = "" if side == cfg.ARM_SIDE else f"_{side}"
+    pose_file  = Path(__file__).parent / f"taught_ee_poses{suffix}.txt"
+    joint_file = Path(__file__).parent / f"taught_joint_poses{suffix}.txt"
+
+    logger.warning("Arm will jog from its CURRENT pose. Be ready to press the e-stop.")
     if input("Continue? [y/N]: ").strip().lower() != "y":
         return
 
@@ -74,7 +80,8 @@ def main(step_m: float = 0.01, move_time: float = 1.0, ostep_deg: float = 5.0) -
                 f"| step={step_m*100:.1f}cm ostep={ostep_deg:.1f}deg move={move_time:.1f}s")
 
     with Robot() as bot:
-        mover = SuctionMover(bot)
+        mover = ArmMover(bot, side=side, ee_frame=ee_frame,
+                         trace=getattr(cfg, "TRACE_ENABLED", False))
 
         if mover.software_estop_active():
             logger.warning("Software E-Stop is ACTIVE — the arm cannot move until released.")
@@ -88,20 +95,12 @@ def main(step_m: float = 0.01, move_time: float = 1.0, ostep_deg: float = 5.0) -
             logger.error("Arm not ready (E-Stop still active?). Aborting.")
             return
 
-        logger.info("ARM_SIDE={}, EE_FRAME={}", cfg.ARM_SIDE, cfg.EE_FRAME)
+        logger.info("ARM_SIDE={}, EE_FRAME={}", side, ee_frame)
         print(__doc__)
 
-        # Explicit commanded target: position = current; orientation = vertical
-        # (roll/pitch from config) with yaw = current yaw + YAW_OFFSET_DEG so the
-        # battery aligns with the case slot.
-        target_pos, cur_rpy = mover.current_ee_pose()
-        target_rpy = np.array([
-            cfg.GRASP_ORIENTATION_RPY[0],
-            cfg.GRASP_ORIENTATION_RPY[1],
-            np.deg2rad(cfg.YAW_OFFSET_DEG),
-        ], dtype=float)
-        logger.info("Reorienting to vertical target rpy_deg={} ...", np.rad2deg(target_rpy).round(1))
-        pos, rpy = mover.goto(target_pos, target_rpy, step_duration=max(move_time, 3.0))
+        # Start from current pose — no initial reorientation move.
+        target_pos, target_rpy = mover.current_ee_pose()
+        target_rpy = np.array(target_rpy, dtype=float)
         print(_status(target_pos, target_rpy))
 
         while True:
@@ -133,11 +132,11 @@ def main(step_m: float = 0.01, move_time: float = 1.0, ostep_deg: float = 5.0) -
                 q = mover._arm.get_joint_pos()
                 ee_line    = " ".join(f"{v:.6f}" for v in (*p, *rp))
                 joint_line = " ".join(f"{v:.6f}" for v in q)
-                with _POSE_FILE.open("a")  as f: f.write(ee_line    + "\n")
-                with _JOINT_FILE.open("a") as f: f.write(joint_line + "\n")
+                with pose_file.open("a")  as f: f.write(ee_line    + "\n")
+                with joint_file.open("a") as f: f.write(joint_line + "\n")
                 print(f"\n>>> EE   : {ee_line}")
                 print(f"    joints: {joint_line}")
-                print(f"    saved to {_POSE_FILE.name} / {_JOINT_FILE.name}")
+                print(f"    saved to {pose_file.name} / {joint_file.name}")
                 continue
             else:
                 continue

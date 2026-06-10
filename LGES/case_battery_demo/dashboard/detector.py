@@ -28,6 +28,8 @@ import time
 import cv2
 import numpy as np
 
+from . import camera_geometry
+
 # Default to the trained bin detector shipped in case_detection/.
 _LGES_DIR = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 DEFAULT_WEIGHTS = os.path.join(
@@ -63,6 +65,8 @@ class BinDetector:
         self._period = 1.0 / max(hz, 1.0)
         self._jpeg_quality = int(jpeg_quality)
         self._frame_path = os.path.join(spool_dir, "frame.jpg")
+        self._depth_raw_path = os.path.join(spool_dir, "depth_raw.png")
+        self._state_path = os.path.join(spool_dir, "state.json")
         self._detect_path = os.path.join(spool_dir, "detect.jpg")
         self._detect_json = os.path.join(spool_dir, "detect.json")
         self._model = None
@@ -136,12 +140,34 @@ class BinDetector:
         res = self._model.predict(bgr, conf=self._conf, verbose=False)[0]
         found, box, conf = self._best_box(res)
 
+        # Bin-centre geometry: sample the spooled raw depth at the box centre
+        # (mapped by fraction, so the resized RGB and native depth needn't share
+        # a resolution), then deproject + transform into base_link using the same
+        # intrinsics/FK as perception.py. base_height is the base_link Z, directly
+        # comparable to the demo's CASE_PLACE_R target z.
+        center_depth = None
+        base_height = None
         disp = bgr.copy()
         if found:
             x, y, w, h = (int(v) for v in box)
             cv2.rectangle(disp, (x, y), (x + w, y + h), _GREEN, 2)
             cv2.putText(disp, f"bin {conf:.2f}", (x, max(14, y - 8)),
                         cv2.FONT_HERSHEY_SIMPLEX, 0.6, _GREEN, 2)
+            cx, cy = x + w / 2.0, y + h / 2.0
+            H_rgb, W_rgb = bgr.shape[:2]
+            mm = self._load_depth_mm()
+            if mm is not None:
+                hd, wd = mm.shape[:2]
+                # native depth/RGB pixel — the intrinsics are at this resolution
+                u = cx / W_rgb * (wd - 1)
+                v = cy / H_rgb * (hd - 1)
+                center_depth = self._sample_depth(mm, u, v)
+                if center_depth is not None:
+                    base_height = self._base_height(u, v, center_depth)
+            cv2.circle(disp, (int(cx), int(cy)), 4, _GREEN, -1)
+            # if center_depth is not None:
+            #     cv2.putText(disp, f"{center_depth * 1000:.0f}mm", (int(cx) + 8, int(cy) - 8),
+            #                 cv2.FONT_HERSHEY_SIMPLEX, 0.55, _GREEN, 2)
         else:
             cv2.putText(disp, "bin: not found", (10, 26),
                         cv2.FONT_HERSHEY_SIMPLEX, 0.7, _RED, 2)
@@ -157,7 +183,54 @@ class BinDetector:
             "found": found,
             "conf": None if conf is None else round(float(conf), 3),
             "box": None if box is None else [int(v) for v in box],
+            "center_depth_m": None if center_depth is None else round(center_depth, 4),
+            "base_height_m": None if base_height is None else round(base_height, 4),
         }).encode("utf-8"))
+
+    def _load_depth_mm(self):
+        """Spooled raw depth as a uint16 (mm) array at native resolution, or None."""
+        try:
+            with open(self._depth_raw_path, "rb") as f:
+                raw = f.read()
+        except OSError:
+            return None
+        mm = cv2.imdecode(np.frombuffer(raw, np.uint8), cv2.IMREAD_UNCHANGED)
+        if mm is None or mm.ndim != 2:
+            return None
+        return mm
+
+    @staticmethod
+    def _sample_depth(mm, u: float, v: float, win: int = 2) -> float | None:
+        """Median valid depth (metres) in a small window around native pixel (u, v)."""
+        px, py = int(round(u)), int(round(v))
+        patch = mm[max(0, py - win):py + win + 1, max(0, px - win):px + win + 1]
+        valid = patch[patch > 0]
+        if valid.size == 0:
+            return None
+        return float(np.median(valid)) / 1000.0
+
+    def _base_height(self, u: float, v: float, depth: float) -> float | None:
+        """base_link Z (m) of the bin-centre point: deproject then torso/head FK."""
+        joints = self._read_joints()
+        if joints is None:
+            return None
+        q_torso, q_head = joints
+        pt_cam = camera_geometry.deproject_pixel(u, v, depth)
+        pt_base = camera_geometry.transform_zed_point_to_base(pt_cam, q_torso, q_head)
+        return float(pt_base[2])
+
+    def _read_joints(self):
+        """(q_torso, q_head), joint-name-ordered, from the spooled state.json, or None."""
+        try:
+            with open(self._state_path) as f:
+                st = json.load(f)
+        except (OSError, ValueError):
+            return None
+        j = st.get("joints", {})
+        torso, head = j.get("torso"), j.get("head")
+        if not torso or not head:
+            return None
+        return [torso[k] for k in sorted(torso)], [head[k] for k in sorted(head)]
 
     @staticmethod
     def _best_box(res):

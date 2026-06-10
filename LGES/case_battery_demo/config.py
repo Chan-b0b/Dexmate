@@ -72,6 +72,44 @@ GRASP_ORIENTATION_RPY: tuple[float, float, float] = (np.pi, 0.0, 0.0)
 YAW_OFFSET_DEG: float = 110
 
 # ---------------------------------------------------------------------------
+# Right-hand Robotiq gripper (driven over the RIGHT arm's EE pass-through,
+# Modbus RTU). A target battery is handed from the suction cup to this gripper
+# at the transport stage and then placed lower-right.
+# ---------------------------------------------------------------------------
+GRIPPER_EE_FRAME: str = "R_gripper_base"   # right-arm IK frame for the gripper
+ROBOTIQ_SLAVE_ID: int = 0x09
+ROBOTIQ_OPEN_POS: int = 0                  # 0 = open, 255 = closed
+ROBOTIQ_PARTIAL_OPEN_POS: int = 40        # partial open to avoid ground contact; tune
+ROBOTIQ_CLOSE_POS: int = 255
+ROBOTIQ_SPEED: int = 0x80                  # 0..255
+ROBOTIQ_FORCE: int = 0x80                  # 0..255
+# Minimum position gap from CLOSE_POS to consider the gripper holding an object.
+# gOBJ==2 (stopped on object) is the primary signal, but slim objects may
+# reach gOBJ==3 (at requested position) while still physically gripped.
+# If CLOSE_POS - gPO >= this value, treat it as gripped regardless of gOBJ.
+# Tune: with nothing in the gripper gPO should be ~CLOSE_POS; with the
+# battery it will stop a few counts short. Start at 5 and raise if needed.
+ROBOTIQ_GRIP_MIN_GAP: int = 5
+
+# Suction -> gripper handoff at the transport pose. The gripper grips the
+# battery the suction cup is holding at SAFE_TRANSPORT_Z; the grip target is
+# computed live from the suction EE pose plus this offset (base_link metres),
+# approached horizontally from the side. TUNE on the robot.
+# Measured 2026-06-09 (gripper EE - suction EE at the handoff pose):
+#   dx ~aligned, dy = -0.127 (gripper side reach), dz = -0.179 (battery hangs below cup).
+HANDOFF_GRIP_OFFSET: tuple[float, float, float] = (0.0624, -0.1073, -0.1508)
+# Exact-horizontal side approach: pitch = 90deg (approach axis horizontal toward
+# the battery), gripper body level; roll holds the posed approach direction.
+GRIPPER_GRASP_RPY: tuple[float, float, float] = (-1.387, np.pi / 2, 0.0)
+GRIPPER_PREGRASP_STANDOFF_M: float = 0.06  # back off along the approach axis, then move in
+HANDOFF_GRIP_DURATION_S: float = 1.5
+# Duration (s) per EE pose step in the post-grip place sequence.
+EE_PLACE_STEP_DURATION_S: float = 3.0
+# Right-arm joint pose where the gripper releases the battery (lower-right).
+# Teach with: python -m case_battery_demo.teach_joint_pose --side right
+PLACE_LOWER_RIGHT_JOINTS: list[float] | None = None
+
+# ---------------------------------------------------------------------------
 # Suction hardware
 # ---------------------------------------------------------------------------
 SUCTION_HOST: str = "192.168.5.1"
@@ -84,6 +122,20 @@ SUCTION_BASE_URL: str = f"http://{SUCTION_HOST}/api/dc/weblogic"
 # ---------------------------------------------------------------------------
 BCR_HOST: str = "192.168.50.101"
 BCR_PORT: int = 23
+
+# Batteries we're looking for: a battery whose decoded barcode is in this list
+# is diverted to the right-hand gripper (placed lower-right); everything else
+# follows the normal suction-into-case workflow. Empty = nothing matches, so
+# the demo behaves exactly like the original suction-only choreography.
+TARGET_BARCODES: list[str] = ['UDCG7B0307']
+# The barcode is read during the suction pick descent (bcr.BackgroundScanner).
+# A scan is accepted only if at least BCR_MIN_READS successful reads were
+# collected and they all agree; any disagreement is treated as "no target".
+BCR_MIN_READS: int = 2
+BCR_SCAN_TIMEOUT_S: float = 1.0     # per-trigger telnet timeout (s)
+# Start scanning when the suction EE is within this distance above the target z.
+# Keeps reads to the final centimetres of descent where the barcode is closest.
+BCR_SCAN_Z_THRESHOLD_M: float = 0.10
 
 # weblogic program IDs (from suction/test_suction.py)
 SUCTION_ON_ID: int = 3587
@@ -133,7 +185,7 @@ LIFT_STEP_M: float = 0.005          # 5 mm per step (lift: ~50 mm/s)
 # Small upward jog performed *before* the blow/suction-off pulse, so the cup
 # breaks contact with the placed object cleanly (no sticking, no blowback
 # pushing the part). Set to 0.0 to disable.
-RELEASE_PRELIFT_M: float = 0.018    # 18 mm pre-release lift
+RELEASE_PRELIFT_M: float = 0.010    # 10 mm pre-release lift
 # Jitter DISABLED: at the far cross-body place reach the IK is ill-conditioned,
 # so this small Cartesian wobble (esp. the angular terms) was amplified into
 # erratic 10 rad/s joint commands — the place-descent jerk (confirmed via the
@@ -154,8 +206,8 @@ JITTER_RAMP_S: float = 0.5
 # ---------------------------------------------------------------------------
 # Contact detection (wrist wrench, via grasp_box/read_force.py)
 # ---------------------------------------------------------------------------
-FORCE_CONTACT_THRESHOLD_N: float = 2.0
-FORCE_HARD_LIMIT_N: float = 15.0          # pick(): empty cup, low baseline noise
+FORCE_CONTACT_THRESHOLD_N: float = 5.0
+FORCE_HARD_LIMIT_N: float = 20.0          # pick(): empty cup, low baseline noise
 FORCE_HARD_LIMIT_PLACE_N: float = 10.0    # place(): cup carrying battery — kept
                                           # tight to protect the battery from
                                           # being crushed if the seat is wrong.
@@ -167,7 +219,7 @@ VACUUM_SEAL_TIMEOUT_S: float = 5.0  # wait for seal after contact before failing
 # ---------------------------------------------------------------------------
 # Gross motion
 # ---------------------------------------------------------------------------
-MOVE_DURATION_S: float = 2.0      # travel time to a hover pose
+MOVE_DURATION_S: float = 2.0     # travel time to a hover pose
 
 # ---- Trajectory smoothing (sideways travel + vertical lift) --------------
 # When True, _move_ee_to() interpolates the EE pose linearly in Cartesian
@@ -207,8 +259,8 @@ MOVE_ARRIVAL_TIMEOUT_S: float = 1.0
 APPROACH_DESCENT_S: float = 1.0
 # Base-frame Z the cup tip is raised to for collision-free sideways transport.
 # Must clear the source stack and both box walls.
-# TODO: set from the teach step.
-SAFE_TRANSPORT_Z: float = 1.05  # 10 mm above max recorded hover Z (1.190 m, line 15 of taught_ee_poses.txt)
+# Set from the live suction EE Z at the handoff pose (measured 2026-06-09).
+SAFE_TRANSPORT_Z: float = 1.0978
 
 # ---------------------------------------------------------------------------
 # Taught poses in base_link frame. Each entry is either:
@@ -225,12 +277,12 @@ SAFE_TRANSPORT_Z: float = 1.05  # 10 mm above max recorded hover Z (1.190 m, lin
 #   BAT_SLOT_1/2  the two battery seats inside the moved case (right box)
 # ---------------------------------------------------------------------------
 TAUGHT_POSES: dict[str, tuple[float, ...]] = {
-    "CASE_PICK":    (0.701310,  0.539836,  0.8215, -3.141523, -0.000023,  1.920076),
-    "CASE_PLACE_R": (0.776267,  0.114816,  0.7309, -3.141531,  0.000216,  1.919917),
+    "CASE_PICK":    (0.701310,  0.529836,  0.8215, -3.141523, -0.000023,  1.920076),
+    "CASE_PLACE_R": (0.776267,  0.104816,  0.7309, -3.141531,  0.000216,  1.919917),
     "BAT_SRC_1":    (0.688931,  0.389726,  0.8160, -3.141483,  0.000227,  1.919921),
     "BAT_SLOT_1":   (0.763274, -0.034724,  0.7421,  3.141523,  0.000298,  1.919760),
-    "BAT_SRC_2":    (0.688875,  0.564910,  0.8160,  3.141340, -0.000154,  1.919955),
-    "BAT_SLOT_2":   (0.763807,  0.136673,  0.7421,  3.141363,  0.000238,  1.920136),
+    "BAT_SRC_2":    (0.688875,  0.529836,  0.8160,  3.141340, -0.000154,  1.919955),
+    "BAT_SLOT_2":   (0.763807,  0.101673,  0.7421,  3.141363,  0.000238,  1.920136),
 }
 
 # ---------------------------------------------------------------------------
@@ -253,7 +305,7 @@ Z_STEP_PER_REPEAT: dict[str, tuple[float, float]] = {
     # ~16–18 mm/repeat. Bias dst slightly UP (safe — cup releases a hair
     # high) and src slightly DOWN in magnitude (descent finds contact in
     # budget). Re-measure after a few repeats and tune.
-    "case":         (-0.015,  0.018),
-    "battery_1":    (-0.015,  0.018),
-    "battery_2":    (-0.015,  0.018),
+    "case":         (-0.015,  0.015),
+    "battery_1":    (-0.015,  0.015),
+    "battery_2":    (-0.015,  0.015),
 }

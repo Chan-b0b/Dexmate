@@ -70,16 +70,43 @@ def go_to_default_pose(robot, duration: float = 4.0, path: str = DEFAULT_POSE_PA
     except Exception as exc:  # noqa: BLE001
         logger.debug("[home_pose] set_modes skipped: {}", exc)
 
-    left_start = robot.left_arm.get_joint_pos().astype(float)
-    right_start = robot.right_arm.get_joint_pos().astype(float)
-
     n_steps = max(1, int(duration / cfg.CONTROL_DT))
+
+    # Right arm first, then left.
+    logger.info("[home_pose] moving right arm to home")
+    right_start = robot.right_arm.get_joint_pos().astype(float)
     for step in range(n_steps):
         t = (step + 1) / n_steps
-        alpha = t * t * (3 - 2 * t)  # smoothstep
-        robot.set_joint_pos({
-            "left_arm": left_start + alpha * (left_target - left_start),
-            "right_arm": right_start + alpha * (right_target - right_start),
-        })
+        alpha = t * t * (3 - 2 * t)
+        robot.right_arm.set_joint_pos(right_start + alpha * (right_target - right_start))
         time.sleep(cfg.CONTROL_DT)
+
+    logger.info("[home_pose] moving left arm to home")
+    left_start = robot.left_arm.get_joint_pos().astype(float)
+    for step in range(n_steps):
+        t = (step + 1) / n_steps
+        alpha = t * t * (3 - 2 * t)
+        robot.left_arm.set_joint_pos(left_start + alpha * (left_target - left_start))
+        time.sleep(cfg.CONTROL_DT)
+
     logger.info("[home_pose] arms at default pose")
+
+
+def go_to_right_default_pose(robot, duration: float = 4.0, path: str = DEFAULT_POSE_PATH) -> None:
+    """Smoothly move only the right arm to its home pose in *path*."""
+    poses = _parse_joint_lines(path)
+    right_target = poses[1]
+    logger.info("[home_pose] right target: {}", np.round(right_target, 4))
+    try:
+        robot.right_arm.set_modes(["position"] * 7)
+    except Exception as exc:  # noqa: BLE001
+        logger.debug("[home_pose] set_modes skipped: {}", exc)
+    n_steps = max(1, int(duration / cfg.CONTROL_DT))
+    logger.info("[home_pose] moving right arm to default pose")
+    right_start = robot.right_arm.get_joint_pos().astype(float)
+    for step in range(n_steps):
+        t = (step + 1) / n_steps
+        alpha = t * t * (3 - 2 * t)
+        robot.right_arm.set_joint_pos(right_start + alpha * (right_target - right_start))
+        time.sleep(cfg.CONTROL_DT)
+    logger.info("[home_pose] right arm at default pose")

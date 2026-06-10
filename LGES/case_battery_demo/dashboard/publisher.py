@@ -48,11 +48,11 @@ DEFAULT_SPOOL_DIR = "/tmp/cns_dashboard"
 
 
 class _EEKinematics:
-    """Forward kinematics for the suction arm's EE frame, in base_link.
+    """Forward kinematics for both grippers' EE frames, in base_link.
 
-    Uses the full URDF model with the live torso + arm joints set; the EE frame
-    (cfg.EE_FRAME) only depends on that chain, so the rest stay at neutral.
-    Owns its own pinocchio data, independent of the SuctionMover.
+    Uses the full URDF model with the live torso + both arm joints set; each
+    gripper frame only depends on its own arm + torso chain. Owns its own
+    pinocchio data, independent of the SuctionMover.
     """
 
     def __init__(self) -> None:
@@ -67,22 +67,31 @@ class _EEKinematics:
         )
         self._model = rw.model
         self._data = self._model.createData()
-        self._ee_fid = self._model.getFrameId(cfg.EE_FRAME)
-        prefix = "R" if cfg.ARM_SIDE == "right" else "L"
-        self._arm_jids = [self._model.getJointId(f"{prefix}_arm_j{i + 1}") for i in range(7)]
+        self._frame_ids = {
+            "left": self._model.getFrameId("L_gripper_base"),
+            "right": self._model.getFrameId("R_gripper_base"),
+        }
+        self._arm_jids = {
+            "left": [self._model.getJointId(f"L_arm_j{i + 1}") for i in range(7)],
+            "right": [self._model.getJointId(f"R_arm_j{i + 1}") for i in range(7)],
+        }
         self._torso_jids = [self._model.getJointId(f"torso_j{i + 1}") for i in range(3)]
 
-    def compute(self, torso_q, arm_q) -> tuple[np.ndarray, np.ndarray]:
-        """Return (position [x,y,z] m, rpy [r,p,y] rad) of the EE in base_link."""
+    def compute(self, torso_q, left_q, right_q) -> dict[str, tuple[np.ndarray, np.ndarray]]:
+        """Return {side: (position [x,y,z] m, rpy [r,p,y] rad)} in base_link."""
         q = pin.neutral(self._model)
         for jid, v in zip(self._torso_jids, np.asarray(torso_q, dtype=float)):
             q[self._model.idx_qs[jid]] = v
-        for jid, v in zip(self._arm_jids, np.asarray(arm_q, dtype=float)):
-            q[self._model.idx_qs[jid]] = v
+        for side, arm_q in (("left", left_q), ("right", right_q)):
+            for jid, v in zip(self._arm_jids[side], np.asarray(arm_q, dtype=float)):
+                q[self._model.idx_qs[jid]] = v
         pin.framesForwardKinematics(self._model, self._data, q)
-        T = self._data.oMf[self._ee_fid]
-        rpy = Rotation.from_matrix(T.rotation).as_euler("xyz")
-        return T.translation.copy(), rpy
+        out: dict[str, tuple[np.ndarray, np.ndarray]] = {}
+        for side, fid in self._frame_ids.items():
+            T = self._data.oMf[fid]
+            rpy = Rotation.from_matrix(T.rotation).as_euler("xyz")
+            out[side] = (T.translation.copy(), rpy)
+        return out
 
 
 def _atomic_write(path: str, data: bytes) -> None:
@@ -103,14 +112,20 @@ class DashboardPublisher:
         max_image_width: int = 720,
         jpeg_quality: int = 80,
         depth_range_m: tuple[float, float] = (0.3, 1.0),
+        on_sample=None,
     ) -> None:
         self._robot = robot
         self.spool_dir = spool_dir
+        # Optional sink, called each tick as on_sample(rgb, depth, state) with the
+        # raw (un-resized) RGB array, raw depth (metres) and the state dict. Used
+        # by the episode recorder so it reuses this thread's sampling.
+        self._on_sample = on_sample
         self._period = 1.0 / max(hz, 1.0)
         self._max_w = max_image_width
         self._jpeg_quality = int(jpeg_quality)
         self._frame_path = os.path.join(spool_dir, "frame.jpg")
         self._depth_path = os.path.join(spool_dir, "depth.jpg")
+        self._depth_raw_path = os.path.join(spool_dir, "depth_raw.png")
         self._state_path = os.path.join(spool_dir, "state.json")
         self._depth_range = (float(depth_range_m[0]), float(depth_range_m[1]))
         self._depth_cmap = getattr(cv2, "COLORMAP_TURBO", cv2.COLORMAP_JET)
@@ -174,6 +189,7 @@ class DashboardPublisher:
 
         # --- head camera: left RGB + depth -> frame.jpg / depth.jpg -------
         has_image = has_depth = False
+        rgb = depth = None
         try:
             if self._robot.has_sensor("head_camera"):
                 cam = self._robot.sensors.head_camera
@@ -183,6 +199,7 @@ class DashboardPublisher:
                 depth = cam.get_depth()
                 if depth is not None:
                     has_depth = self._write_depth(depth)
+                    self._write_depth_raw(depth)
         except Exception as e:  # noqa: BLE001
             logger.debug("[dashboard] camera read error: {}", e)
         state["has_image"] = has_image
@@ -201,15 +218,25 @@ class DashboardPublisher:
         state["joints"] = joints
 
         # --- EE pose (base_link) ------------------------------------------
+        # state["ee"] stays the configured/suction arm (charts + back-compat);
+        # state["ee_right"] adds the right gripper so the viewer shows both.
         if self._fk is not None:
             try:
                 torso_q = self._robot.torso.get_joint_pos()
-                arm_q = self._arm.get_joint_pos()
-                pos, rpy = self._fk.compute(torso_q, arm_q)
+                left_q = self._robot.left_arm.get_joint_pos()
+                right_q = self._robot.right_arm.get_joint_pos()
+                poses = self._fk.compute(torso_q, left_q, right_q)
+                cpos, crpy = poses[cfg.ARM_SIDE]
                 state["ee"] = {
                     "frame": cfg.EE_FRAME,
-                    "pos": [float(v) for v in pos],
-                    "rpy": [float(v) for v in rpy],
+                    "pos": [float(v) for v in cpos],
+                    "rpy": [float(v) for v in crpy],
+                }
+                rpos, rrpy = poses["right"]
+                state["ee_right"] = {
+                    "frame": "R_gripper_base",
+                    "pos": [float(v) for v in rpos],
+                    "rpy": [float(v) for v in rrpy],
                 }
             except Exception as e:  # noqa: BLE001
                 logger.debug("[dashboard] FK error: {}", e)
@@ -218,6 +245,12 @@ class DashboardPublisher:
         state["wrench"] = self._read_wrench()
 
         _atomic_write(self._state_path, json.dumps(state).encode("utf-8"))
+
+        if self._on_sample is not None:
+            try:
+                self._on_sample(rgb, depth, state)
+            except Exception as e:  # noqa: BLE001 - a bad sink must not kill sampling
+                logger.debug("[dashboard] on_sample error: {}", e)
 
     def _write_frame(self, rgb: np.ndarray) -> bool:
         # head camera returns RGB; cv2 encodes assuming BGR, so convert first.
@@ -243,6 +276,22 @@ class DashboardPublisher:
             return False
         _atomic_write(self._depth_path, buf.tobytes())
         return True
+
+    def _write_depth_raw(self, depth: np.ndarray) -> None:
+        """Spool raw depth as a 16-bit PNG in millimetres (native resolution).
+
+        Consumers that need metric depth (the detector samples the bin-centre
+        distance) can't recover it from the colorized depth.jpg, so we keep an
+        unscaled, full-resolution copy. Invalid pixels (NaN/inf/<=0) become 0.
+        """
+        d = np.asarray(depth, dtype=np.float32)
+        if d.ndim == 3:  # some streams hand back (H, W, 1)
+            d = d[..., 0]
+        mm = np.where(np.isfinite(d) & (d > 0.0), d * 1000.0, 0.0)
+        mm = np.clip(mm, 0, 65535).astype(np.uint16)
+        ok, buf = cv2.imencode(".png", mm)
+        if ok:
+            _atomic_write(self._depth_raw_path, buf.tobytes())
 
     def _colorize_depth(self, depth: np.ndarray) -> np.ndarray:
         """Map a float32 depth map (metres) to a BGR colour image for display.

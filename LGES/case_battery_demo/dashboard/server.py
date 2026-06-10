@@ -22,9 +22,11 @@ state.json layout) is all that a future "saved data" mode needs.
 from __future__ import annotations
 
 import argparse
+import json
 import os
+import time
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
-from urllib.parse import urlparse
+from urllib.parse import parse_qs, urlparse
 
 INDEX_HTML = """<!DOCTYPE html>
 <html lang="en">
@@ -37,18 +39,18 @@ INDEX_HTML = """<!DOCTYPE html>
   * { box-sizing: border-box; }
   body { margin:0; background:var(--bg); color:var(--txt);
          font:14px/1.4 ui-monospace,SFMono-Regular,Menlo,Consolas,monospace; }
-  header { padding:10px 16px; border-bottom:1px solid var(--line);
+  header { padding:10px 28px; border-bottom:1px solid var(--line);
            display:flex; align-items:center; gap:12px; }
   header h1 { font-size:15px; margin:0; font-weight:600; }
   #status { font-size:12px; color:var(--muted); }
   #dot { display:inline-block; width:9px; height:9px; border-radius:50%;
          background:var(--bad); margin-right:6px; vertical-align:middle; }
-  .wrap { display:flex; flex-direction:column; gap:14px; padding:14px; }
+  .wrap { display:flex; flex-direction:column; gap:14px; padding:14px 60px; }
   /* top row: force / EE pose / joints side by side */
-  .metrics { display:grid; grid-template-columns:repeat(3,1fr); gap:14px; align-items:start; }
+  .metrics { display:grid; grid-template-columns:repeat(3,1fr); gap:14px; align-items:stretch; }
   @media (max-width:900px){ .metrics{ grid-template-columns:1fr; } }
   /* image strip below the metrics */
-  .images { display:grid; grid-template-columns:repeat(4,1fr); gap:14px; align-items:start; }
+  .images { display:grid; grid-template-columns:repeat(4,1fr); gap:14px; align-items:stretch; }
   @media (max-width:1100px){ .images{ grid-template-columns:repeat(2,1fr); } }
   @media (max-width:600px){ .images{ grid-template-columns:1fr; } }
   /* two selectable time-series charts side by side */
@@ -59,9 +61,16 @@ INDEX_HTML = """<!DOCTYPE html>
              margin:0; padding:8px 12px; border-bottom:1px solid var(--line);
              display:flex; align-items:center; gap:10px; }
   .card .body { padding:10px 12px; }
+  /* vertically center a card's body content (used by the EE pose card) */
+  .card.vcenter { display:flex; flex-direction:column; }
+  .card.vcenter .body { flex:1; display:flex; flex-direction:column; justify-content:center; }
   #cam, #depth, #detect, #barcode { width:100%; display:block; background:#000; max-height:300px; object-fit:contain; }
   .caption { font-size:11px; color:var(--muted); padding:6px 12px 0;
              text-transform:uppercase; letter-spacing:.05em; }
+  .bcread { font-size:14px; padding:4px 12px 8px; font-variant-numeric:tabular-nums; }
+  .bcread b { color:var(--accent); font-weight:700; letter-spacing:.02em; }
+  .bcread .ok { color:var(--good); } .bcread .miss { color:var(--warn); }
+  .bcread .no { color:var(--muted); }
   table { width:100%; border-collapse:collapse; }
   td { padding:3px 4px; white-space:nowrap; }
   td.k { color:var(--muted); }
@@ -88,12 +97,30 @@ INDEX_HTML = """<!DOCTYPE html>
            border-radius:5px; padding:3px 6px; font:12px ui-monospace,Menlo,Consolas,monospace; }
   .cur { color:var(--accent); font-weight:600; font-variant-numeric:tabular-nums; min-width:110px; text-align:right; }
   .chart { width:100%; height:200px; display:block; }
+  /* recording controls (header, far right) */
+  .rec { margin-left:auto; display:flex; align-items:center; gap:8px; font-size:12px; }
+  .recinfo { color:var(--muted); font-variant-numeric:tabular-nums; min-width:96px; text-align:right; }
+  .recdecide { display:flex; gap:8px; }
+  .rbtn { background:#21262d; color:var(--txt); border:1px solid var(--line); border-radius:6px;
+          padding:9px 18px; cursor:pointer; font:14px/1 ui-monospace,Menlo,Consolas,monospace; font-weight:600; }
+  .rbtn:hover { border-color:var(--accent); }
+  .rbtn.rec-on { background:var(--bad); border-color:var(--bad); color:#fff; }
+  .rbtn.keep { border-color:var(--good); color:var(--good); }
+  .rbtn.discard { border-color:var(--bad); color:var(--bad); }
 </style>
 </head>
 <body>
 <header>
   <h1>Case + Battery Demo</h1>
   <span id="status"><span id="dot"></span><span id="statustxt">connecting…</span></span>
+  <span class="rec">
+    <span class="recinfo" id="recinfo">recorder off</span>
+    <button class="rbtn" id="recbtn">● Record</button>
+    <span class="recdecide" id="recdecide" hidden>
+      <button class="rbtn keep" id="keepbtn">Save (y)</button>
+      <button class="rbtn discard" id="discardbtn">Discard (n)</button>
+    </span>
+  </span>
 </header>
 <div class="wrap">
   <div class="metrics">
@@ -115,9 +142,18 @@ INDEX_HTML = """<!DOCTYPE html>
         </div>
       </div>
     </div>
-    <div class="card">
-      <h2>EE pose <span id="eeframe" style="text-transform:none;color:var(--muted)"></span></h2>
-      <div class="body"><table id="ee"></table></div>
+    <div class="card vcenter">
+      <h2>EE pose</h2>
+      <div class="body">
+        <div class="grp">
+          <h3>L gripper <span id="eeframe" style="text-transform:none;color:var(--muted)"></span></h3>
+          <table id="ee"></table>
+        </div>
+        <div class="grp">
+          <h3>R gripper <span id="eeframe_r" style="text-transform:none;color:var(--muted)"></span></h3>
+          <table id="ee_r"></table>
+        </div>
+      </div>
     </div>
     <div class="card">
       <h2>Joints (deg)</h2>
@@ -139,11 +175,13 @@ INDEX_HTML = """<!DOCTYPE html>
       <h2>Bin detection</h2>
       <img id="detect" alt="detector not running"/>
       <div class="caption" id="detectcap">bin detection</div>
+      <div class="bcread" id="detectinfo"><span class="no">target z — · center depth —</span></div>
     </div>
     <div class="card">
       <h2>Barcode reader</h2>
       <img id="barcode" alt="waiting for reader…"/>
       <div class="caption" id="barcodecap">cognex · waiting…</div>
+      <div class="bcread" id="barcoderead"><span class="no">no barcode read yet</span></div>
     </div>
   </div>
 
@@ -194,13 +232,18 @@ function setOnline(on, ageMs){
   $("statustxt").textContent = on ? ("live · " + (ageMs/1000).toFixed(1) + "s ago") : "no data";
 }
 
-function renderEE(ee){
-  if(!ee){ $("ee").innerHTML = "<tr><td class='k'>unavailable</td></tr>"; $("eeframe").textContent=""; return; }
-  $("eeframe").textContent = "(" + ee.frame + ", base_link)";
+function renderEEInto(ee, tableId, frameId){
+  const tbl = $(tableId), frm = $(frameId);
+  if(!ee){ tbl.innerHTML = "<tr><td class='k'>unavailable</td></tr>"; frm.textContent=""; return; }
+  frm.textContent = "(" + ee.frame + ", base_link)";
   const p = ee.pos, r = ee.rpy;
-  $("ee").innerHTML =
+  tbl.innerHTML =
     `<tr><td class='k'>x / y / z (m)</td><td class='v'>${fmt(p[0])} &nbsp; ${fmt(p[1])} &nbsp; ${fmt(p[2])}</td></tr>` +
     `<tr><td class='k'>roll/pitch/yaw (deg)</td><td class='v'>${fmt(deg(r[0]),1)} &nbsp; ${fmt(deg(r[1]),1)} &nbsp; ${fmt(deg(r[2]),1)}</td></tr>`;
+}
+function renderEE(s){
+  renderEEInto(s.ee, "ee", "eeframe");
+  renderEEInto(s.ee_right, "ee_r", "eeframe_r");
 }
 
 function renderJoints(joints){
@@ -379,7 +422,7 @@ async function tick(){
     if(s.depth_range_m) $("depthcap").textContent =
       `depth (${s.depth_range_m[0]}–${s.depth_range_m[1]} m, near→far)`;
     renderForce(s.wrench);
-    renderEE(s.ee);
+    renderEE(s);
     renderJoints(s.joints);
     accumulate(s);
     drawAll();
@@ -399,9 +442,34 @@ async function tickDetect(){
     $("detectcap").textContent = d.found
       ? `bin detection · conf ${d.conf} · ${age}s ago`
       : `bin detection · no bin · ${age}s ago`;
+    let bz = "<span class='no'>bin z —</span>";
+    if(d.base_height_m!=null){
+      let delta = "";
+      if(targetZ!=null){ const mm=(d.base_height_m-targetZ)*1000; delta=` (Δ${mm>=0?"+":""}${mm.toFixed(0)} mm)`; }
+      bz = `bin z <b>${d.base_height_m.toFixed(3)} m</b>${delta}`;
+    }
+    $("detectinfo").innerHTML = `${targetInfo()} · ${bz}`;
   }catch(e){
     $("detectcap").textContent = "bin detection · detector not running";
+    $("detectinfo").innerHTML = `${targetInfo()} · <span class='no'>bin z —</span>`;
   }
+}
+
+// live case-place target height (CASE_PLACE_R.z raised by repeat*dst_dz),
+// spooled by the demo's run_forward — independent of the detector.
+let targetZ = null, targetDz = null;
+function targetInfo(){
+  if(targetZ==null) return "<span class='no'>target z —</span>";
+  const step = (targetDz!=null) ? ` (+${(targetDz*1000).toFixed(0)} mm/step)` : "";
+  return `target z <b>${targetZ.toFixed(3)} m</b>${step}`;
+}
+async function tickTarget(){
+  try{
+    const r = await fetch("/target.json", {cache:"no-store"});
+    if(!r.ok) throw new Error("none");
+    const d = await r.json();
+    targetZ = d.target_z_m; targetDz = d.dst_dz;
+  }catch(e){ targetZ = null; targetDz = null; }
 }
 
 // barcode reader: independent process/cadence (1 Hz image-only pull).
@@ -421,17 +489,74 @@ async function tickBarcode(){
   }
 }
 
+// decoded barcode: the demo spools its last decoded code + match status here
+// (the image feed never triggers a read, so the string only exists in the demo).
+async function tickBarcodeRead(){
+  const el = $("barcoderead");
+  try{
+    const r = await fetch("/barcode_read.json", {cache:"no-store"});
+    if(!r.ok) throw new Error("none");
+    const d = await r.json();
+    const age = ((Date.now() - d.stamp*1000)/1000).toFixed(0);
+    if(d.code){
+      const safe = String(d.code).replace(/[<>&]/g, c => ({'<':'&lt;','>':'&gt;','&':'&amp;'}[c]));
+      const tag = d.matched ? "<span class='ok'>✓ target</span>" : "<span class='miss'>not target</span>";
+      el.innerHTML = `last read: <b>${safe}</b> · ${tag} · ${age}s ago`;
+    } else {
+      el.innerHTML = `<span class='no'>last pick: no read · ${age}s ago</span>`;
+    }
+  }catch(e){
+    el.innerHTML = "<span class='no'>no barcode read yet</span>";
+  }
+}
+
 for(const ch of CHARTS){
   $(ch.sig).addEventListener("change", e => { ch.selected = e.target.value; drawChart(ch); });
   $(ch.win).addEventListener("change", () => drawChart(ch));
 }
 window.addEventListener("resize", drawAll);
+
+// ---- recording controls (drive the same recorder as the keyboard) --------
+async function postRecord(cmd){
+  try{ await fetch("/record?cmd=" + cmd, {cache:"no-store", method:"POST"}); }catch(e){}
+}
+async function tickRecord(){
+  const btn = $("recbtn"), dec = $("recdecide"), info = $("recinfo");
+  try{
+    const r = await fetch("/record.json", {cache:"no-store"});
+    if(!r.ok) throw new Error("no recorder");
+    const d = await r.json();
+    if(d.state === "recording"){
+      btn.hidden = false; btn.textContent = "■ Stop"; btn.classList.add("rec-on"); dec.hidden = true;
+      info.textContent = "● REC " + (d.frames||0) + "f · " + (d.elapsed||0).toFixed(1) + "s";
+    } else if(d.state === "deciding"){
+      btn.hidden = true; dec.hidden = false;
+      info.textContent = "save " + (d.frames||0) + "f? " + Math.ceil(d.decide_remaining||0) + "s";
+    } else {
+      btn.hidden = false; btn.textContent = "● Record"; btn.classList.remove("rec-on"); dec.hidden = true;
+      info.textContent = d.takes_saved ? (d.takes_saved + " saved") : "idle";
+    }
+  }catch(e){
+    btn.hidden = false; btn.textContent = "● Record"; btn.classList.remove("rec-on"); dec.hidden = true;
+    info.textContent = "recorder off";
+  }
+}
+$("recbtn").addEventListener("click", () => postRecord("toggle"));
+$("keepbtn").addEventListener("click", () => postRecord("keep"));
+$("discardbtn").addEventListener("click", () => postRecord("discard"));
+
 setInterval(tick, 100);
 setInterval(tickDetect, 200);
+setInterval(tickTarget, 1000);
 setInterval(tickBarcode, 1000);
+setInterval(tickBarcodeRead, 1000);
+setInterval(tickRecord, 500);
 tick();
 tickDetect();
+tickTarget();
 tickBarcode();
+tickBarcodeRead();
+tickRecord();
 </script>
 </body>
 </html>
@@ -474,12 +599,41 @@ class _Handler(BaseHTTPRequestHandler):
             self._send_file(os.path.join(self.spool_dir, "detect.jpg"), "image/jpeg")
         elif path == "/detect.json":
             self._send_file(os.path.join(self.spool_dir, "detect.json"), "application/json")
+        elif path == "/target.json":
+            self._send_file(os.path.join(self.spool_dir, "target.json"), "application/json")
         elif path == "/barcode.jpg":
             self._send_file(os.path.join(self.spool_dir, "barcode.jpg"), "image/jpeg")
         elif path == "/barcode.json":
             self._send_file(os.path.join(self.spool_dir, "barcode.json"), "application/json")
+        elif path == "/barcode_read.json":
+            self._send_file(os.path.join(self.spool_dir, "barcode_read.json"), "application/json")
+        elif path == "/record.json":
+            self._send_file(os.path.join(self.spool_dir, "record.json"), "application/json")
         else:
             self._send(404, "text/plain", b"not found")
+
+    def do_POST(self) -> None:  # noqa: N802
+        # Record control: write <spool>/record.cmd for the recorder to poll.
+        # Time-stamped so the recorder applies each command exactly once.
+        parsed = urlparse(self.path)
+        if parsed.path != "/record":
+            self._send(404, "text/plain", b"not found", no_store=True)
+            return
+        cmd = (parse_qs(parsed.query).get("cmd", [""])[0]).strip()
+        if cmd not in ("toggle", "start", "stop", "keep", "discard"):
+            self._send(400, "text/plain", b"bad cmd", no_store=True)
+            return
+        payload = json.dumps({"stamp": time.time(), "cmd": cmd}).encode("utf-8")
+        cmd_path = os.path.join(self.spool_dir, "record.cmd")
+        tmp = cmd_path + ".tmp"
+        try:
+            with open(tmp, "wb") as f:
+                f.write(payload)
+            os.replace(tmp, cmd_path)
+        except OSError as e:
+            self._send(500, "text/plain", str(e).encode("utf-8"), no_store=True)
+            return
+        self._send(200, "application/json", payload, no_store=True)
 
     do_HEAD = do_GET
 
