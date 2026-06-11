@@ -1,2 +1,2 @@
-recordings/
-case_detection/data/
+recordings/**
+case_detection/data/**
