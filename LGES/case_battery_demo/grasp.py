@@ -70,10 +70,33 @@ class PickResult:
     success: bool
     contact_position_base: np.ndarray | None
     trigger: str  # "vacuum" | "force+vacuum" | "vacuum_timeout" | "force_limit" | "max_descent"
+    barcode: str | None = None  # agreed barcode from the scan, if any
+    scan_gated: bool = False    # True if the pre-seal spiral scan gate actually ran
 
 
 def _rpy_to_matrix(roll: float, pitch: float, yaw: float) -> np.ndarray:
     return Rotation.from_euler("xyz", [roll, pitch, yaw]).as_matrix()
+
+
+def _spiral_offsets(ring_step: float, max_radius: float, angles: int) -> list[tuple[float, float]]:
+    """Concentric-ring spiral (dx, dy) offsets, innermost ring first.
+
+    Rings sit at ``ring_step, 2*ring_step, ... <= max_radius``; each ring is
+    sampled at ``angles`` evenly-spaced bearings (the first bearing of each ring
+    is rotated half a step so successive rings don't stack their waypoints on
+    the same spokes). Pure function — no robot state — so it is unit-testable.
+    """
+    if ring_step <= 0 or max_radius <= 0 or angles < 1:
+        return []
+    offsets: list[tuple[float, float]] = []
+    n_rings = int(max_radius / ring_step)
+    for k in range(1, n_rings + 1):
+        r = k * ring_step
+        phase = (k - 1) * (np.pi / angles)  # stagger rings
+        for i in range(angles):
+            theta = phase + 2.0 * np.pi * i / angles
+            offsets.append((float(r * np.cos(theta)), float(r * np.sin(theta))))
+    return offsets
 
 
 def _ease(t: float, profile: str = "quintic") -> float:
@@ -654,13 +677,20 @@ class SuctionMover(ArmMover):
     # Public primitives
     # ------------------------------------------------------------------
 
-    def pick(self, pose: Pose, near_target_callback=None) -> PickResult:
+    def pick(self, pose: Pose, near_target_callback=None,
+             scanner=None, scan_gate: bool = False) -> PickResult:
         """Hover above *pose*, activate suction, descend until seal/contact.
 
         ``near_target_callback``: optional no-arg callable fired once when the
         commanded EE z drops within ``cfg.BCR_SCAN_Z_THRESHOLD_M`` of the target
         z. Use this to start the barcode scanner only in the final centimetres
         of descent rather than from the beginning of the approach.
+
+        ``scanner`` + ``scan_gate``: when both are set (and
+        ``cfg.BCR_SCAN_GATE_ENABLED``), resolve the barcode BEFORE grabbing —
+        descend to a floor just above contact with suction off, scan, and if
+        nothing reads run an x/y spiral search; only then turn suction on and
+        seal. The agreed code (or None) is returned on ``PickResult.barcode``.
         """
         hover_pos = pose.pos.copy()
         hover_pos[2] += cfg.HOVER_HEIGHT_M
@@ -681,36 +711,158 @@ class SuctionMover(ArmMover):
             # from the right (x, y) at SAFE_TRANSPORT_Z.
             self._wait_until_arrived(transit, cfg.MOVE_ARRIVAL_TOL_M, cfg.MOVE_ARRIVAL_TIMEOUT_S)
 
+        will_gate = scan_gate and scanner is not None and getattr(cfg, "BCR_SCAN_GATE_ENABLED", False)
+
         logger.info("[Mover] pick: hover at ({:.3f}, {:.3f}, {:.3f})", *hover_pos)
-        # Z-only descent from SAFE_TRANSPORT_Z down to hover_z. Use ease_in
-        # so the EE accelerates from rest at transport z and is still moving
-        # at hover_z, blending into the contact-search descent loop without
-        # decelerating to a full stop and re-accelerating.
+        # Z-only descent from SAFE_TRANSPORT_Z down to hover_z. This is the high,
+        # collision-free leg, so it can move at the normal lift speed.
         #
-        # Match the velocity at handoff to what _descent_loop is willing to
-        # command on its very first tick: DESCENT_MAX_STEP_M / DESCENT_DT_S.
-        # Ease_in's terminal velocity is 2× the average, so size the average
-        # at half the descent loop's velocity cap. Without this match the
-        # hover descent arrives ~5× faster than the descent loop allows and
-        # the first descent tick is felt as a hard deceleration.
-        descent_v_cap = cfg.DESCENT_MAX_STEP_M / max(cfg.DESCENT_DT_S, 1e-3)
-        hover_avg_speed = 0.5 * descent_v_cap
-        self._cartesian_z_to(
-            hover_pos[2], rpy,
-            profile="ease_in", avg_speed=hover_avg_speed,
-        )
+        # When the scan gate will run, it owns the slow, careful final approach
+        # to the battery, so the hover descent just needs to arrive at rest
+        # (quintic) — no velocity match required. When there's no gate, the
+        # hover descent hands straight into _descent_loop, so keep ease_in with
+        # its terminal velocity matched to the descent loop's first-tick cap
+        # (DESCENT_MAX_STEP_M / DESCENT_DT_S; ease_in terminal = 2× average) so
+        # the handoff isn't felt as a hard deceleration.
+        if will_gate:
+            self._cartesian_z_to(hover_pos[2], rpy)
+        else:
+            descent_v_cap = cfg.DESCENT_MAX_STEP_M / max(cfg.DESCENT_DT_S, 1e-3)
+            self._cartesian_z_to(
+                hover_pos[2], rpy,
+                profile="ease_in", avg_speed=0.5 * descent_v_cap,
+            )
+
+        # Pre-seal scan gate: with suction still OFF, resolve the barcode before
+        # committing the grab. Leaves the EE hovering just above the suction
+        # point so the seal descent below only has the final centimetre to go.
+        code = None
+        gate_ran = False
+        if will_gate:
+            code = self._scan_descend_and_search(pose, scanner)
+            gate_ran = True
 
         suction_io.suction_on()
         vac = suction_io.VacuumMonitor()
         vac.start()
         tare_force(cfg.ARM_SIDE, self._robot, rotation=self._ee_rotation())  # hands free at hover
 
-        result = self._descent_loop(hover_pos, pose.pos[2], rpy, vac,
-                                    near_target_callback=near_target_callback)
+        # Rollback path: when the gate is disabled but scanning was requested,
+        # fall back to the old behavior — scan during the seal descent and read
+        # the result after. A no-read here is NOT treated as a search-exhausted
+        # divert (scan_gated stays False), so the caller places normally.
+        old_scan = scanner is not None and scan_gate and not gate_ran
+
+        # After the gate the arm sits at the scan floor (~1cm above contact), so
+        # seed the descent ramp from the live pose instead of the full hover —
+        # otherwise the commanded ramp would first drive the arm back up to
+        # hover before coming down. The scanner already ran, so no callback.
+        seal_start = self._current_ee_pos() if gate_ran else hover_pos
+        if old_scan:
+            seal_callback = scanner.start
+        elif gate_ran:
+            seal_callback = None
+        else:
+            seal_callback = near_target_callback
+        result = self._descent_loop(seal_start, pose.pos[2], rpy, vac,
+                                    near_target_callback=seal_callback)
+        if old_scan:
+            scanner.stop()
+            code = scanner.result()
+        result.barcode = code
+        result.scan_gated = gate_ran
         vac.stop()
         if not result.success:
             suction_io.suction_off()
         return result
+
+    def _scan_descend_and_search(self, pose: Pose, scanner) -> str | None:
+        """Resolve the barcode before grabbing; return the agreed code or None.
+
+        Suction is OFF throughout. Descend to the scan floor (just above
+        contact) and scan; if nothing reads, lift a little and walk an
+        expanding-ring spiral in x/y, re-scanning at each waypoint, then return
+        over the suction point and drop back to the scan floor so the caller's
+        seal descent starts from directly above contact.
+        """
+        import time
+        rpy = pose.rpy
+        target_z = float(pose.pos[2])
+        sx, sy = float(pose.pos[0]), float(pose.pos[1])
+        scan_floor_z = target_z + cfg.BCR_SCAN_FLOOR_OFFSET_M
+
+        # Pin the IK posture to the configuration we enter the gate in, for the
+        # whole gate. The x/y spiral goes through _move_ee_to/_move_ee_cartesian,
+        # which (unlike _smooth_z_to/lift) do NOT pin posture themselves; without
+        # this the redundant shoulder DOF (j1) is pulled toward joint mid-ranges
+        # and walks across an IK branch boundary, slewing j1 hard. Set the
+        # attribute (not just the task) so the inner lift()/_cartesian_z_to()
+        # calls restore to this pinned config rather than to mid-ranges.
+        pinned_q = self._fresh_configuration().q.copy()
+        prev_posture = self._posture_target
+        self._posture_target = pinned_q
+        self._posture_task.set_target(pinned_q)
+
+        # Slow, careful approach speed — this leg descends toward the battery, so
+        # it must not run at the fast lift speed.
+        approach_v = getattr(cfg, "BCR_SCAN_APPROACH_SPEED_M_S", cfg.LIFT_AVG_SPEED_M_S)
+
+        scanner.start()
+        try:
+            logger.info("[BCR-gate] scan descent to floor z={:.4f}", scan_floor_z)
+            self._cartesian_z_to(scan_floor_z, rpy, avg_speed=approach_v)
+            time.sleep(cfg.BCR_SCAN_DWELL_S)
+            code = scanner.result()
+            if code is not None:
+                logger.info("[BCR-gate] read on descent: {!r}", code)
+                return code
+
+            search_z = scan_floor_z + cfg.BCR_SEARCH_LIFT_M
+            logger.info("[BCR-gate] no read at floor — lifting to z={:.4f} and searching", search_z)
+            self.lift(search_z)
+            offsets = _spiral_offsets(
+                cfg.BCR_SEARCH_RING_STEP_M, cfg.BCR_SEARCH_MAX_RADIUS_M, cfg.BCR_SEARCH_ANGLES
+            )
+            roll_delta = np.radians(getattr(cfg, "BCR_SEARCH_ROLL_DEG", 0.0))
+            pitch_delta = np.radians(getattr(cfg, "BCR_SEARCH_PITCH_DEG", 0.0))
+            for i, (dx, dy) in enumerate(offsets):
+                wp = np.array([sx + dx, sy + dy, search_z])
+                # Tilt the cup/reader a little to sweep a small cone, so we
+                # sample different viewing angles (helps with glare or a label
+                # angled out of the reader's depth of field). Roll flips every
+                # waypoint, pitch every two, so consecutive waypoints cover all
+                # four (+/-roll, +/-pitch) combinations. Orientation is reset to
+                # the taught rpy for the return + seal below.
+                wp_rpy = rpy.copy()
+                wp_rpy[0] += roll_delta if i % 2 == 0 else -roll_delta
+                wp_rpy[1] += pitch_delta if i % 4 < 2 else -pitch_delta
+                logger.info("[BCR-gate] waypoint {}/{}: dx={:+.3f} dy={:+.3f} roll={:+.1f} pitch={:+.1f}deg",
+                            i + 1, len(offsets), dx, dy,
+                            np.degrees(wp_rpy[0] - rpy[0]), np.degrees(wp_rpy[1] - rpy[1]))
+                self._move_ee_to(wp, wp_rpy, cfg.BCR_SEARCH_MOVE_S)
+                self._wait_until_arrived(wp, cfg.MOVE_ARRIVAL_TOL_M, cfg.MOVE_ARRIVAL_TIMEOUT_S)
+                time.sleep(cfg.BCR_SCAN_DWELL_S)
+                # Reads accumulate across the descent and every waypoint — we
+                # finish as soon as BCR_MIN_READS agreeing reads have landed in
+                # total, not within this single waypoint's dwell.
+                code = scanner.result()
+                if code is not None:
+                    logger.info("[BCR-gate] read at waypoint {}: {!r}", i + 1, code)
+                    break
+            else:
+                logger.warning("[BCR-gate] spiral exhausted ({} waypoints) — no read",
+                               len(offsets))
+
+            # Return over the suction point, then drop back to the scan floor.
+            home = np.array([sx, sy, search_z])
+            self._move_ee_to(home, rpy, cfg.BCR_SEARCH_MOVE_S)
+            self._wait_until_arrived(home, cfg.MOVE_ARRIVAL_TOL_M, cfg.MOVE_ARRIVAL_TIMEOUT_S)
+            self._cartesian_z_to(scan_floor_z, rpy, avg_speed=approach_v)
+            return code
+        finally:
+            scanner.stop()
+            self._posture_target = prev_posture
+            self._posture_task.set_target(prev_posture)
 
     def place(self, pose: Pose) -> None:
         """Descend to the taught place z, release, then retract to transport z."""

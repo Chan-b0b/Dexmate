@@ -191,22 +191,14 @@ class TaskOrchestrator:
         importlib.reload(cfg)
         logger.info("=== Move: {} ===", move.label)
 
-        # Forward battery picks get barcode-scanned during the descent; the
-        # case move and undo moves never scan. The scanner runs in a daemon
-        # thread so it can't stall the 50 ms descent loop.
+        # Forward battery picks resolve the barcode BEFORE grabbing: pick() runs
+        # the scan gate (descend to a floor above contact, scan, x/y spiral
+        # search on a no-read), then seals. The case move and undo moves never
+        # scan. The scanner runs in a daemon thread so it can't stall the loop.
         scan_this = move.label.startswith("battery") and self._gripper is not None
         scanner = bcr.BackgroundScanner() if scan_this else None
 
-        # Scanner starts only when the suction EE enters BCR_SCAN_Z_THRESHOLD_M
-        # above the target — not at hover — so reads are taken in the final
-        # centimetres where the barcode is closest to the camera.
-        result = self._mover.pick(
-            move.src,
-            near_target_callback=scanner.start if scanner is not None else None,
-        )
-
-        if scanner is not None:
-            scanner.stop()
+        result = self._mover.pick(move.src, scanner=scanner, scan_gate=scan_this)
 
         if not result.success:
             logger.error("[{}] pick failed (trigger={}) — aborting", move.label, result.trigger)
@@ -222,11 +214,19 @@ class TaskOrchestrator:
         self._mover.lift()
         self._mover.move_to(move.dst)
 
-        code = scanner.result() if scanner is not None else None
-        if scanner is not None:
+        code = result.barcode
+        if scan_this:
             _publish_barcode_read(code, bool(code) and code in cfg.TARGET_BARCODES, move.label)
-        if code is not None and code in cfg.TARGET_BARCODES:
-            logger.info("[{}] barcode {!r} matches target — diverting to right gripper", move.label, code)
+        # Divert to the right gripper when the barcode matches a target, OR when
+        # the scan gate's spiral search ran and exhausted with no read at all (an
+        # unreadable battery is treated like a target and quarantined). A no-read
+        # without the gate (e.g. gate disabled) places normally, as before.
+        divert = scan_this and (code in cfg.TARGET_BARCODES or (result.scan_gated and code is None))
+        if divert:
+            if code is None:
+                logger.warning("[{}] no barcode read after search — diverting to right gripper", move.label)
+            else:
+                logger.info("[{}] barcode {!r} matches target — diverting to right gripper", move.label, code)
             if self._handoff_to_gripper():
                 # Diverted batteries leave the case workflow, so they are not
                 # recorded for undo (undo skips them).
@@ -268,9 +268,25 @@ class TaskOrchestrator:
         dur = cfg.EE_PLACE_STEP_DURATION_S
         suction_retract_done = threading.Event()
 
+        try:
+            default_poses = _parse_joint_lines(DEFAULT_POSE_PATH)
+        except Exception as exc:  # noqa: BLE001
+            logger.warning("[handoff] could not read default pose: {}", exc)
+            default_poses = None
+
         def _retract_suction():
-            self._mover.lift(cfg.SAFE_TRANSPORT_Z)
-            suction_retract_done.set()
+            # The suction arm is already at SAFE_TRANSPORT_Z (lifted before the
+            # handoff), so the lift is just a clearance no-op; the actual
+            # "move back" is returning the left/suction arm to its default pose
+            # so it clears the gripper instead of hovering at the handoff point.
+            try:
+                self._mover.lift(cfg.SAFE_TRANSPORT_Z)
+                if default_poses is not None:
+                    self._mover.move_arm_joints(default_poses[0])
+            except Exception as exc:  # noqa: BLE001
+                logger.warning("[handoff] suction retract failed: {}", exc)
+            finally:
+                suction_retract_done.set()
 
         for i, (label, vec, rpy_val, is_relative) in enumerate(steps):
             if is_relative:
@@ -298,8 +314,8 @@ class TaskOrchestrator:
 
         logger.info("[handoff] returning right arm to default pose")
         try:
-            poses = _parse_joint_lines(DEFAULT_POSE_PATH)
-            self._gripper.move_arm_joints(poses[1])
+            if default_poses is not None:
+                self._gripper.move_arm_joints(default_poses[1])
         except Exception as exc:  # noqa: BLE001
             logger.warning("[handoff] could not return right arm to default: {}", exc)
 

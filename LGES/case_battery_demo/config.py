@@ -104,7 +104,7 @@ GRIPPER_GRASP_RPY: tuple[float, float, float] = (-1.387, np.pi / 2, 0.0)
 GRIPPER_PREGRASP_STANDOFF_M: float = 0.06  # back off along the approach axis, then move in
 HANDOFF_GRIP_DURATION_S: float = 1.5
 # Duration (s) per EE pose step in the post-grip place sequence.
-EE_PLACE_STEP_DURATION_S: float = 3.0
+EE_PLACE_STEP_DURATION_S: float = 2.0
 # Right-arm joint pose where the gripper releases the battery (lower-right).
 # Teach with: python -m case_battery_demo.teach_joint_pose --side right
 PLACE_LOWER_RIGHT_JOINTS: list[float] | None = None
@@ -127,7 +127,7 @@ BCR_PORT: int = 23
 # is diverted to the right-hand gripper (placed lower-right); everything else
 # follows the normal suction-into-case workflow. Empty = nothing matches, so
 # the demo behaves exactly like the original suction-only choreography.
-TARGET_BARCODES: list[str] = ['UDCG7B0307']
+TARGET_BARCODES: list[str] = ['UDCG7B0307', 'UDCG7B0289', 'UDCG7B0291']
 # The barcode is read during the suction pick descent (bcr.BackgroundScanner).
 # A scan is accepted only if at least BCR_MIN_READS successful reads were
 # collected and they all agree; any disagreement is treated as "no target".
@@ -135,7 +135,25 @@ BCR_MIN_READS: int = 2
 BCR_SCAN_TIMEOUT_S: float = 1.0     # per-trigger telnet timeout (s)
 # Start scanning when the suction EE is within this distance above the target z.
 # Keeps reads to the final centimetres of descent where the barcode is closest.
-BCR_SCAN_Z_THRESHOLD_M: float = 0.10
+BCR_SCAN_Z_THRESHOLD_M: float = 0.25
+
+# Scan gate: resolve the barcode BEFORE the suction grab. The cup descends to a
+# floor just above contact (suction off) and scans; if nothing reads, it lifts a
+# little and walks an expanding-ring spiral in x/y, re-scanning at each waypoint,
+# to bring a mis-aligned label into the top-down reader's view; then it returns
+# to the suction point and grabs. Set BCR_SCAN_GATE_ENABLED=False to fall back to
+# the old behavior (scan during the seal descent, decide after the grab).
+BCR_SCAN_GATE_ENABLED: bool = True
+BCR_SCAN_FLOOR_OFFSET_M: float = 0.01   # stop the scan descent this far above contact
+BCR_SCAN_APPROACH_SPEED_M_S: float = 0.04  # slow approach speed for the scan descent toward the battery
+BCR_SCAN_DWELL_S: float = 0.4           # dwell at a scan pose to gather >= BCR_MIN_READS
+BCR_SEARCH_LIFT_M: float = 0.05         # "lift a bit" before starting the spiral
+BCR_SEARCH_RING_STEP_M: float = 0.005   # spiral ring spacing
+BCR_SEARCH_MAX_RADIUS_M: float = 0.02   # outermost spiral ring
+BCR_SEARCH_ANGLES: int = 6              # waypoints per ring
+BCR_SEARCH_MOVE_S: float = 0.8          # travel time between spiral waypoints
+BCR_SEARCH_ROLL_DEG: float = 5.0        # roll tilt applied at each waypoint (alternating +/-); 0 disables
+BCR_SEARCH_PITCH_DEG: float = 5.0       # pitch tilt at each waypoint (flips every 2 waypoints); 0 disables
 
 # weblogic program IDs (from suction/test_suction.py)
 SUCTION_ON_ID: int = 3587
@@ -185,7 +203,7 @@ LIFT_STEP_M: float = 0.005          # 5 mm per step (lift: ~50 mm/s)
 # Small upward jog performed *before* the blow/suction-off pulse, so the cup
 # breaks contact with the placed object cleanly (no sticking, no blowback
 # pushing the part). Set to 0.0 to disable.
-RELEASE_PRELIFT_M: float = 0.010    # 10 mm pre-release lift
+RELEASE_PRELIFT_M: float = 0.014    # 10 mm pre-release lift
 # Jitter DISABLED: at the far cross-body place reach the IK is ill-conditioned,
 # so this small Cartesian wobble (esp. the angular terms) was amplified into
 # erratic 10 rad/s joint commands — the place-descent jerk (confirmed via the
@@ -282,7 +300,7 @@ TAUGHT_POSES: dict[str, tuple[float, ...]] = {
     "BAT_SRC_1":    (0.688931,  0.389726,  0.8160, -3.141483,  0.000227,  1.919921),
     "BAT_SLOT_1":   (0.763274, -0.034724,  0.7421,  3.141523,  0.000298,  1.919760),
     "BAT_SRC_2":    (0.688875,  0.529836,  0.8160,  3.141340, -0.000154,  1.919955),
-    "BAT_SLOT_2":   (0.763807,  0.101673,  0.7421,  3.141363,  0.000238,  1.920136),
+    "BAT_SLOT_2":   (0.763807,  0.106673,  0.7421,  3.141363,  0.000238,  1.920136),
 }
 
 # ---------------------------------------------------------------------------
