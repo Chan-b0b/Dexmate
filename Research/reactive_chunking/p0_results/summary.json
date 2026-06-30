@@ -1,0 +1,34 @@
+{
+  "frames": 4913,
+  "seal_events": 20,
+  "reaction_lag_ticks": {
+    "mean": 16.4,
+    "max": 41,
+    "p90": 31.0
+  },
+  "reaction_lag_seconds": {
+    "mean": 1.0933333333333333,
+    "max": 2.7333333333333334
+  },
+  "staleness_dpos_mm": {
+    "at_L0": 0.0,
+    "at_Lmax": 3.2427174971319763,
+    "mean_over_L": 2.4777343766849196
+  },
+  "staleness_drot_mrad": {
+    "at_L0": 0.0,
+    "at_Lmax": 3.0103599001704135
+  },
+  "deploy_vs_fresh_dpos_mm": {
+    "near_contact": 0.30863364601524756,
+    "far_from_contact": 2.7564289245844282
+  },
+  "suction_disagree_near_contact": {
+    "near": 0.0,
+    "far": 0.008012463832628533
+  },
+  "track_recorded_dpos_mm_near_contact": {
+    "deploy": 0.16331548830142611,
+    "fresh": 0.3435044163779821
+  }
+}

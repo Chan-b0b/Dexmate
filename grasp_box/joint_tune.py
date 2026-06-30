@@ -12,6 +12,7 @@
 """Keyboard controller for all 7 joints of both arms in symmetric mirror mode.
 
 Both arms move together: left gets +delta, right gets −delta (mirrored).
+Can also control single arm with --arm left or --arm right.
 
 Controls:
     q / a  — j1  + / −    (shoulder pitch,      Y-axis)
@@ -22,6 +23,7 @@ Controls:
     u / j  — j6  + / −    (wrist 2)
     i / k  — j7  + / −    (wrist 3)
     [ / ]  — decrease / increase step size
+    Tab    — switch active arm (left ↔ right)
     r      — reset to starting pose
     Ctrl+C — quit
 
@@ -29,6 +31,9 @@ Usage:
     python joint_tune.py
     python joint_tune.py --step 0.05
     python joint_tune.py --adjust-duration 0.2
+    python joint_tune.py --arm left
+    python joint_tune.py --arm right
+    python joint_tune.py --arm both
 """
 
 import os
@@ -44,6 +49,9 @@ from loguru import logger
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import config
 from ik_pink import build_ik_context
+
+# Order Tab cycles through. --arm sets the starting selection.
+_ARM_CYCLE = ("left", "right")
 
 
 # ── Keyboard ─────────────────────────────────────────────────────────────────
@@ -98,6 +106,7 @@ def print_status(
     left_upper: np.ndarray,
     right_lower: np.ndarray,
     right_upper: np.ndarray,
+    active: str,
 ) -> None:
     def limit_marker(val, lo, hi):
         if val <= lo + 0.01:
@@ -112,17 +121,21 @@ def print_status(
             for i in indices
         )
 
+    # "> " prefix marks the row(s) the keyboard currently drives.
+    lmark = ">" if active in ("left", "both") else " "
+    rmark = ">" if active in ("right", "both") else " "
+
     W = 82
     print(f"\n{'─'*W}")
-    print(f" Step : {np.rad2deg(step_rad):.1f}°  ({step_rad:.4f} rad)")
+    print(f" Step : {np.rad2deg(step_rad):.1f}°  ({step_rad:.4f} rad)    Active: {active.upper()}  [Tab] switch")
     # j1-j4
     print(f"        {'j1(pitch)':>11}  {'j2(abduct)':>11}  {'j3(roll)':>11}  {'j4(elbow)':>11}")
-    print(f" Left : {fmt_row(left_q,  left_lower,  left_upper,  [0, 1, 2, 3])}")
-    print(f" Right: {fmt_row(right_q, right_lower, right_upper, [0, 1, 2, 3])}")
+    print(f"{lmark}Left : {fmt_row(left_q,  left_lower,  left_upper,  [0, 1, 2, 3])}")
+    print(f"{rmark}Right: {fmt_row(right_q, right_lower, right_upper, [0, 1, 2, 3])}")
     # j5-j7
     print(f"        {'j5(wrist1)':>11}  {'j6(wrist2)':>11}  {'j7(wrist3)':>11}")
-    print(f" Left : {fmt_row(left_q,  left_lower,  left_upper,  [4, 5, 6])}")
-    print(f" Right: {fmt_row(right_q, right_lower, right_upper, [4, 5, 6])}")
+    print(f"{lmark}Left : {fmt_row(left_q,  left_lower,  left_upper,  [4, 5, 6])}")
+    print(f"{rmark}Right: {fmt_row(right_q, right_lower, right_upper, [4, 5, 6])}")
     print(f" (▲/▼ = at joint limit)")
     # JOINT format for copy-paste into trajectory files
     def fmt_joint(q):
@@ -140,13 +153,18 @@ def print_status(
 def main(
     step: float = 0.05,
     adjust_duration: float = 0.5,
+    arm: str = "both",
 ) -> None:
     """Keyboard controller for all 7 joints of both arms (symmetric mirror mode).
 
     Args:
         step: Joint angle step per keypress in radians.
         adjust_duration: Duration (s) for each incremental movement.
+        arm: Which arm to control: "left", "right", or "both" (default: "both").
     """
+    if arm not in ("left", "right", "both"):
+        raise ValueError(f"arm must be 'left', 'right', or 'both', got '{arm}'")
+    active = arm  # live selection; Tab cycles it through _ARM_CYCLE
     ctx = build_ik_context(skip_confirmation=False)
     bot = ctx.bot
     model = ctx.model
@@ -164,7 +182,7 @@ def main(
         start_left_q    = current_left_q.copy()
         start_right_q   = current_right_q.copy()
 
-        logger.info("Starting from live robot joint state.")
+        logger.info(f"Starting from live robot joint state. Controlling: {active} arm.")
         logger.info(
             f"Joint limits (left arm)  "
             + "  ".join(
@@ -172,7 +190,7 @@ def main(
                 for j in range(7)
             )
         )
-        print_status(current_left_q, current_right_q, step, left_lower, left_upper, right_lower, right_upper)
+        print_status(current_left_q, current_right_q, step, left_lower, left_upper, right_lower, right_upper, active)
 
         while True:
             key = get_key()
@@ -181,14 +199,23 @@ def main(
                 logger.info("Quitting...")
                 break
 
+            # ── Switch active arm ─────────────────────────────────────────
+            elif key == '\t':  # Tab
+                # -1 when starting in "both" (not in the cycle) -> first Tab lands on "left".
+                idx = _ARM_CYCLE.index(active) if active in _ARM_CYCLE else -1
+                active = _ARM_CYCLE[(idx + 1) % len(_ARM_CYCLE)]
+                logger.info(f"Active arm -> {active}")
+                print_status(current_left_q, current_right_q, step, left_lower, left_upper, right_lower, right_upper, active)
+                continue
+
             # ── Step size ─────────────────────────────────────────────────
             elif key == '[':
                 step = max(0.01, round(step - 0.01, 4))
-                print_status(current_left_q, current_right_q, step, left_lower, left_upper, right_lower, right_upper)
+                print_status(current_left_q, current_right_q, step, left_lower, left_upper, right_lower, right_upper, active)
                 continue
             elif key == ']':
                 step = min(0.50, round(step + 0.01, 4))
-                print_status(current_left_q, current_right_q, step, left_lower, left_upper, right_lower, right_upper)
+                print_status(current_left_q, current_right_q, step, left_lower, left_upper, right_lower, right_upper, active)
                 continue
 
             # ── Reset ─────────────────────────────────────────────────────
@@ -198,7 +225,7 @@ def main(
                                start_left_q, start_right_q, adjust_duration * 4)
                 current_left_q  = start_left_q.copy()
                 current_right_q = start_right_q.copy()
-                print_status(current_left_q, current_right_q, step, left_lower, left_upper, right_lower, right_upper)
+                print_status(current_left_q, current_right_q, step, left_lower, left_upper, right_lower, right_upper, active)
                 continue
 
             # ── Joint adjustments (mirrored: left +delta, right −delta) ──
@@ -223,17 +250,25 @@ def main(
 
                 target_left_q  = current_left_q.copy()
                 target_right_q = current_right_q.copy()
-                # j4 (index 3) is not mirrored — both arms move in the same direction
-                mirror = np.array([-1.0 if i != 3 else 1.0 for i in range(7)])
-                target_left_q[:7]  = np.clip(current_left_q[:7]  + delta[:7],          left_lower,  left_upper)
-                target_right_q[:7] = np.clip(current_right_q[:7] + mirror * delta[:7], right_lower, right_upper)
+
+                if active == "left":
+                    # Only move left arm
+                    target_left_q[:7] = np.clip(current_left_q[:7] + delta[:7], left_lower, left_upper)
+                elif active == "right":
+                    # Only move right arm
+                    target_right_q[:7] = np.clip(current_right_q[:7] + delta[:7], right_lower, right_upper)
+                else:  # active == "both"
+                    # j4 (index 3) is not mirrored — both arms move in the same direction
+                    mirror = np.array([-1.0 if i != 3 else 1.0 for i in range(7)])
+                    target_left_q[:7]  = np.clip(current_left_q[:7]  + delta[:7],          left_lower,  left_upper)
+                    target_right_q[:7] = np.clip(current_right_q[:7] + mirror * delta[:7], right_lower, right_upper)
 
                 move_to_joints(bot, current_left_q, current_right_q,
                                target_left_q, target_right_q, adjust_duration)
                 current_left_q  = target_left_q.copy()
                 current_right_q = target_right_q.copy()
 
-                print_status(current_left_q, current_right_q, step, left_lower, left_upper, right_lower, right_upper)
+                print_status(current_left_q, current_right_q, step, left_lower, left_upper, right_lower, right_upper, active)
 
     except KeyboardInterrupt:
         logger.info("Interrupted")

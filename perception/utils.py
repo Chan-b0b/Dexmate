@@ -1,7 +1,7 @@
 import numpy as np
 
 
-def align_head_to_forward(bot, wait_time: float = 6.0) -> None:
+def align_head_to_forward(bot, wait_time: float = 6.0, angle: float = 30.0) -> None:
     """Adjust head pitch so the robot looks forward in the world frame.
 
     Keeps torso_pitch_deg + (-head_pitch_deg) ≈ 90 deg, meaning the
@@ -11,8 +11,9 @@ def align_head_to_forward(bot, wait_time: float = 6.0) -> None:
         bot: Connected Robot instance.
         wait_time: Maximum time (seconds) to wait for the head to reach
                    the target position.
+        angle: Desired angle for the head to look forward.
     """
-    forward_sum_deg = 70.0
+    forward_sum_deg = angle
     torso_pitch_deg = float(np.rad2deg(bot.torso.pitch_angle))
     current_head_pos = np.asarray(bot.head._get_state()["pos"], dtype=float)
     

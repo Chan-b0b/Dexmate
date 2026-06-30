@@ -368,7 +368,7 @@ def send_camera_data(robot, text):
     device = Accelerator().device
     #model = AutoModelForZeroShotObjectDetection.from_pretrained("IDEA-Research/grounding-dino-base", local_files_only=True).to(device)
     #processor = AutoProcessor.from_pretrained("./grounding-dino-local")
-    model_id = "IDEA-Research/grounding-dino-tiny"
+    model_id = "IDEA-Research/grounding-dino-base"
     processor = AutoProcessor.from_pretrained(model_id)
     model = AutoModelForZeroShotObjectDetection.from_pretrained(model_id).to(device)
 
@@ -442,7 +442,8 @@ def send_camera_data(robot, text):
                             box = [int(round(x, 0)) for x in box.tolist()]
                             u = min(int((box[0]+box[2])/2),img.shape[1])
                             v = min(int((box[1]+box[3])/2),img.shape[0])
-                            v_check = int((v+box[3]*3)/4)
+                            #v_check = int((v+box[3]*3)/4)
+                            v_check = v
                             center_point = (u,v)
                             direction = img.shape[1]//2 - u
                             
@@ -457,9 +458,9 @@ def send_camera_data(robot, text):
 
                         min_depth_value = min(depth_value, depth_left, depth_right)
                         max_depth_value = max(depth_value, depth_left, depth_right)
-                        if min_depth_value<0.5 or max_depth_value>1.2:
+                        if min_depth_value<0.2 or max_depth_value>1.0:
                             is_detected=False
-                        if min_depth_value<0.5:
+                        if min_depth_value<0.2:
                             is_occluded=True
 
                         yaw = 0.0
@@ -467,6 +468,7 @@ def send_camera_data(robot, text):
                             left_point = get_3d_zed_point((u-10,v_check), depth_left)
                             right_point = get_3d_zed_point((u+10,v_check), depth_right)
                             yaw = np.atan2(right_point[2]-left_point[2],right_point[0]-left_point[0])
+
 
                         
                             
@@ -477,7 +479,7 @@ def send_camera_data(robot, text):
                 q_torso = np.array(robot.torso.get_joint_pos(), dtype=np.float64)
                 q_head = np.array(robot.head.get_joint_pos(), dtype=np.float64)
                 base_point = transform_zed_point_to_base(target_point, q_torso, q_head)
-                #print(base_point)
+                print(base_point)
                 if not point_queue.empty():
                     point_queue.get()
                 if not yaw_queue.empty():
@@ -528,7 +530,9 @@ def main(use_rtc: bool = False) -> None:
         # Start live camera visualization
         #visualize_camera_data(robot, fps)
         
-        send_camera_data(robot, "green box")
+
+        text_label = "box"
+        send_camera_data(robot, text_label)
         #detect_thread = threading.Thread(target=send_camera_data, kwargs={'robot':robot, 'text':"green box"},daemon=True)
         #detect_thread.start()
         #detect_thread.join()

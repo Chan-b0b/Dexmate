@@ -4,6 +4,17 @@ Provides ``get_force(side, robot)`` which returns the scalar force magnitude
 (sqrt(fx² + fy² + fz²)) for a given hand. Intended for use in grasp control
 loops — e.g. move the arm inward until the measured force exceeds a threshold.
 
+For vertical descents, ``get_push_force(side, robot)`` returns the median-
+filtered *signed* force along the sensor approach axis (positive = pressing into
+the surface), which rejects lateral noise and single-sample spikes that the
+magnitude does not.
+
+``get_vertical_force(side, robot, rotation)`` goes one step further: it rotates
+the wrench into the base frame and returns the median-filtered vertical contact
+force. Since gravity is a constant offset in the base frame, one tare stays
+valid as the wrist tilts — so it is robust to the orientation changes a fixed
+sensor axis is not (e.g. the place-descent jitter).
+
 Usage as a standalone script:
     python read_force.py               # print once for both hands
     python read_force.py --loop        # print at ~10 Hz until Ctrl+C
@@ -14,6 +25,7 @@ from __future__ import annotations
 
 import math
 import time
+from collections import deque
 
 import numpy as np
 import tyro
@@ -26,8 +38,31 @@ from dexcontrol.robot import Robot
 # Subtracted before computing force magnitude in get_force().
 _baseline: dict[str, np.ndarray] = {}
 
+# Signed push-force support (see get_push_force).
+# A vertical descent presses the tool INTO the surface along the wrench z-axis;
+# empirically (suction arm, cup pointing down) that press DROPS fz below its
+# resting/gravity baseline, so the press magnitude is `baseline_fz - fz_now`.
+_PUSH_AXIS = 2  # wrench index for the approach/descent axis (z)
+# Median-filter window for get_push_force. At the 50 ms descent tick a window
+# of 3 is a 2-of-3 majority vote (~100 ms to confirm a sustained change): it
+# still rejects single-sample sensor spikes, but keeps detection latency low so
+# the arm halts before it over-presses a stiff contact into the hard-force
+# limit. Larger windows reject more noise at the cost of more contact overshoot.
+_FILTER_WINDOW = 3
+# Per-side ring buffer of recent signed push samples; cleared on tare_force().
+_push_filter: dict[str, deque] = {}
 
-def tare_force(side: str, robot: Robot, samples: int = 10) -> bool:
+# Base-frame-vertical support (see get_vertical_force). The wrist wrench is
+# reported in the sensor frame, which rotates with the arm, so a fixed sensor
+# axis is only valid at one orientation. Rotating the force into the base frame
+# (where gravity is a constant vertical offset) lets a single tare stay valid as
+# the wrist wobbles. _baseline_base_z holds the resting base-frame vertical
+# force captured by tare_force(rotation=...); _vertical_filter is its median buffer.
+_baseline_base_z: dict[str, float] = {}
+_vertical_filter: dict[str, deque] = {}
+
+
+def tare_force(side: str, robot: Robot, rotation=None, samples: int = 10) -> bool:
     """Record the current resting wrench as a baseline to zero out gravity/offset.
 
     Call this once while the hands are free (not touching anything).
@@ -36,6 +71,10 @@ def tare_force(side: str, robot: Robot, samples: int = 10) -> bool:
     Args:
         side: ``'left'``, ``'right'``, or ``'both'``.
         robot: An already-connected :class:`Robot` instance.
+        rotation: Optional 3x3 ``R_base_sensor`` matrix (sensor-frame -> base).
+            If given, the resting base-frame vertical force is also stored so
+            :func:`get_vertical_force` can subtract it. Pass the live EE rotation
+            for the side being tared (single side only).
         samples: Number of readings to average for the baseline.
 
     Returns:
@@ -63,6 +102,12 @@ def tare_force(side: str, robot: Robot, samples: int = 10) -> bool:
             time.sleep(0.02)
         if readings:
             _baseline[s] = np.mean(readings, axis=0)
+            _push_filter.pop(s, None)  # drop stale pre-tare samples
+            _vertical_filter.pop(s, None)
+            if rotation is not None:
+                _baseline_base_z[s] = float(
+                    (np.asarray(rotation, dtype=float) @ _baseline[s])[2]
+                )
             logger.info(
                 "[{}] tared: baseline fx={:.3f} fy={:.3f} fz={:.3f} N",
                 s, *_baseline[s].tolist(),
@@ -108,9 +153,98 @@ def get_force(side: str, robot: Robot) -> float | None:
     w = np.asarray(state["wrench"], dtype=np.float32)
     raw = w[:3]
     baseline = _baseline.get(side, np.zeros(3, dtype=np.float32))
-    fx, fy, fz = np.maximum(np.abs(raw) - np.abs(baseline), 0).tolist()
-    # print(f'Raw wrench: {raw}, baseline: {baseline}, tared: {(fx, fy, fz)}')
+    tared = raw - baseline
+    fx, fy, fz = float(tared[0]), float(tared[1]), float(tared[2])
     return math.sqrt(fx**2 + fy**2 + fz**2)
+
+
+def get_push_force(side: str, robot: Robot, window: int | None = None) -> float | None:
+    """Return the median-filtered signed *push* force (N) along the approach axis.
+
+    Unlike :func:`get_force` (direction-agnostic magnitude), this isolates the
+    component that matters during a vertical descent: how hard the tool is
+    pressing INTO the surface. Positive means pressing; values near zero or
+    negative mean no contact (or being pulled away).
+
+    The approach-axis reading is baselined by :func:`tare_force` and
+    sign-corrected so a press reads positive (a press drops ``fz`` below its
+    resting/gravity baseline, hence ``push = baseline_fz - fz_now``). The last
+    ``window`` samples are median-filtered to reject single-sample sensor
+    spikes that would otherwise trip a contact/hard-force threshold on noise.
+
+    Args:
+        side: ``'left'`` or ``'right'``.
+        robot: An already-connected :class:`Robot` instance.
+        window: Median filter length in samples. Defaults to ``_FILTER_WINDOW``.
+
+    Returns:
+        Signed push force in Newtons, or ``None`` if the sensor is unavailable.
+    """
+    arm = robot.left_arm if side == "left" else robot.right_arm
+    ws = arm.wrench_sensor
+    if ws is None:
+        return None
+
+    try:
+        state = ws.get_state()
+    except ServiceUnavailableError:
+        return None
+
+    w = np.asarray(state["wrench"], dtype=np.float32)
+    baseline = _baseline.get(side, np.zeros(3, dtype=np.float32))
+    push = float(baseline[_PUSH_AXIS] - w[_PUSH_AXIS])
+
+    win = _FILTER_WINDOW if window is None else max(1, int(window))
+    buf = _push_filter.get(side)
+    if buf is None or buf.maxlen != win:
+        buf = deque(buf or (), maxlen=win)
+        _push_filter[side] = buf
+    buf.append(push)
+    return float(np.median(buf))
+
+
+def get_vertical_force(side: str, robot: Robot, rotation, window: int | None = None) -> float | None:
+    """Return the median-filtered contact force along the base-frame vertical.
+
+    This is the orientation-robust version of :func:`get_push_force`. The raw
+    wrist force (sensor frame) is rotated into the base frame via ``rotation``
+    (``R_base_sensor``, the live EE rotation), then the resting base-frame
+    vertical force captured by ``tare_force(rotation=...)`` is subtracted.
+    Because gravity/tool weight is a *constant* vertical offset in the base
+    frame, that single baseline stays valid even as the wrist tilts (e.g. the
+    place-descent jitter) — unlike a fixed sensor-axis baseline. Positive means
+    pressing into the surface (the contact pushes the tool up).
+
+    Args:
+        side: ``'left'`` or ``'right'``.
+        robot: An already-connected :class:`Robot` instance.
+        rotation: 3x3 ``R_base_sensor`` matrix (sensor-frame -> base).
+        window: Median filter length in samples. Defaults to ``_FILTER_WINDOW``.
+
+    Returns:
+        Signed vertical contact force in Newtons, or ``None`` if unavailable.
+    """
+    arm = robot.left_arm if side == "left" else robot.right_arm
+    ws = arm.wrench_sensor
+    if ws is None:
+        return None
+
+    try:
+        state = ws.get_state()
+    except ServiceUnavailableError:
+        return None
+
+    w = np.asarray(state["wrench"], dtype=np.float32)
+    f_base_z = float((np.asarray(rotation, dtype=float) @ w[:3].astype(float))[2])
+    push = f_base_z - _baseline_base_z.get(side, 0.0)
+
+    win = _FILTER_WINDOW if window is None else max(1, int(window))
+    buf = _vertical_filter.get(side)
+    if buf is None or buf.maxlen != win:
+        buf = deque(buf or (), maxlen=win)
+        _vertical_filter[side] = buf
+    buf.append(push)
+    return float(np.median(buf))
 
 
 def _get_arm_row(side: str, robot: Robot) -> dict | None:
@@ -127,7 +261,7 @@ def _get_arm_row(side: str, robot: Robot) -> dict | None:
 
     w = np.asarray(state["wrench"], dtype=np.float32)
     baseline = _baseline.get(side, np.zeros(3, dtype=np.float32))
-    tared = np.maximum(np.abs(w[:3]) - np.abs(baseline), 0)
+    tared = w[:3] - baseline
     fx, fy, fz = float(tared[0]), float(tared[1]), float(tared[2])
     _, _, _, tx, ty, tz = (float(x) for x in w.tolist())
 
@@ -141,6 +275,7 @@ def _get_arm_row(side: str, robot: Robot) -> dict | None:
         "ty": ty,
         "tz": tz,
         "force": math.sqrt(fx**2 + fy**2 + fz**2),
+        "push": get_push_force(side, robot),
         "blue_button": bool(state["blue_button"]),
         "green_button": bool(state["green_button"]),
     }
@@ -148,7 +283,7 @@ def _get_arm_row(side: str, robot: Robot) -> dict | None:
 
 def _print_row(row: dict) -> None:
     logger.info(
-        "[{side}] force={force:.3f} N  "
+        "[{side}] push={push:.3f} N  force={force:.3f} N  "
         "(fx={fx:.3f}, fy={fy:.3f}, fz={fz:.3f})  "
         "torque=(tx={tx:.3f}, ty={ty:.3f}, tz={tz:.3f})  "
         "buttons=blue:{blue_button} green:{green_button}",

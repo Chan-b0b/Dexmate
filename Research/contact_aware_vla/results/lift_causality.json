@@ -1,0 +1,32 @@
+{
+  "case_pick": {
+    "takes": 6,
+    "at_seal_dpos_mm": 0.15871566046414606,
+    "lift_frames": 48,
+    "pred_dz_seal0_mm": -1.3311209678649902,
+    "pred_dz_seal1_mm": 2.8813915252685547,
+    "recorded_dz_mm": 6.477464199066162,
+    "lift_gain_from_seal_mm": 4.212512493133545,
+    "seal_gating_ratio": 0.6503335817341686
+  },
+  "battery_1_pick": {
+    "takes": 6,
+    "at_seal_dpos_mm": 0.05513676595520727,
+    "lift_frames": 48,
+    "pred_dz_seal0_mm": 0.07337293773889542,
+    "pred_dz_seal1_mm": 3.2220795154571533,
+    "recorded_dz_mm": 6.879219055175781,
+    "lift_gain_from_seal_mm": 3.1487064361572266,
+    "seal_gating_ratio": 0.45771277392136617
+  },
+  "battery_2_pick": {
+    "takes": 6,
+    "at_seal_dpos_mm": 0.14397063231237034,
+    "lift_frames": 48,
+    "pred_dz_seal0_mm": 0.493350625038147,
+    "pred_dz_seal1_mm": 2.492208480834961,
+    "recorded_dz_mm": 6.050523281097412,
+    "lift_gain_from_seal_mm": 1.9988579750061035,
+    "seal_gating_ratio": 0.3303611740906418
+  }
+}

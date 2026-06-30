@@ -51,8 +51,11 @@ def main() -> None:
         current_angles = np.asarray(bot.torso._get_state()["pos"], dtype=float)
         # Move to target joint angles (60, 120, 30 degrees)
         
-        target_angles = np.deg2rad([60,120,30])
-        
+        # target_angles = np.deg2rad([60,120,30])
+
+        target_angles = np.deg2rad([80,175,25])
+
+
         # Set velocity proportional to joint error with conservative bounds.
         error = target_angles - current_angles
         kp = 0.40
