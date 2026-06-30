@@ -1,0 +1,26 @@
+# Core ML framework (install torch separately for your hardware)
+lerobot>=0.5.1
+
+# Data & numerics
+numpy>=1.24.0
+scipy>=1.10.0
+pandas>=1.5.0
+
+# HuggingFace ecosystem
+huggingface-hub>=0.19.0
+datasets>=2.14.0
+transformers>=4.35.0
+
+# Logging & monitoring
+tensorboard>=2.13.0
+
+# Utilities
+pyyaml>=6.0
+Pillow>=9.0.0
+opencv-python>=4.8.0
+
+# Device/CUDA utils
+# Note: torch, torchvision, torchaudio should be installed separately
+# for your specific CUDA version and hardware (H200)
+# Example for H200 + CUDA 12.1:
+#   pip install torch torchvision torchaudio --index-url https://download.pytorch.org/whl/cu121

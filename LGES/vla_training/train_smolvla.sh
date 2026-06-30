@@ -79,12 +79,16 @@ if [[ "$RESUME" == "1" ]]; then
     --resume=true \
     ${ARGS[@]+"${ARGS[@]}"} 2>&1 | tee -a "$LOG"
 else
+  # Use HuggingFace dataset repo (set HF_DATASET_REPO to override)
+  HF_REPO="${HF_DATASET_REPO:-chanho-lee/lges_suction}"
+  HF_CACHE_DIR="${HF_CACHE_DIR:-$HOME/.cache/huggingface/datasets}"
+
   "$VENV/bin/lerobot-train" \
     --policy.path=lerobot/smolvla_base \
     --policy.device=cuda \
     --policy.push_to_hub=false \
-    --dataset.repo_id=local/lges_suction \
-    --dataset.root="$DIR/datasets/lges_suction" \
+    --dataset.repo_id="$HF_REPO" \
+    --dataset.root="$HF_CACHE_DIR" \
     --rename_map='{"observation.images.head": "observation.images.camera1", "observation.images.head_depth": "observation.images.camera2"}' \
     --policy.input_features='{"observation.state": {"type": "STATE", "shape": [15]}, "observation.images.camera1": {"type": "VISUAL", "shape": [3, 256, 256]}, "observation.images.camera2": {"type": "VISUAL", "shape": [3, 256, 256]}, "observation.images.camera3": {"type": "VISUAL", "shape": [3, 256, 256]}}' \
     --batch_size=32 \
