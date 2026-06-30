@@ -204,8 +204,8 @@ def load_policy(checkpoint: Path, film: bool = False):
         mask_force = os.environ.get("FILM_MASK_FORCE", "1") not in ("0", "false", "False")
         cond = tuple(c.strip() for c in os.environ.get("FILM_COND", "contact,fz,seal").split(",") if c.strip())
         inject = os.environ.get("FILM_INJECT", "suffix")
-        f0 = float(os.environ.get("FILM_F0", "14"))
-        tau = float(os.environ.get("FILM_TAU", "3"))         # contact-DROP scale; MUST match training
+        f0 = float(os.environ.get("FILM_F0", "12"))
+        tau = float(os.environ.get("FILM_TAU", "10"))        # contact-DROP scale; MUST match training
         fz_tau = float(os.environ.get("FILM_FZ_TAU", "30"))  # fz scale; MUST match training
         ds = VLA_DIR / "datasets/lges_suction"
         wm, ws = film_contact.load_wrench_stats(ds)
@@ -982,4 +982,4 @@ if __name__ == "__main__":
     main()
 
 
-#FILM_COND=contact FILM_MASK_FORCE=0 FILM_INJECT=suffix /home/dexmate/vla_venv/bin/python run_policy.py --go --task case_pick --goto-start /home/dexmate/CNS_code/Dexmate/LGES/recordings/case_pick/20260617-145810_ep0001_case_pick --checkpoint outputs/film_v2_contact_suffix/checkpoints/last --film
+#FILM_COND=contact,fz,seal FILM_MASK_FORCE=0 FILM_INJECT=suffix /home/dexmate/vla_venv/bin/python run_policy.py --go --task case_pick --goto-start /home/dexmate/CNS_code/Dexmate/LGES/recordings/case_pick/20260617-145810_ep0001_case_pick --checkpoint outputs/film_v3_contactfzseal_nomask/checkpoints/last --film

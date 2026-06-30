@@ -22,8 +22,9 @@ class _M:
 m = _M()
 m._wrench_mean = torch.tensor([-1.828, 0.264, 16.585, -0.118, -0.095, 0.039])
 m._wrench_std = torch.tensor([1.282, 0.914, 5.895, 0.159, 0.154, 0.082])
-m._contact_F0 = torch.tensor(14.0)
-m._contact_tau = torch.tensor(30.0)   # large tau -> GRADED (not saturated binary)
+m._contact_F0 = torch.tensor(12.0)    # threshold 2N below the ~14N baseline (deadband)
+m._contact_tau = torch.tensor(10.0)   # graded contact-DROP (saturates near the full press)
+m._fz_tau = torch.tensor(30.0)        # continuous fz scale (fz_raw/30)
 
 def norm_state(fz_raw):
     raw = torch.tensor([-1.8, 0.26, fz_raw, -0.1, -0.09, 0.04])
@@ -32,18 +33,20 @@ def norm_state(fz_raw):
     return s
 
 c_rest = float(fc._contact_from_state(m, norm_state(14.0)))     # free hover -> 0
-c_press = float(fc._contact_from_state(m, norm_state(2.0)))     # pressing |F|~2 -> ~(14-2)/30=0.4
+c_press = float(fc._contact_from_state(m, norm_state(2.0)))     # pressing |F|~2 -> 1 (sharp)
 c_loaded = float(fc._contact_from_state(m, norm_state(20.0)))   # loaded/lift (|F| rises) -> 0
-print(f"[2] graded c-hat (tau=30): |F|~14N -> {c_rest:.3f}   pressing |F|~2N -> {c_press:.3f}   "
+print(f"[2] contact c-hat (tau=10): |F|~14N -> {c_rest:.3f}   pressing |F|~2N -> {c_press:.3f}   "
       f"loaded |F|~20N -> {c_loaded:.3f}")
-assert c_rest < 0.1 and 0.3 < c_press < 0.5 and c_loaded < 0.1, "contact-DROP not graded as expected"
-print("[2] contact-from-state (graded force DROP) OK")
+assert c_rest < 0.2 and c_press > 0.8 and c_loaded < 0.2, "contact-DROP scalar not as expected"
+print("[2] contact-from-state (force DROP) OK")
 
-# 2b. fz channel = the normalized state value (idx 11) fed straight through (signed, continuous).
-fz_state = norm_state(2.0)
-fz_chan = float(fc._fz_from_state(m, fz_state))
-print(f"[2b] fz channel (normalized) = {fz_chan:.3f}  (== state idx 11 {float(fz_state[0,11]):.3f})")
-assert abs(fz_chan - float(fz_state[0, 11])) < 1e-6, "fz channel should pass normalized fz through"
+# 2b. fz channel = raw fz / fz_tau (continuous, signed). Captures descent/contact/loaded by level.
+fz_press = float(fc._fz_from_state(m, norm_state(2.0)))     # ~2/30
+fz_descent = float(fc._fz_from_state(m, norm_state(14.0)))  # ~14/30
+fz_loaded = float(fc._fz_from_state(m, norm_state(17.0)))   # ~17/30
+print(f"[2b] fz channel (fz/30): press~2N -> {fz_press:.3f}  descent~14N -> {fz_descent:.3f}  "
+      f"loaded~17N -> {fz_loaded:.3f}")
+assert abs(fz_press - 2.0 / 30) < 1e-3 and abs(fz_descent - 14.0 / 30) < 1e-3, "fz should be fz_raw/fz_tau"
 print("[2b] fz-from-state OK")
 
 # 2c. seal channel + the full 3-channel condition vector (contact, fz, seal).

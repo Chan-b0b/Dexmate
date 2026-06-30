@@ -38,6 +38,9 @@ def main():
                     help="checkpoint dir (default: latest outputs/*/checkpoints/last)")
     ap.add_argument("--val-root", type=Path, default=VLA_DIR / "datasets" / "lges_suction_val")
     ap.add_argument("--repo-id", default="local/lges_suction_val")
+    ap.add_argument("--film", action="store_true",
+                    help="evaluate a FiLM checkpoint (apply film_contact before load; "
+                         "FILM_COND/F0/TAU/FZ_TAU/MASK_FORCE/INJECT envs MUST match training)")
     args = ap.parse_args()
 
     ckpt = args.checkpoint or latest_checkpoint()
@@ -47,6 +50,24 @@ def main():
     from lerobot.datasets.lerobot_dataset import LeRobotDataset
     from lerobot.policies.smolvla.modeling_smolvla import SmolVLAPolicy
     from lerobot.policies.factory import make_pre_post_processors
+
+    if args.film:
+        import os
+        import film_contact
+        mask_force = os.environ.get("FILM_MASK_FORCE", "1") not in ("0", "false", "False")
+        cond = tuple(c.strip() for c in os.environ.get("FILM_COND", "contact,fz,seal").split(",") if c.strip())
+        inject = os.environ.get("FILM_INJECT", "suffix")
+        f0 = float(os.environ.get("FILM_F0", "12"))
+        tau = float(os.environ.get("FILM_TAU", "10"))
+        fz_tau = float(os.environ.get("FILM_FZ_TAU", "30"))
+        train_ds = VLA_DIR / "datasets" / "lges_suction"   # film stats from TRAIN (matches training)
+        wm, ws = film_contact.load_wrench_stats(train_ds)
+        sm, ss = film_contact.load_seal_stats(train_ds)
+        film_contact.apply("v2", wm, ws, seal_mean=sm, seal_std=ss, cond=cond,
+                           contact_F0=f0, contact_tau=tau, fz_tau=fz_tau,
+                           mask_force=mask_force, inject=inject)
+        print(f"[eval] FiLM ENABLED (cond={cond} inject={inject} mask_force={mask_force} "
+              f"F0={f0:.0f} tau={tau:.0f} fz_tau={fz_tau:.0f})")
 
     policy = SmolVLAPolicy.from_pretrained(model_dir)
     policy.eval()
@@ -75,6 +96,8 @@ def main():
                 "observation.state": frame["observation.state"].unsqueeze(0),
                 "task": task,
             }
+            if "observation.images.head_depth" in frame:   # match the trained model's camera2
+                obs["observation.images.head_depth"] = frame["observation.images.head_depth"].unsqueeze(0)
             obs = pre(obs)
             with torch.inference_mode():
                 action = policy.select_action(obs)

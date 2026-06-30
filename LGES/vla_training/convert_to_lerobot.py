@@ -169,7 +169,6 @@ def load_take(take_dir: Path, with_depth: bool):
         [[f["wrench"][k] for k in ("fx", "fy", "fz", "tx", "ty", "tz")] for f in frames],
         dtype=np.float64,
     )
-
     states = np.concatenate(
         [pos, quat, suction[:, None], sealed[:, None], wrench], axis=1
     ).astype(np.float32)

@@ -5,7 +5,18 @@ See Research/condition_driven/DESCEND_UNTIL_CONTACT_DESIGN.md.
 Monkey-patches lerobot 0.5.1 `VLAFlowMatching` (installed in the venv, NOT edited) to:
   - build a condition vector c-hat from the observation.state. Channels are configurable
     (`cond=`); currently two are available:
-        'contact' : clip((|F[:3]| - F0) / tau, 0, 1)   from the un-normalized wrench (idx 9:15)
+        'contact' : clip((F0 - |F[:3]|) / contact_tau, 0, 1)  from the un-normalized wrench.
+                    Contact is a force DROP (the surface unloads the tool's hanging weight:
+                    |F| ~14N -> ~2N at the press), so c^ fires on the drop BELOW the fixed
+                    threshold F0=12 (~2N under the ~14N empty-tool baseline = a deadband so
+                    noise doesn't trigger). (The earlier clip((|F|-14)/3) had the SIGN BACKWARDS
+                    — it fired on a rise, so it read ~0 at the press where contact happens.)
+                    contact_tau=10 -> graded (saturates near the full ~12N press). NOTE: the
+                    ~14N baseline is the EMPTY tool -> F0=12 is correct for PICKS; a held payload
+                    raises the baseline (places ~16-24N) so this fixed threshold under-reads there.
+        'fz'      : fz_raw / fz_tau  — the continuous (signed) vertical force, scaled by fz_tau
+                    (30). Captures the full gradation contact's clip throws away: descent ~0.47,
+                    contact ~0, loaded ~0.57; keeps the sign |F| loses.
         'seal'    : the vacuum_sealed bit (idx 8), un-normalized to ~{0,1}
     stats (wrench / seal mean,std) are baked into buffers so c-hat is identical train+test.
   - optionally FORCE-MASK the conditioned dims out of the state that feeds the action expert
@@ -35,11 +46,12 @@ import torch
 import torch.nn as nn
 
 WRENCH_LO, WRENCH_HI = 9, 15   # wrench (fx,fy,fz,tx,ty,tz) dims in observation.state
+FZ_IDX = 11                    # fz (vertical force) — fed to FiLM as a continuous channel
 SEAL_IDX = 8                   # vacuum_sealed bit in observation.state
-CHANNELS = ("contact", "seal")  # available condition channels (canonical order)
+CHANNELS = ("contact", "fz", "seal")  # available condition channels (canonical order)
 _CFG = {"variant": "v0", "mask_force": True, "cond": ("contact", "seal"),
         "inject": "suffix"}  # mutated by apply()
-INJECTS = ("suffix", "output")  # where FiLM modulates the action features
+INJECTS = ("suffix", "output", "prefix")  # where FiLM modulates
 
 
 def load_wrench_stats(dataset_root):
@@ -89,10 +101,21 @@ class ContactFiLM(nn.Module):
 
 
 def _contact_from_state(self, state: torch.Tensor) -> torch.Tensor:
-    """contact c-hat in [0,1], shape (B,1), from the NORMALIZED wrench in `state` (B, >=15)."""
+    """contact c-hat in [0,1], shape (B,1), from the NORMALIZED wrench in `state` (B, >=15).
+    Contact = a force DROP below the fixed baseline F0: c^ = clip((F0 - |F|)/tau, 0, 1)."""
     w = state[..., WRENCH_LO:WRENCH_HI] * self._wrench_std + self._wrench_mean  # un-normalize
     fmag = torch.linalg.norm(w[..., :3], dim=-1, keepdim=True)                  # raw |F| (B,1)
-    return torch.clamp((fmag - self._contact_F0) / self._contact_tau, 0.0, 1.0)
+    return torch.clamp((self._contact_F0 - fmag) / self._contact_tau, 0.0, 1.0)
+
+
+def _fz_from_state(self, state: torch.Tensor) -> torch.Tensor:
+    """fz (vertical force) as a continuous FiLM channel, shape (B,1): raw fz / fz_tau.
+    fz_raw is recovered by un-normalizing state idx 11 (wrench fz = wrench[2]); /fz_tau (30)
+    scales it so the full range maps to ~[0,0.6]. Keeps the SIGN that |F| (used by 'contact')
+    loses, and separates descent (~14N) / contact (~0N) / loaded (~17N) that the rectified
+    contact drop cannot (contact reads 0 for both descent AND loaded)."""
+    fz_raw = state[..., FZ_IDX:FZ_IDX + 1] * self._wrench_std[2] + self._wrench_mean[2]
+    return fz_raw / self._fz_tau
 
 
 def _seal_from_state(self, state: torch.Tensor) -> torch.Tensor:
@@ -103,22 +126,31 @@ def _seal_from_state(self, state: torch.Tensor) -> torch.Tensor:
 
 def _condition_from_state(self, state: torch.Tensor) -> torch.Tensor:
     """Concatenate the enabled channels (canonical order) -> c-hat (B, cond_dim)."""
-    cols = [(_contact_from_state if ch == "contact" else _seal_from_state)(self, state)
-            for ch in self._film_cond]
+    fns = {"contact": _contact_from_state, "fz": _fz_from_state, "seal": _seal_from_state}
+    cols = [fns[ch](self, state) for ch in self._film_cond]
     return torch.cat(cols, dim=-1)
 
 
 def apply(variant: str, wrench_mean: torch.Tensor, wrench_std: torch.Tensor,
           seal_mean: torch.Tensor = None, seal_std: torch.Tensor = None,
-          cond=("contact", "seal"), contact_F0: float = 14.0, contact_tau: float = 3.0,
-          mask_force: bool = True, inject: str = "suffix") -> None:
+          cond=("contact", "fz", "seal"), contact_F0: float = 12.0, contact_tau: float = 10.0,
+          fz_tau: float = 30.0, mask_force: bool = True, inject: str = "suffix") -> None:
     """Patch VLAFlowMatching for the given variant + condition channels.
 
-    cond: which channels feed FiLM — any subset of CHANNELS ('contact', 'seal').
+    cond: which channels feed FiLM — any subset of CHANNELS ('contact', 'fz', 'seal').
+      'contact' = force-DROP clip((F0-|F|)/contact_tau); 'fz' = the continuous (signed) vertical
+      force fz_raw/fz_tau; 'seal' = the DI0 bit. Continuous channels are fine — the FiLM label
+      need NOT be binary.
+    contact_F0/contact_tau: threshold + scale for the contact-DROP c^ (F0=12 below the ~14N
+      baseline = a deadband; tau=10 -> graded, saturates near the full press).
+    fz_tau: scale for the continuous fz channel (30 -> fz_raw/30, the graded force gradation).
     inject: WHERE FiLM modulates —
-      'suffix' : the action-token embedding at the EXPERT INPUT (embed_suffix) — every expert
-                 layer computes the action conditioned on c-hat (strong authority).
+      'suffix' : the action-token embedding at the EXPERT INPUT (embed_suffix) — modulates the
+                 NOISY-ACTION tokens (no observation content).
       'output' : the input to action_out_proj (the final projection) — a weak last-layer tap.
+      'prefix' : the STATE token in the prefix (state_proj output, VLM-space ~960-d) — conditions
+                 the OBSERVATION representation where ee_z + the wrench live, rather than the
+                 action tokens. Uses a film sized to the prefix dim (state_proj.out_features).
     mask_force=False keeps the conditioned dims in the action path (FiLM added ON TOP of the
     existing signal) — an ablation to isolate the effect of adding FiLM before committing to
     the bottleneck. When True, the conditioned dims (wrench for 'contact', seal for 'seal')
@@ -149,14 +181,20 @@ def apply(variant: str, wrench_mean: torch.Tensor, wrench_std: torch.Tensor,
 
     def new_init(self, *a, **k):
         orig_init(self, *a, **k)
-        hidden = self.vlm_with_expert.expert_hidden_size
+        # prefix injection modulates the state token (VLM space), the others the action tokens
+        # (expert space) — size the film to the right space.
+        hidden = (self.state_proj.out_features if inject == "prefix"
+                  else self.vlm_with_expert.expert_hidden_size)
         self._film_cond = cond
         self.contact_film = ContactFiLM(hidden, cond_dim=len(cond))
-        if "contact" in cond:
+        if "contact" in cond or "fz" in cond:   # both read the (un-normalized) wrench
             self.register_buffer("_wrench_mean", wrench_mean.clone())
             self.register_buffer("_wrench_std", wrench_std.clone())
+        if "contact" in cond:
             self.register_buffer("_contact_F0", torch.tensor(float(contact_F0)))
             self.register_buffer("_contact_tau", torch.tensor(float(contact_tau)))
+        if "fz" in cond:
+            self.register_buffer("_fz_tau", torch.tensor(float(fz_tau)))
         if "seal" in cond:
             self.register_buffer("_seal_mean", seal_mean.clone())
             self.register_buffer("_seal_std", seal_std.clone())
@@ -171,6 +209,17 @@ def apply(variant: str, wrench_mean: torch.Tensor, wrench_std: torch.Tensor,
                 return (owner.contact_film(inp[0], c),)
             self.action_out_proj.register_forward_pre_hook(_film_pre_hook)
 
+        if inject == "prefix":   # condition the STATE token (where ee_z lives), not the actions.
+            # _cur_contact is set in embed_prefix BEFORE state_proj runs, so it's available here.
+            def _state_film_hook(_module, _inp, out):
+                c = owner._cur_contact
+                if c is None:
+                    return out
+                if out.ndim == 2:                          # (B, H) -> film expects (B,T,H)
+                    return owner.contact_film(out[:, None, :], c)[:, 0, :]
+                return owner.contact_film(out, c)
+            self.state_proj.register_forward_hook(_state_film_hook)
+
     def new_embed_suffix(self, noisy_actions, timestep):
         embs, pad_masks, att_masks = orig_embed_suffix(self, noisy_actions, timestep)
         if inject == "suffix" and self._cur_contact is not None:  # condition the action tokens
@@ -184,9 +233,11 @@ def apply(variant: str, wrench_mean: torch.Tensor, wrench_std: torch.Tensor,
                 c = c[torch.randperm(c.shape[0], device=c.device)]
             self._cur_contact = c
             if _CFG["mask_force"]:                                 # bottleneck: mask conditioned dims
-                state = state.clone()
+                state = state.clone()                              # (c was already read above)
                 if "contact" in self._film_cond:
                     state[..., WRENCH_LO:WRENCH_HI] = 0.0
+                if "fz" in self._film_cond:
+                    state[..., FZ_IDX] = 0.0
                 if "seal" in self._film_cond:
                     state[..., SEAL_IDX] = 0.0
         return orig_embed_prefix(self, images, img_masks, lang_tokens, lang_masks, state=state)

@@ -1,2 +1,5 @@
 recordings/**
 case_detection/data/**
+vla_training/logs/**
+vla_training/datasets/**
+vla_training/outputs/**
