@@ -1,0 +1,21 @@
+# Data & recordings
+LGES/recordings/**
+LGES/case_detection/data/**
+Research/condition_driven/rollouts/**
+Research/condition_driven/rollouts_gated/**
+
+# Training outputs, logs, datasets (any folder)
+**/logs/**
+**/datasets/**
+**/outputs/**
+**/rollouts/**
+**/data/**
+
+# Python & cache
+__pycache__/
+*.pyc
+*.pyo
+*.egg-info/
+.pytest_cache/
+.DS_Store
+*.log
