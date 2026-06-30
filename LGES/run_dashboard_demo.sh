@@ -8,15 +8,17 @@
 # Pass --dashboard to the demo if you want live joints/EE/wrench/camera in
 # the viewer; omit it if you just want the robot to run without data spooling.
 #
-#   PORT=9090 SPOOL=/tmp/foo ./run_dashboard_demo.sh
+#   PORT=9090 SPOOL=/tmp/foo REVIEW_PORT=9091 RECORD_DIR=recordings ./run_dashboard_demo.sh
 #
-# Then open http://<robot-ip>:8080/ in a browser.
+# Then open http://<robot-ip>:8080/ (live) and :8081/ (take review) in a browser.
 # Ctrl-C here tears down the background services.
 set -uo pipefail
 
 cd "$(dirname "$0")"                       # LGES/ — package import root
 SPOOL="${SPOOL:-/tmp/cns_dashboard}"
 PORT="${PORT:-8080}"
+REVIEW_PORT="${REVIEW_PORT:-8081}"
+RECORD_DIR="${RECORD_DIR:-recordings}"     # must match the demo's --record-dir
 
 pids=()
 cleanup() {
@@ -48,6 +50,12 @@ pids+=($!)
 # 4) Barcode reader image feed (IMAGE.SEND at 1 Hz — never triggers a read).
 echo "[run_all] starting barcode image publisher…"
 python -m case_battery_demo.dashboard.barcode --spool "$SPOOL" &
+pids+=($!)
+
+# 5) Recorded-take review dashboard (gallery + frame scrubber).
+echo "[run_all] starting take review server on :${REVIEW_PORT} (root ${RECORD_DIR})…"
+python -m case_battery_demo.dashboard.review_server \
+  --root "$RECORD_DIR" --port "$REVIEW_PORT" &
 pids+=($!)
 
 echo "[run_all] Dashboard services running. Start the demo in another terminal:"

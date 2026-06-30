@@ -11,15 +11,40 @@ reports a value only if enough reads agree.
 
 from __future__ import annotations
 
+import os
 import socket
 import threading
 
 from loguru import logger
 
 from . import config as cfg
+from .dashboard.barcode import DEFAULT_SPOOL_DIR
 
 # Reader replies that mean "no code read" rather than a real barcode.
 _NO_CODE = {"", "NOREAD", "NO READ", "NG"}
+
+# The Cognex services one client at a time: while the dashboard image feed
+# (dashboard/barcode.py, IMAGE.SEND) holds the reader, our T triggers come back
+# "NG". The BackgroundScanner touches this lock while it is actively scanning so
+# the image feed can yield the reader for the duration of a pick.
+SCAN_LOCK_PATH = os.path.join(DEFAULT_SPOOL_DIR, "bcr_scanning.lock")
+
+
+def _touch_scan_lock() -> None:
+    """Refresh the scan lock (best-effort) so the image feed backs off."""
+    try:
+        os.makedirs(DEFAULT_SPOOL_DIR, exist_ok=True)
+        with open(SCAN_LOCK_PATH, "w") as f:
+            f.write("1")
+    except OSError:
+        pass
+
+
+def _clear_scan_lock() -> None:
+    try:
+        os.remove(SCAN_LOCK_PATH)
+    except OSError:
+        pass
 
 
 def scan_once(
@@ -79,17 +104,26 @@ class BackgroundScanner:
     def start(self) -> "BackgroundScanner":
         self._reads = []
         self._stop.clear()
+        _touch_scan_lock()  # claim the reader before the first trigger
         self._thread = threading.Thread(target=self._run, name="bcr-scan", daemon=True)
         self._thread.start()
         return self
 
     def _run(self) -> None:
         while not self._stop.is_set():
+            _touch_scan_lock()  # keep the lock fresh so the image feed stays backed off
             code = scan_once(self._host, self._port)
             if code is not None:
                 with self._lock:
                     self._reads.append(code)
-                logger.info("[BCR] read: {!r}  (total reads: {})", code, len(self._reads))
+                    n = len(self._reads)
+                logger.info("[BCR] read: {!r}  (total reads: {})", code, n)
+                # Enough reads in hand — stop triggering rather than keep
+                # hammering the reader. result() still applies the agreement
+                # check over what we collected.
+                if n >= cfg.BCR_MAX_READS:
+                    logger.info("[BCR] reached {} reads — stopping scan", n)
+                    break
             # Small breather so we don't hammer the reader (and so stop() is
             # responsive between triggers).
             self._stop.wait(0.05)
@@ -99,6 +133,7 @@ class BackgroundScanner:
         if self._thread is not None:
             self._thread.join(timeout=cfg.BCR_SCAN_TIMEOUT_S + 1.0)
             self._thread = None
+        _clear_scan_lock()  # release the reader so the image feed resumes
 
     def __enter__(self) -> "BackgroundScanner":
         return self.start()

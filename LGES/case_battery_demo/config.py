@@ -35,6 +35,29 @@ URDF_PATH: str = (
 TRACE_ENABLED: bool = True
 TRACE_PATH: str = "/tmp/cns_trace.csv"
 
+# Per-phase language instructions for auto-cut VLA episodes. The orchestrator
+# tells the recorder which phase is running; the recorder stamps the matching
+# instruction into that episode's meta.json. Phases not listed fall back to
+# the --instruction CLI flag.
+# Random equal x,y shift applied to ALL taught poses, for VLA spatial
+# diversity. Sampled uniformly in ±EPISODE_XY_SHIFT_MAX_M per axis once per
+# run and announced at startup; the operator places the physical case/battery
+# stacks shifted by the same amount before confirming. The same shift goes to
+# every src and dst (relative geometry preserved, so slot insertions still
+# align) and is stamped into each episode's meta.json. 0 disables.
+EPISODE_XY_SHIFT_MAX_M: float = 0.01
+
+PHASE_INSTRUCTIONS: dict[str, str] = {
+    "case_pick": "pick up the case with the suction cup",
+    "case_place": "place the case on the right workspace",
+    "battery_1_pick": "pick up the right battery with the suction cup",
+    "battery_1_place": "insert the right battery into slot 1 of the case",
+    "battery_2_pick": "pick up the left battery with the suction cup",
+    "battery_2_place": "insert the left battery into slot 2 of the case",
+    "hand_off": "hand the battery from the suction cup to the right gripper",
+    "gripper_battery_handling": "place the battery in the lower-right area with the gripper",
+}
+
 IK_DT: float = 0.01
 IK_MAX_ITERS: int = 500
 # Combined position+orientation twist-norm tolerance. A soft posture task adds
@@ -127,15 +150,18 @@ BCR_PORT: int = 23
 # is diverted to the right-hand gripper (placed lower-right); everything else
 # follows the normal suction-into-case workflow. Empty = nothing matches, so
 # the demo behaves exactly like the original suction-only choreography.
-TARGET_BARCODES: list[str] = ['UDCG7B0307', 'UDCG7B0289', 'UDCG7B0291']
+TARGET_BARCODES: list[str] = ['UDCG7B0289', 'UDCG7B0291']
 # The barcode is read during the suction pick descent (bcr.BackgroundScanner).
 # A scan is accepted only if at least BCR_MIN_READS successful reads were
 # collected and they all agree; any disagreement is treated as "no target".
 BCR_MIN_READS: int = 2
+# Stop triggering once this many successful reads have landed — no point
+# hammering the reader after we already have enough to agree on a code.
+BCR_MAX_READS: int = 4
 BCR_SCAN_TIMEOUT_S: float = 1.0     # per-trigger telnet timeout (s)
 # Start scanning when the suction EE is within this distance above the target z.
 # Keeps reads to the final centimetres of descent where the barcode is closest.
-BCR_SCAN_Z_THRESHOLD_M: float = 0.25
+BCR_SCAN_Z_THRESHOLD_M: float = 0.5
 
 # Scan gate: resolve the barcode BEFORE the suction grab. The cup descends to a
 # floor just above contact (suction off) and scans; if nothing reads, it lifts a
@@ -144,12 +170,13 @@ BCR_SCAN_Z_THRESHOLD_M: float = 0.25
 # to the suction point and grabs. Set BCR_SCAN_GATE_ENABLED=False to fall back to
 # the old behavior (scan during the seal descent, decide after the grab).
 BCR_SCAN_GATE_ENABLED: bool = True
-BCR_SCAN_FLOOR_OFFSET_M: float = 0.01   # stop the scan descent this far above contact
+BCR_SCAN_FLOOR_OFFSET_M: float = 0.1   # stop the scan descent this far above contact
 BCR_SCAN_APPROACH_SPEED_M_S: float = 0.04  # slow approach speed for the scan descent toward the battery
 BCR_SCAN_DWELL_S: float = 0.4           # dwell at a scan pose to gather >= BCR_MIN_READS
 BCR_SEARCH_LIFT_M: float = 0.05         # "lift a bit" before starting the spiral
-BCR_SEARCH_RING_STEP_M: float = 0.005   # spiral ring spacing
-BCR_SEARCH_MAX_RADIUS_M: float = 0.02   # outermost spiral ring
+BCR_SEARCH_RING_STEP_M: float = 0.005   # spiral ring spacing (along the wider axis)
+BCR_SEARCH_MAX_RADIUS_X_M: float = 0.08 # outermost spiral ring, x extent (set wider to sweep more in x)
+BCR_SEARCH_MAX_RADIUS_Y_M: float = 0.02 # outermost spiral ring, y extent
 BCR_SEARCH_ANGLES: int = 6              # waypoints per ring
 BCR_SEARCH_MOVE_S: float = 0.8          # travel time between spiral waypoints
 BCR_SEARCH_ROLL_DEG: float = 5.0        # roll tilt applied at each waypoint (alternating +/-); 0 disables
@@ -174,7 +201,7 @@ BLOW_OFF_ID: int = 5089
 # Physical suction tube length from EE origin to cup tip (m).
 SUCTION_LENGTH_M: float = 0.25
 # Height the cup tip hovers above a target before activating suction (m).
-HOVER_HEIGHT_M: float = 0.10
+HOVER_HEIGHT_M: float = 0.15
 
 # ---------------------------------------------------------------------------
 # Descent (pick) — descend until vacuum seal / contact, like suction_grasp.py
@@ -224,7 +251,7 @@ JITTER_RAMP_S: float = 0.5
 # ---------------------------------------------------------------------------
 # Contact detection (wrist wrench, via grasp_box/read_force.py)
 # ---------------------------------------------------------------------------
-FORCE_CONTACT_THRESHOLD_N: float = 5.0
+FORCE_CONTACT_THRESHOLD_N: float = 8.0
 FORCE_HARD_LIMIT_N: float = 20.0          # pick(): empty cup, low baseline noise
 FORCE_HARD_LIMIT_PLACE_N: float = 10.0    # place(): cup carrying battery — kept
                                           # tight to protect the battery from
@@ -233,6 +260,27 @@ FORCE_HARD_LIMIT_PLACE_N: float = 10.0    # place(): cup carrying battery — ke
                                           # baseline is bad — investigate via
                                           # the diagnostic logs in place().
 VACUUM_SEAL_TIMEOUT_S: float = 5.0  # wait for seal after contact before failing (DI0 takes ~3-4s to trigger)
+# After the approach halts on contact, back the cup off this far BEFORE turning
+# suction on, so the vacuum pulls the cup onto the part to seal instead of the
+# arm crushing it in. Without this, the contact press force + vacuum preload
+# stack above FORCE_HARD_LIMIT_N and the seal wait aborts on a "hard push" the
+# arm isn't actually generating. Keep small — too large and the cup lip lifts
+# clear of the surface and never seals. 0 disables. Tune on the robot.
+SEAL_PRELIFT_M: float = 0.001
+
+# ---------------------------------------------------------------------------
+# Failure recovery
+# ---------------------------------------------------------------------------
+# When True, a failed phase (a pick that ends in force_limit / max_descent /
+# vacuum_timeout) is retried instead of aborting the run. The arm lifts back to
+# transport z at the start of each pick attempt, so a retry re-approaches from
+# above rather than re-pressing in place. The sequence stops only on a software
+# E-Stop or Ctrl-C. Set False for the old behaviour (a failure aborts the run).
+RETRY_FAILED_PHASE: bool = True
+# Pause between a failed attempt and the retry — gives the operator a moment to
+# react / fix the part, and a window to edit thresholds in config.py (each
+# attempt reloads config). Read live, so it honours edits between attempts.
+PHASE_RETRY_DELAY_S: float = 2.0
 
 # ---------------------------------------------------------------------------
 # Gross motion
@@ -299,8 +347,8 @@ TAUGHT_POSES: dict[str, tuple[float, ...]] = {
     "CASE_PLACE_R": (0.776267,  0.104816,  0.7309, -3.141531,  0.000216,  1.919917),
     "BAT_SRC_1":    (0.688931,  0.389726,  0.8160, -3.141483,  0.000227,  1.919921),
     "BAT_SLOT_1":   (0.763274, -0.034724,  0.7421,  3.141523,  0.000298,  1.919760),
-    "BAT_SRC_2":    (0.688875,  0.529836,  0.8160,  3.141340, -0.000154,  1.919955),
-    "BAT_SLOT_2":   (0.763807,  0.106673,  0.7421,  3.141363,  0.000238,  1.920136),
+    "BAT_SRC_2":    (0.688875,  0.539836,  0.8160,  3.141340, -0.000154,  1.919955),
+    "BAT_SLOT_2":   (0.763807,  0.116673,  0.7421,  3.141363,  0.000238,  1.920136),
 }
 
 # ---------------------------------------------------------------------------

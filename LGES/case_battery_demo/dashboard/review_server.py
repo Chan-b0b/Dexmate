@@ -5,7 +5,7 @@ server.py polls a single live spool; this serves random access over the many
 them before they become VLA training data:
 
   * gallery  GET /            — every take as a card (thumb, instruction, frames,
-                                duration, dropped-frame badge, good/bad chip)
+                                duration, dropped-frame badge, success/fail chip)
   * player   GET /take/<name> — scrub one take frame-by-frame with RGB + colorized
                                 depth + synced wrench / EE / joints / suction and
                                 whole-episode timeline charts with a playhead
@@ -45,19 +45,57 @@ _NAME_RE = re.compile(r"^[A-Za-z0-9._-]+$")   # take dir names; rejects path tra
 
 
 # ---- take discovery / disk helpers ----------------------------------------
+# The recorder groups takes by task: <root>/<phase|manual>/<take>/. Take names
+# stay globally unique (timestamp + ep counter), so they remain the identifier
+# everywhere (URLs, ratings sidecar, depth cache, trash) and only the on-disk
+# location gains a task level. Legacy flat takes (<root>/<take>/) still work.
 
-def _is_take(root: str, name: str) -> bool:
-    if not _NAME_RE.match(name) or name in (TRASH, ".pending"):
-        return False
-    return os.path.isfile(os.path.join(root, name, "meta.json"))
+def _ok_name(name: str) -> bool:
+    return bool(_NAME_RE.match(name)) and name not in (TRASH, ".pending")
 
 
-def _list_takes(root: str) -> list[str]:
+def _discover(root: str) -> dict[str, str]:
+    """Map take name -> task subfolder ('' for legacy flat takes)."""
+    out: dict[str, str] = {}
     try:
-        names = os.listdir(root)
+        entries = os.listdir(root)
     except OSError:
-        return []
-    return sorted((n for n in names if _is_take(root, n)), reverse=True)
+        return out
+    for e in entries:
+        if not _ok_name(e):
+            continue
+        p = os.path.join(root, e)
+        if os.path.isfile(os.path.join(p, "meta.json")):
+            out[e] = ""          # legacy flat take
+        elif os.path.isdir(p):
+            try:
+                subs = os.listdir(p)
+            except OSError:
+                continue
+            for n in subs:
+                if _ok_name(n) and os.path.isfile(os.path.join(p, n, "meta.json")):
+                    out[n] = e
+    return out
+
+
+def _find_take(root: str, name: str) -> str | None:
+    """Return the take's directory (flat or one task-folder deep), or None."""
+    if not _ok_name(name):
+        return None
+    p = os.path.join(root, name)
+    if os.path.isfile(os.path.join(p, "meta.json")):
+        return p
+    try:
+        entries = os.listdir(root)
+    except OSError:
+        return None
+    for task in entries:
+        if not _ok_name(task):
+            continue
+        p = os.path.join(root, task, name)
+        if os.path.isfile(os.path.join(p, "meta.json")):
+            return p
+    return None
 
 
 def _read_json(path: str) -> dict:
@@ -87,23 +125,39 @@ def _quat_to_rpy(q) -> list[float]:
     return [float(v) for v in rpy]
 
 
-def _take_summary(root: str, name: str, ratings: dict) -> dict:
-    meta = _read_json(os.path.join(root, name, "meta.json"))
+# Curation is a single success/fail label per take. The recorder's meta.json
+# success flag is the starting point (null/missing counts as success); a click
+# in the player writes an override to the sidecar — take files are never
+# mutated. Legacy good/bad sidecar entries map to success/fail.
+_LEGACY_RATING = {"good": "success", "bad": "fail"}
+
+
+def _label(meta: dict, ratings: dict, name: str) -> str:
+    override = ratings.get(name, {}).get("rating", "")
+    override = _LEGACY_RATING.get(override, override)
+    if override in ("success", "fail"):
+        return override
+    return "fail" if meta.get("success") is False else "success"
+
+
+def _take_summary(tdir: str, name: str, task: str, ratings: dict) -> dict:
+    meta = _read_json(os.path.join(tdir, "meta.json"))
     return {
         "name": name,
+        "task": task,
         "created": meta.get("created", ""),
         "instruction": meta.get("instruction", ""),
         "frames": meta.get("frames", 0),
         "duration_s": meta.get("duration_s", 0.0),
         "dropped_frames": meta.get("dropped_frames", 0),
-        "rating": ratings.get(name, {}).get("rating", ""),
+        "label": _label(meta, ratings, name),
     }
 
 
-def _load_states(root: str, name: str) -> list[dict]:
+def _load_states(tdir: str) -> list[dict]:
     """Parse states.jsonl, adding ee.rpy (deg-free) for display."""
     out = []
-    path = os.path.join(root, name, "states.jsonl")
+    path = os.path.join(tdir, "states.jsonl")
     try:
         with open(path) as f:
             for line in f:
@@ -123,7 +177,7 @@ def _load_states(root: str, name: str) -> list[dict]:
 
 # ---- depth colorizing (cached) ---------------------------------------------
 
-def _colorize_depth(root: str, name: str, idx: int) -> bytes | None:
+def _colorize_depth(tdir: str, name: str, idx: int) -> bytes | None:
     cache = os.path.join(CACHE_DIR, name, f"{idx:06d}.jpg")
     if os.path.isfile(cache):
         try:
@@ -131,7 +185,7 @@ def _colorize_depth(root: str, name: str, idx: int) -> bytes | None:
                 return f.read()
         except OSError:
             pass
-    src = os.path.join(root, name, "head_depth", f"{idx:06d}.png")
+    src = os.path.join(tdir, "head_depth", f"{idx:06d}.png")
     d = cv2.imread(src, cv2.IMREAD_UNCHANGED)
     if d is None:
         return None
@@ -186,6 +240,8 @@ _CSS = """
   .btn.good { border-color:var(--good); color:var(--good); }
   .btn.bad  { border-color:var(--bad);  color:var(--bad); }
   .btn.on   { background:var(--accent); border-color:var(--accent); color:#0d1117; }
+  .btn.good.on { background:var(--good); border-color:var(--good); color:#0d1117; }
+  .btn.bad.on  { background:var(--bad);  border-color:var(--bad);  color:#0d1117; }
 """
 
 GALLERY_HTML = """<!DOCTYPE html>
@@ -207,20 +263,23 @@ GALLERY_HTML = """<!DOCTYPE html>
 <div class="wrap">
   <div class="filters">
     <button class="btn on" data-f="all">All</button>
-    <button class="btn" data-f="good">Good</button>
-    <button class="btn" data-f="bad">Bad</button>
-    <button class="btn" data-f="unrated">Unrated</button>
+    <button class="btn" data-f="success">Success</button>
+    <button class="btn" data-f="fail">Fail</button>
+    <select id="taskf" style="background:#0d1117;color:var(--txt);border:1px solid var(--line);
+            border-radius:6px;padding:7px 10px;font:13px ui-monospace,Menlo,Consolas,monospace;">
+      <option value="">all tasks</option>
+    </select>
   </div>
   <div class="grid" id="grid"></div>
 </div>
 <script>
 const $ = id => document.getElementById(id);
-let takes = [], filter = "all";
+let takes = [], filter = "all", taskFilter = "";
 function esc(s){ return String(s).replace(/[<>&]/g,c=>({'<':'&lt;','>':'&gt;','&':'&amp;'}[c])); }
 function matches(t){
+  if(taskFilter && (t.task||"") !== taskFilter) return false;
   if(filter==="all") return true;
-  if(filter==="unrated") return !t.rating;
-  return t.rating===filter;
+  return t.label===filter;
 }
 function render(){
   const g = $("grid");
@@ -228,13 +287,14 @@ function render(){
   if(!shown.length){ g.innerHTML = "<div class='empty'>no takes</div>"; return; }
   g.innerHTML = shown.map(t => {
     const drop = t.dropped_frames>0 ? `<span class="chip warn">⚠ ${t.dropped_frames} dropped</span>` : "";
-    const rate = t.rating ? `<span class="chip ${t.rating}">${t.rating}</span>` : `<span class="chip">unrated</span>`;
+    const task = t.task ? `<span class="chip">${esc(t.task)}</span>` : "";
+    const label = `<span class="chip ${t.label==="fail"?"bad":"good"}">${t.label}</span>`;
     return `<a class="card take" href="/take/${encodeURIComponent(t.name)}">
       <img loading="lazy" src="/thumb/${encodeURIComponent(t.name)}" alt=""/>
       <div class="meta">
         <div class="name">${esc(t.name)}</div>
         <div class="instr">${esc(t.instruction)}</div>
-        <div class="nums">${t.frames} frames · ${Number(t.duration_s).toFixed(1)}s ${rate} ${drop}</div>
+        <div class="nums">${t.frames} frames · ${Number(t.duration_s).toFixed(1)}s ${task} ${label} ${drop}</div>
       </div></a>`;
   }).join("");
 }
@@ -242,8 +302,13 @@ async function load(){
   const r = await fetch("/api/takes",{cache:"no-store"});
   takes = await r.json();
   $("sub").textContent = takes.length + " takes";
+  const tasks = [...new Set(takes.map(t => t.task||""))].filter(Boolean).sort();
+  $("taskf").innerHTML = '<option value="">all tasks</option>'
+    + tasks.map(t => `<option value="${esc(t)}">${esc(t)}</option>`).join("");
+  $("taskf").value = taskFilter;
   render();
 }
+$("taskf").addEventListener("change", () => { taskFilter = $("taskf").value; render(); });
 for(const b of document.querySelectorAll(".filters .btn")){
   b.addEventListener("click", () => {
     filter = b.dataset.f;
@@ -251,7 +316,13 @@ for(const b of document.querySelectorAll(".filters .btn")){
     render();
   });
 }
+// Re-fetch labels whenever the gallery is shown again — coming back from the
+// player (incl. browser Back / bfcache restore) or refocusing the tab — so a
+// take just tagged fail no longer shows its stale success label. The selected
+// filters live in JS state, so they survive the refresh.
 load();
+window.addEventListener("pageshow", load);
+document.addEventListener("visibilitychange", () => { if(!document.hidden) load(); });
 </script></body></html>
 """
 
@@ -304,9 +375,8 @@ PLAYER_HTML = """<!DOCTYPE html>
   <h1 id="name">…</h1>
   <span class="sub" id="instr"></span>
   <span style="margin-left:auto; display:flex; gap:8px;">
-    <button class="btn good" id="goodbtn">Good</button>
-    <button class="btn bad" id="badbtn">Bad</button>
-    <button class="btn" id="unratebtn">Unrate</button>
+    <button class="btn good" id="goodbtn">Success</button>
+    <button class="btn bad" id="badbtn">Fail</button>
     <button class="btn bad" id="delbtn">Delete</button>
   </span>
 </header>
@@ -541,8 +611,15 @@ function step(){
 function play(){ if(playing){ stop(); return; } if(cur>=frames.length-1) show(0); playing=true; $("play").textContent="⏸"; $("play").classList.add("on"); step(); }
 
 // ---- curation -------------------------------------------------------------
+function setLabel(l){
+  $("goodbtn").classList.toggle("on", l==="success");
+  $("badbtn").classList.toggle("on", l==="fail");
+}
 async function rate(action){
-  await fetch(`/api/take/${encodeURIComponent(NAME)}?action=${action}`,{method:"POST",cache:"no-store"});
+  const res = await fetch(`/api/take/${encodeURIComponent(NAME)}?action=${action}`,{method:"POST",cache:"no-store"});
+  if(!res.ok){ alert("labeling failed ("+res.status+")"); return; }
+  const d = await res.json().catch(()=>({}));
+  setLabel(d.label||"success");
 }
 async function del(){
   if(!confirm(`Move ${NAME} to .trash/ ?`)) return;
@@ -558,6 +635,7 @@ async function load(){
   frames = d.frames || [];
   $("name").textContent = d.meta.name || NAME;
   $("instr").textContent = d.meta.instruction || "";
+  setLabel(d.label||"success");
   $("depthcap").textContent = `depth ${_PREVIEW_LABEL} (turbo, near→far)`;
   if(!frames.length){ $("tinfo").textContent="no frames"; return; }
   t0 = frames[0].t;
@@ -590,9 +668,8 @@ $("suctionstrip").addEventListener("click", e=>{
   const frac=(e.clientX-rect.left-STRIP_PAD)/Math.max(1, rect.width-2*STRIP_PAD);
   stop(); show(Math.round(Math.max(0,Math.min(1,frac))*(frames.length-1)));
 });
-$("goodbtn").addEventListener("click", ()=>rate("good"));
-$("badbtn").addEventListener("click", ()=>rate("bad"));
-$("unratebtn").addEventListener("click", ()=>rate("unrate"));
+$("goodbtn").addEventListener("click", ()=>rate("success"));
+$("badbtn").addEventListener("click", ()=>rate("fail"));
 $("delbtn").addEventListener("click", del);
 document.addEventListener("keydown", e=>{
   if(e.target.tagName==="SELECT") return;
@@ -635,22 +712,24 @@ class _Handler(BaseHTTPRequestHandler):
 
     # -- parse  /thing/<name>/<idx>  with name validated against disk --------
     def _take_arg(self, prefix):
+        """Return (take_dir, name, idx); (None, None, None) if unknown."""
         path = urlparse(self.path).path
         rest = path[len(prefix):]
         parts = [p for p in rest.split("/") if p != ""]
         if not parts:
-            return None, None
+            return None, None, None
         from urllib.parse import unquote
         name = unquote(parts[0])
-        if not _is_take(self.root, name):
-            return None, None
+        tdir = _find_take(self.root, name)
+        if tdir is None:
+            return None, None, None
         idx = None
         if len(parts) > 1:
             try:
                 idx = int(parts[1].split(".")[0])
             except ValueError:
                 idx = None
-        return name, idx
+        return tdir, name, idx
 
     def do_GET(self):  # noqa: N802
         path = urlparse(self.path).path
@@ -662,35 +741,40 @@ class _Handler(BaseHTTPRequestHandler):
                        PLAYER_HTML.replace("__CSS__", _CSS).encode("utf-8"))
         elif path == "/api/takes":
             ratings = _ratings(self.root)
-            self._send_json([_take_summary(self.root, n, ratings) for n in _list_takes(self.root)])
+            takes = _discover(self.root)
+            self._send_json([
+                _take_summary(os.path.join(self.root, task, name), name, task, ratings)
+                for name, task in sorted(takes.items(), reverse=True)
+            ])
         elif path.startswith("/api/take/"):
-            name, _ = self._take_arg("/api/take/")
-            if name is None:
+            tdir, name, _ = self._take_arg("/api/take/")
+            if tdir is None:
                 self._send_json({"error": "unknown take"}, 404)
                 return
+            meta = _read_json(os.path.join(tdir, "meta.json"))
             self._send_json({
-                "meta": _read_json(os.path.join(self.root, name, "meta.json")),
-                "frames": _load_states(self.root, name),
-                "rating": _ratings(self.root).get(name, {}).get("rating", ""),
+                "meta": meta,
+                "frames": _load_states(tdir),
+                "label": _label(meta, _ratings(self.root), name),
             })
         elif path.startswith("/thumb/"):
-            name, _ = self._take_arg("/thumb/")
-            if name is None:
+            tdir, _, _ = self._take_arg("/thumb/")
+            if tdir is None:
                 self._send(404, "text/plain", b"not found", no_store=True)
                 return
-            self._send_file(os.path.join(self.root, name, "head_rgb", "000000.jpg"), "image/jpeg")
+            self._send_file(os.path.join(tdir, "head_rgb", "000000.jpg"), "image/jpeg")
         elif path.startswith("/rgb/"):
-            name, idx = self._take_arg("/rgb/")
-            if name is None or idx is None:
+            tdir, _, idx = self._take_arg("/rgb/")
+            if tdir is None or idx is None:
                 self._send(404, "text/plain", b"not found", no_store=True)
                 return
-            self._send_file(os.path.join(self.root, name, "head_rgb", f"{idx:06d}.jpg"), "image/jpeg")
+            self._send_file(os.path.join(tdir, "head_rgb", f"{idx:06d}.jpg"), "image/jpeg")
         elif path.startswith("/depth/"):
-            name, idx = self._take_arg("/depth/")
-            if name is None or idx is None:
+            tdir, name, idx = self._take_arg("/depth/")
+            if tdir is None or idx is None:
                 self._send(404, "text/plain", b"not found", no_store=True)
                 return
-            body = _colorize_depth(self.root, name, idx)
+            body = _colorize_depth(tdir, name, idx)
             if body is None:
                 self._send(404, "text/plain", b"no depth", no_store=True)
                 return
@@ -703,25 +787,21 @@ class _Handler(BaseHTTPRequestHandler):
         if not parsed.path.startswith("/api/take/"):
             self._send(404, "text/plain", b"not found", no_store=True)
             return
-        name, _ = self._take_arg("/api/take/")
+        tdir, name, _ = self._take_arg("/api/take/")
         action = (parse_qs(parsed.query).get("action", [""])[0]).strip()
-        if name is None:
+        if tdir is None:
             self._send_json({"error": "unknown take"}, 404)
             return
-        if action in ("good", "bad"):
+        if action in ("success", "fail"):
             r = _ratings(self.root)
             r[name] = {"rating": action, "ts": time.time()}
             _write_ratings(self.root, r)
-            self._send_json({"ok": True, "rating": action})
-        elif action == "unrate":
-            r = _ratings(self.root)
-            r.pop(name, None)
-            _write_ratings(self.root, r)
-            self._send_json({"ok": True, "rating": ""})
+            self._send_json({"ok": True, "label": action})
         elif action == "delete":
+            # Trash is flat regardless of task folder — names are unique.
             trash = os.path.join(self.root, TRASH)
             os.makedirs(trash, exist_ok=True)
-            os.replace(os.path.join(self.root, name), os.path.join(trash, name))
+            os.replace(tdir, os.path.join(trash, name))
             r = _ratings(self.root)
             r.pop(name, None)
             _write_ratings(self.root, r)

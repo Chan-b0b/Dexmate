@@ -30,6 +30,11 @@ from .. import config as cfg
 
 DEFAULT_SPOOL_DIR = "/tmp/cns_dashboard"
 
+# If the demo's scan lock was touched within this window, the image feed yields
+# the reader. Must exceed the scanner's per-trigger period (~BCR_SCAN_TIMEOUT_S
+# + 0.05s) so a still-scanning demo never looks idle between triggers.
+SCAN_LOCK_FRESH_S = 2.5
+
 
 def _atomic_write(path: str, data: bytes) -> None:
     tmp = f"{path}.tmp"
@@ -103,6 +108,10 @@ class BarcodeImagePublisher:
         self._period = 1.0 / max(hz, 0.1)
         self._img_path = os.path.join(spool_dir, "barcode.jpg")
         self._json_path = os.path.join(spool_dir, "barcode.json")
+        # The demo's scanner touches this while actively triggering reads; the
+        # Cognex serves one client at a time, so we skip IMAGE.SEND while it is
+        # fresh and let the demo have the reader (panel keeps its last frame).
+        self._lock_path = os.path.join(spool_dir, "bcr_scanning.lock")
         self._thread: threading.Thread | None = None
         self._stop = threading.Event()
         self._seq = 0
@@ -131,13 +140,38 @@ class BarcodeImagePublisher:
     # -- worker ------------------------------------------------------------
 
     def _run(self) -> None:
+        # Event-driven: the reader's image only changes when a read is taken, so
+        # there's no point polling IMAGE.SEND continuously (it also fights the
+        # demo's triggers — one client at a time). Instead we pull a single
+        # frame at startup, then exactly once each time the demo's scan finishes
+        # (the scan lock goes from fresh -> stale). Between scans the reader is
+        # left alone. We poll the lock file (cheap, local) — not the reader.
+        poll = min(self._period, 0.5)
+        was_scanning = self._scan_in_progress()
+        if not was_scanning:
+            self._safe_tick()  # one frame up front so the panel isn't blank
         while not self._stop.is_set():
-            t0 = time.time()
-            try:
-                self._tick()
-            except Exception as e:  # noqa: BLE001 - never die on a bad read
-                self._write_meta(False, str(e))
-            self._stop.wait(max(0.0, self._period - (time.time() - t0)))
+            scanning = self._scan_in_progress()
+            if was_scanning and not scanning:
+                # Scan just completed: the reader is free and still holds the
+                # frame it captured during the scan — grab it once.
+                self._safe_tick()
+            was_scanning = scanning
+            self._stop.wait(poll)
+
+    def _scan_in_progress(self) -> bool:
+        """True if the demo's scanner is actively holding the reader."""
+        try:
+            age = time.time() - os.path.getmtime(self._lock_path)
+        except OSError:
+            return False
+        return age < SCAN_LOCK_FRESH_S
+
+    def _safe_tick(self) -> None:
+        try:
+            self._tick()
+        except Exception as e:  # noqa: BLE001 - never die on a bad read
+            self._write_meta(False, str(e))
 
     def _tick(self) -> None:
         jpg = pull_image(self._host, self._port)
@@ -163,7 +197,9 @@ def main() -> None:
                         help="spool dir to write barcode.jpg + barcode.json into")
     parser.add_argument("--host", default=cfg.BCR_HOST, help="reader IP")
     parser.add_argument("--port", type=int, default=cfg.BCR_PORT, help="reader telnet/DMCC port")
-    parser.add_argument("--hz", type=float, default=1.0, help="poll rate (default: 1 Hz)")
+    parser.add_argument("--hz", type=float, default=1.0,
+                        help="scan-lock poll rate (default: 1 Hz; capped at 2 Hz internally). "
+                             "Images are pulled only when a demo scan finishes, not on this cadence.")
     args = parser.parse_args()
 
     pub = BarcodeImagePublisher(spool_dir=os.path.abspath(args.spool),

@@ -78,24 +78,28 @@ def _rpy_to_matrix(roll: float, pitch: float, yaw: float) -> np.ndarray:
     return Rotation.from_euler("xyz", [roll, pitch, yaw]).as_matrix()
 
 
-def _spiral_offsets(ring_step: float, max_radius: float, angles: int) -> list[tuple[float, float]]:
+def _spiral_offsets(ring_step: float, max_radius_x: float, max_radius_y: float,
+                    angles: int) -> list[tuple[float, float]]:
     """Concentric-ring spiral (dx, dy) offsets, innermost ring first.
 
-    Rings sit at ``ring_step, 2*ring_step, ... <= max_radius``; each ring is
+    Rings expand on nested ellipses out to ``max_radius_x`` in x and
+    ``max_radius_y`` in y (pass them equal for a circle). The ring count is set
+    by the wider axis so its rings stay ``ring_step`` apart; each ring is
     sampled at ``angles`` evenly-spaced bearings (the first bearing of each ring
     is rotated half a step so successive rings don't stack their waypoints on
     the same spokes). Pure function — no robot state — so it is unit-testable.
     """
-    if ring_step <= 0 or max_radius <= 0 or angles < 1:
+    if ring_step <= 0 or max_radius_x <= 0 or max_radius_y <= 0 or angles < 1:
         return []
     offsets: list[tuple[float, float]] = []
-    n_rings = int(max_radius / ring_step)
+    n_rings = int(max(max_radius_x, max_radius_y) / ring_step)
     for k in range(1, n_rings + 1):
-        r = k * ring_step
-        phase = (k - 1) * (np.pi / angles)  # stagger rings
+        f = k / n_rings                       # fraction of the full extent
+        rx, ry = f * max_radius_x, f * max_radius_y
+        phase = (k - 1) * (np.pi / angles)    # stagger rings
         for i in range(angles):
             theta = phase + 2.0 * np.pi * i / angles
-            offsets.append((float(r * np.cos(theta)), float(r * np.sin(theta))))
+            offsets.append((float(rx * np.cos(theta)), float(ry * np.sin(theta))))
     return offsets
 
 
@@ -124,16 +128,6 @@ def _ease(t: float, profile: str = "quintic") -> float:
         return t * (2.0 - t)
     # default: quintic
     return t * t * t * (10.0 + t * (-15.0 + 6.0 * t))
-
-
-def _shortest_rpy_delta(a: np.ndarray, b: np.ndarray) -> np.ndarray:
-    """Component-wise shortest angular delta from a to b, each in (-pi, pi].
-
-    Used by the Cartesian-interpolated travel so a small yaw change doesn't
-    accidentally interpolate the long way around the circle.
-    """
-    d = np.asarray(b, dtype=float) - np.asarray(a, dtype=float)
-    return (d + np.pi) % (2.0 * np.pi) - np.pi
 
 
 # ---------------------------------------------------------------------------
@@ -427,7 +421,7 @@ class ArmMover:
         """Interpolate the EE pose linearly in Cartesian space over *duration*.
 
         Each substep advances the commanded EE pose along a straight line
-        (with shortest-angle slerp on rpy) using a smoothstep time profile,
+        (with geodesic slerp on orientation) using a smoothstep time profile,
         then solves IK warm-started from the previous solution. This avoids
         the EE arcs / elbow swings that joint-space interpolation between two
         IK solutions can produce when the start and end joints differ by a
@@ -437,7 +431,11 @@ class ArmMover:
         start_pos, start_rpy = self.current_ee_pose()
         target_pos = np.asarray(target_pos, dtype=float)
         target_rpy = np.asarray(target_rpy, dtype=float)
-        rpy_delta = _shortest_rpy_delta(start_rpy, target_rpy)
+        # Geodesic orientation delta in rotation space: component-wise Euler
+        # interpolation breaks when start/target sit in different gimbal
+        # representations of nearby orientations (sweeps the wrist ~180°).
+        start_rot = Rotation.from_euler("xyz", start_rpy)
+        delta_rotvec = (start_rot.inv() * Rotation.from_euler("xyz", target_rpy)).as_rotvec()
 
         dt = float(getattr(cfg, "EE_TRAVEL_DT_S", cfg.CONTROL_DT))
         n_steps = max(1, int(round(duration / dt)))
@@ -451,7 +449,7 @@ class ArmMover:
         for step in range(1, n_steps + 1):
             alpha = _ease(step / n_steps, profile)
             step_pos = start_pos + alpha * (target_pos - start_pos)
-            step_rpy = start_rpy + alpha * rpy_delta
+            step_rpy = (start_rot * Rotation.from_rotvec(alpha * delta_rotvec)).as_euler("xyz")
             q_step, ok = self._solve_ik(configuration, step_pos, step_rpy)
             if not ok:
                 ok_all = False
@@ -579,18 +577,29 @@ class ArmMover:
         finally:
             self._posture_task.set_target(prev_posture)
 
-    def lift(self, z: float | None = None) -> None:
-        """Raise the EE straight up to *z*, holding x, y and orientation fixed.
+    def lift(self, z: float | None = None, by: float | None = None) -> None:
+        """Raise the EE straight up, holding x, y and orientation fixed.
+
+        Pass ``z`` for an absolute target z, or ``by`` for a rise relative to
+        the live z. Prefer ``by`` when the arm may still be moving (e.g. right
+        after a contact halt): the rise is computed from the *same* single
+        position read the move starts from, so a still-settling arm can't make
+        the executed rise differ from the requested amount (computing an
+        absolute target from an earlier read and passing it here would add the
+        settle drift on top).
 
         Uses the same smoothstep position profile as the rest of the EE
         travel (see _smooth_z_to) so velocity ramps in and out instead of
         stepping at a constant rate.
         """
-        z = cfg.SAFE_TRANSPORT_Z if z is None else z
-        if z is None:
-            raise ValueError("SAFE_TRANSPORT_Z is not set — teach it before running")
         cur_pos, cur_rpy = self.current_ee_pose()
-        target_z = float(z)
+        if by is not None:
+            target_z = float(cur_pos[2]) + float(by)
+        else:
+            z = cfg.SAFE_TRANSPORT_Z if z is None else z
+            if z is None:
+                raise ValueError("SAFE_TRANSPORT_Z is not set — teach it before running")
+            target_z = float(z)
         logger.info("[Mover] lift from z={:.3f} to z={:.3f}", cur_pos[2], target_z)
         if target_z <= cur_pos[2] + 1e-4:
             return
@@ -742,30 +751,44 @@ class SuctionMover(ArmMover):
             code = self._scan_descend_and_search(pose, scanner)
             gate_ran = True
 
-        suction_io.suction_on()
+        # (b) Decomposed grab: descend with suction OFF until the cup touches
+        # the part (approach_to_contact), THEN seal_at_contact backs the cup off
+        # a few mm, turns suction on, and waits for the vacuum to seal. The pump
+        # engages only at the part — and the demo now uses the same two
+        # primitives the micro-task data collector loops, so they can't drift.
         vac = suction_io.VacuumMonitor()
         vac.start()
-        tare_force(cfg.ARM_SIDE, self._robot, rotation=self._ee_rotation())  # hands free at hover
+        # Tare hands-free before contact (suction still off, nothing grabbed) so
+        # the approach's force-contact detection reads from ~0 N.
+        tare_force(cfg.ARM_SIDE, self._robot, rotation=self._ee_rotation())
 
         # Rollback path: when the gate is disabled but scanning was requested,
-        # fall back to the old behavior — scan during the seal descent and read
-        # the result after. A no-read here is NOT treated as a search-exhausted
-        # divert (scan_gated stays False), so the caller places normally.
+        # fall back to the old behavior — scan during the approach descent and
+        # read the result after. A no-read here is NOT treated as a
+        # search-exhausted divert (scan_gated stays False), so the caller places
+        # normally.
         old_scan = scanner is not None and scan_gate and not gate_ran
 
         # After the gate the arm sits at the scan floor (~1cm above contact), so
-        # seed the descent ramp from the live pose instead of the full hover —
+        # seed the approach ramp from the live pose instead of the full hover —
         # otherwise the commanded ramp would first drive the arm back up to
         # hover before coming down. The scanner already ran, so no callback.
-        seal_start = self._current_ee_pos() if gate_ran else hover_pos
+        approach_start = self._current_ee_pos() if gate_ran else hover_pos
         if old_scan:
-            seal_callback = scanner.start
+            approach_callback = scanner.start
         elif gate_ran:
-            seal_callback = None
+            approach_callback = None
         else:
-            seal_callback = near_target_callback
-        result = self._descent_loop(seal_start, pose.pos[2], rpy, vac,
-                                    near_target_callback=seal_callback)
+            approach_callback = near_target_callback
+        result = self.approach_to_contact(approach_start, pose.pos[2], rpy,
+                                           near_target_callback=approach_callback)
+        if result.success:
+            contact_pos = result.contact_position_base
+            # seal_at_contact owns the grab now (pre-lift, then suction on).
+            result = self.seal_at_contact(rpy, vac)
+            # Keep the approach's contact z (the seat height used for undo).
+            if contact_pos is not None:
+                result.contact_position_base = contact_pos
         if old_scan:
             scanner.stop()
             code = scanner.result()
@@ -821,7 +844,8 @@ class SuctionMover(ArmMover):
             logger.info("[BCR-gate] no read at floor — lifting to z={:.4f} and searching", search_z)
             self.lift(search_z)
             offsets = _spiral_offsets(
-                cfg.BCR_SEARCH_RING_STEP_M, cfg.BCR_SEARCH_MAX_RADIUS_M, cfg.BCR_SEARCH_ANGLES
+                cfg.BCR_SEARCH_RING_STEP_M, cfg.BCR_SEARCH_MAX_RADIUS_X_M,
+                cfg.BCR_SEARCH_MAX_RADIUS_Y_M, cfg.BCR_SEARCH_ANGLES
             )
             roll_delta = np.radians(getattr(cfg, "BCR_SEARCH_ROLL_DEG", 0.0))
             pitch_delta = np.radians(getattr(cfg, "BCR_SEARCH_PITCH_DEG", 0.0))
@@ -926,6 +950,125 @@ class SuctionMover(ArmMover):
     # ------------------------------------------------------------------
     # Descent helpers
     # ------------------------------------------------------------------
+
+    def approach_to_contact(self, start_pos, target_z: float, rpy,
+                            near_target_callback=None) -> PickResult:
+        """Descend (suction OFF) until the cup touches the part, then halt.
+
+        Step (b) of a decomposed pick: this is the *approach* only — it brings
+        the cup down to the part and stops on force contact WITHOUT grabbing.
+        The caller then calls ``seal_at_contact``, which backs off, turns
+        suction on, and waits for the seal.
+
+        Same open-loop descent ramp as ``_descent_loop`` (the commanded z marches
+        down ahead of the position-mode-lagging arm so the servo reaches the full
+        step/dt velocity; x, y pinned at the start x, y). Stops on:
+          - force > FORCE_CONTACT_THRESHOLD_N -> contact, halt, success=True
+          - force > FORCE_HARD_LIMIT_N        -> over-push, halt, success=False
+          - descended > MAX_DESCENT_M         -> never touched, success=False
+        """
+        import time
+        current_pos = np.asarray(start_pos, dtype=float).copy()
+        descended = 0.0
+        _near_fired = False
+        _scan_threshold = float(target_z) + getattr(cfg, "BCR_SCAN_Z_THRESHOLD_M", 0.05)
+        _live0 = self._current_ee_pos()
+        logger.info(
+            "[Mover] approach start: live=({:.4f}, {:.4f}, {:.4f}) -> target_z={:.4f}",
+            _live0[0], _live0[1], _live0[2], float(target_z),
+        )
+
+        def _halt() -> None:
+            """Re-command the live EE pose so the arm stops where it is."""
+            live = self._current_ee_pos()
+            hold_q, _ = self._solve_ik(self._fresh_configuration(), live, rpy)
+            cmd = self._arm_joints_from_q(hold_q)
+            self._arm.set_joint_pos(cmd)
+            self._trace("approach_halt", cmd)
+
+        while descended < cfg.MAX_DESCENT_M:
+            configuration = self._fresh_configuration()
+            step = float(np.clip((current_pos[2] - target_z) * cfg.DESCENT_KP,
+                                 cfg.DESCENT_MIN_STEP_M, cfg.DESCENT_MAX_STEP_M))
+            current_pos[2] -= step
+            descended += step
+            q_step, _ = self._solve_ik(configuration, current_pos, rpy)
+            cmd = self._arm_joints_from_q(q_step)
+            self._arm.set_joint_pos(cmd)
+            self._trace("approach", cmd)
+            time.sleep(cfg.DESCENT_DT_S)
+
+            if near_target_callback and not _near_fired and current_pos[2] <= _scan_threshold:
+                near_target_callback()
+                _near_fired = True
+
+            force = get_vertical_force(cfg.ARM_SIDE, self._robot, self._ee_rotation())
+            if force is None:
+                continue
+            if force > cfg.FORCE_HARD_LIMIT_N:
+                _halt()
+                logger.warning("[Mover] approach hard push limit {:.1f}N — aborting", force)
+                return PickResult(False, current_pos.copy(), "force_limit")
+            if force > cfg.FORCE_CONTACT_THRESHOLD_N:
+                _halt()
+                live_pos = self._current_ee_pos()
+                logger.info("[Mover] approach contact {:.1f}N at z={:.4f} — HALT",
+                            force, float(live_pos[2]))
+                return PickResult(True, live_pos, "contact")
+
+        logger.warning("[Mover] approach: max descent reached without contact")
+        return PickResult(False, None, "max_descent")
+
+    def seal_at_contact(self, rpy, vac: suction_io.VacuumMonitor) -> PickResult:
+        """Back the cup off contact, turn suction on, and wait for vacuum seal.
+
+        Step after ``approach_to_contact`` in a decomposed pick: the cup is
+        pressed on the part with suction OFF. This primitive owns the grab — it
+        first lifts ``cfg.SEAL_PRELIFT_M`` to relieve the contact press (so the
+        vacuum pulls the cup onto the part to seal rather than the arm crushing
+        it, which otherwise stacks contact + vacuum force above
+        FORCE_HARD_LIMIT_N), THEN turns suction on. It pins the arm to the live
+        pose for the whole wait so it can't drift further into the part while
+        the seal forms (mirrors ``_descent_loop``'s post-contact wait). A seal
+        with no real vacuum is treated as a failed pick — force alone is not
+        proof of seal (a leaky surface can feel solid).
+        """
+        import time
+
+        def _halt() -> None:
+            live = self._current_ee_pos()
+            hold_q, _ = self._solve_ik(self._fresh_configuration(), live, rpy)
+            self._arm.set_joint_pos(self._arm_joints_from_q(hold_q))
+
+        # Relieve the contact press before the vacuum engages. Relative lift so
+        # the rise is exactly SEAL_PRELIFT_M even though the arm may still be
+        # settling into contact (a single position read; see lift()).
+        if cfg.SEAL_PRELIFT_M and cfg.SEAL_PRELIFT_M > 0.0:
+            logger.info("[Mover] seal pre-lift +{:.0f}mm before suction", cfg.SEAL_PRELIFT_M * 1000)
+            self.lift(by=float(cfg.SEAL_PRELIFT_M))
+
+        suction_io.suction_on()
+
+        deadline = time.time() + cfg.VACUUM_SEAL_TIMEOUT_S
+        while time.time() < deadline:
+            _halt()
+            if vac.is_sealed():
+                live_pos = self._current_ee_pos()
+                logger.info("[Mover] seal confirmed at z={:.4f}m (toolA={:.4f}A)",
+                            float(live_pos[2]), vac.get_tool_current())
+                return PickResult(True, live_pos, "force+vacuum")
+            f = get_vertical_force(cfg.ARM_SIDE, self._robot, self._ee_rotation())
+            if f is not None and f > cfg.FORCE_HARD_LIMIT_N:
+                _halt()
+                logger.warning("[Mover] hard push {:.1f}N during seal wait — aborting", f)
+                return PickResult(False, self._current_ee_pos(), "force_limit")
+            time.sleep(0.05)
+
+        logger.error(
+            "[Mover] seal NOT confirmed within {:.1f}s (toolA={:.4f}A) — pick FAILED",
+            cfg.VACUUM_SEAL_TIMEOUT_S, vac.get_tool_current(),
+        )
+        return PickResult(False, self._current_ee_pos(), "vacuum_timeout")
 
     def _descent_loop(self, hover_pos, target_z: float, rpy, vac: suction_io.VacuumMonitor,
                       near_target_callback=None) -> PickResult:
@@ -1206,6 +1349,16 @@ class GripperMover(ArmMover):
     def __init__(self, robot) -> None:
         super().__init__(robot, side="right", ee_frame=cfg.GRIPPER_EE_FRAME, trace=False)
         self.gripper = RobotiqGripper(robot, side="right")
+        self.gripper.initialize()
+        
+    def initialize(self) -> bool:
+        """Reset + activate + open the gripper. Returns True on success."""
+        if not self.gripper.initialize():
+            logger.warning("[Gripper] initialization failed — gripper disabled.")
+            return False
+        self.gripper.open()
+        logger.info("[Gripper] initialized (reset + activated + opened).")
+        return True
 
     def grip_at(self, pos, rpy=None) -> bool:
         """Side-approach grasp at base-frame *pos*; return True if an object was gripped.

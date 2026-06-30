@@ -26,6 +26,7 @@ from dataclasses import dataclass, field
 
 import numpy as np
 from loguru import logger
+from scipy.spatial.transform import Rotation
 
 from . import bcr
 from . import config as cfg
@@ -155,19 +156,33 @@ def _pose(name: str) -> Pose:
     raise ValueError(f"Taught pose {name!r} must have 3 or 6 values, got {len(vals)}")
 
 
+# Equal x,y shift applied to every taught pose this run (VLA spatial
+# diversity). Set once at startup via set_episode_shift(); the operator places
+# the physical objects shifted by the same amount.
+_EPISODE_SHIFT_XY = np.zeros(2)
+
+
+def set_episode_shift(dx: float, dy: float) -> None:
+    _EPISODE_SHIFT_XY[:] = (dx, dy)
+
+
 def build_forward_moves(repeat: int = 0) -> list[Move]:
     """Build the three forward moves, offset in Z for stacking.
 
     ``repeat`` is the 0-based pass index. Each move's src and dst Z are
     shifted by ``repeat * cfg.Z_STEP_PER_REPEAT[label]`` so the source stack
     shrinks and the target stack grows across repeats. Pose objects are
-    freshly constructed here, so mutating them is safe.
+    freshly constructed here, so mutating them is safe. The run's episode
+    x,y shift is applied to every src and dst.
     """
     moves = [
         Move("case", _pose("CASE_PICK"), _pose("CASE_PLACE_R")),
         Move("battery_1", _pose("BAT_SRC_1"), _pose("BAT_SLOT_1")),
         Move("battery_2", _pose("BAT_SRC_2"), _pose("BAT_SLOT_2")),
     ]
+    for m in moves:
+        m.src.pos[:2] += _EPISODE_SHIFT_XY
+        m.dst.pos[:2] += _EPISODE_SHIFT_XY
     if repeat:
         for m in moves:
             src_dz, dst_dz = cfg.Z_STEP_PER_REPEAT.get(m.label, (0.0, 0.0))
@@ -177,10 +192,24 @@ def build_forward_moves(repeat: int = 0) -> list[Move]:
 
 
 class TaskOrchestrator:
-    def __init__(self, mover: SuctionMover, gripper: GripperMover | None = None) -> None:
+    def __init__(self, mover: SuctionMover, gripper: GripperMover | None = None,
+                 recorder=None) -> None:
         self._mover = mover
         self._gripper = gripper
+        self._recorder = recorder  # RecordController or None; auto-cuts VLA episodes
         self._done: list[Move] = []  # successfully executed moves, for undo
+
+    def _rec_begin(self, phase: str) -> None:
+        if self._recorder is not None:
+            self._recorder.episode_begin(phase)
+
+    def _rec_end(self, success: bool) -> None:
+        if self._recorder is not None:
+            self._recorder.episode_end(success)
+
+    def _rec_barcode(self, confirmed: bool) -> None:
+        if self._recorder is not None:
+            self._recorder.set_barcode_confirmed(confirmed)
 
     def _execute(self, move: Move) -> bool:
         # Reload config so edits made between moves (during --loop, or while
@@ -191,6 +220,11 @@ class TaskOrchestrator:
         importlib.reload(cfg)
         logger.info("=== Move: {} ===", move.label)
 
+        # Each move starts with the barcode unconfirmed; set True once a battery
+        # scan reads a code (below). Reset here rather than after the place so an
+        # aborted pick or a case move can't leak a stale True into the next take.
+        self._rec_barcode(False)
+
         # Forward battery picks resolve the barcode BEFORE grabbing: pick() runs
         # the scan gate (descend to a floor above contact, scan, x/y spiral
         # search on a no-read), then seals. The case move and undo moves never
@@ -198,9 +232,11 @@ class TaskOrchestrator:
         scan_this = move.label.startswith("battery") and self._gripper is not None
         scanner = bcr.BackgroundScanner() if scan_this else None
 
+        self._rec_begin(f"{move.label}_pick")
         result = self._mover.pick(move.src, scanner=scanner, scan_gate=scan_this)
 
         if not result.success:
+            self._rec_end(False)
             logger.error("[{}] pick failed (trigger={}) — aborting", move.label, result.trigger)
             return False
         # Remember the sealed z so a future undo of this same move places
@@ -209,19 +245,28 @@ class TaskOrchestrator:
             move.actual_pick_z = float(result.contact_position_base[2])
             logger.info("[{}] recorded pick z={:.4f}m for undo", move.label, move.actual_pick_z)
 
-        # Normal lift + horizontal travel to the transport pose — shared by
-        # both the suction-place and gripper-handoff branches.
+        # The pick episode ends once the object is lifted clear of the stack.
         self._mover.lift()
-        self._mover.move_to(move.dst)
+        self._rec_end(True)
 
+        # The divert decision only needs the pick result, so it is made BEFORE
+        # the transport: that way the transport frames are recorded under the
+        # episode they actually belong to (place vs hand_off).
         code = result.barcode
         if scan_this:
             _publish_barcode_read(code, bool(code) and code in cfg.TARGET_BARCODES, move.label)
+            if code is not None:
+                self._rec_barcode(True)  # destination info now known for the place
         # Divert to the right gripper when the barcode matches a target, OR when
         # the scan gate's spiral search ran and exhausted with no read at all (an
         # unreadable battery is treated like a target and quarantined). A no-read
         # without the gate (e.g. gate disabled) places normally, as before.
         divert = scan_this and (code in cfg.TARGET_BARCODES or (result.scan_gated and code is None))
+        self._rec_begin("hand_off" if divert else f"{move.label}_place")
+
+        # Horizontal travel to the transport pose — shared by both branches.
+        self._mover.move_to(move.dst)
+
         if divert:
             if code is None:
                 logger.warning("[{}] no barcode read after search — diverting to right gripper", move.label)
@@ -233,10 +278,13 @@ class TaskOrchestrator:
                 logger.info("[{}] done (placed lower-right via gripper)", move.label)
                 return True
             logger.warning("[{}] gripper handoff failed — falling back to normal place", move.label)
+            self._rec_end(False)  # no-op if the handoff already closed its episode
+            self._rec_begin(f"{move.label}_place")
         elif code is not None:
             logger.info("[{}] barcode {!r} is not a target — normal place", move.label, code)
 
         self._mover.place(move.dst)
+        self._rec_end(True)
         self._done.append(move)
         logger.info("[{}] done", move.label)
         return True
@@ -258,6 +306,8 @@ class TaskOrchestrator:
 
         suction_io.suction_off()
         time.sleep(0.3)
+        # Battery is now in the gripper — the hand_off episode is complete.
+        self._rec_end(True)
 
         steps = _parse_ee_sequence(_EE_PLACE_SEQ_PATH)
         if not steps:
@@ -288,16 +338,24 @@ class TaskOrchestrator:
             finally:
                 suction_retract_done.set()
 
+        self._rec_begin("gripper_battery_handling")
+        # REL steps build on the *commanded* pose, not the live FK readout:
+        # near roll=±180°/pitch=±90° the Euler readout can jump representation
+        # (wraparound / gimbal lock), and adding a delta to the flipped triple
+        # commands a wrist ~180° off. Deltas compose in rotation space for the
+        # same reason — Euler components don't add.
+        cmd_pos, cmd_rpy = self._gripper.current_ee_pose()
         for i, (label, vec, rpy_val, is_relative) in enumerate(steps):
             if is_relative:
-                cur_pos, cur_rpy = self._gripper.current_ee_pose()
-                pos = cur_pos + vec
-                rpy = cur_rpy + rpy_val
+                pos = cmd_pos + vec
+                rpy = (Rotation.from_euler("xyz", rpy_val)
+                       * Rotation.from_euler("xyz", cmd_rpy)).as_euler("xyz")
                 logger.info("[handoff] {} (REL) dpos={} drpy_deg={}", label,
                             np.round(vec, 4).tolist(), np.round(np.degrees(rpy_val), 1).tolist())
             else:
                 pos, rpy = vec, rpy_val
                 logger.info("[handoff] {}", label)
+            cmd_pos, cmd_rpy = pos, rpy
 
             self._gripper._move_ee_to(pos, rpy, dur)
             self._gripper._wait_until_arrived(pos, cfg.MOVE_ARRIVAL_TOL_M, cfg.MOVE_ARRIVAL_TIMEOUT_S)
@@ -319,12 +377,46 @@ class TaskOrchestrator:
         except Exception as exc:  # noqa: BLE001
             logger.warning("[handoff] could not return right arm to default: {}", exc)
 
+        self._rec_end(True)
         return True
+
+    def _execute_with_retry(self, move: Move) -> bool:
+        """Run a move, retrying on failure until it succeeds.
+
+        A move "fails" only when its pick fails — one of force_limit (cup hit a
+        hard force), max_descent (cup never touched the part) or vacuum_timeout
+        (touched but the suction never sealed). place() never reports failure.
+
+        Retrying is gated by ``cfg.RETRY_FAILED_PHASE`` (read live, since
+        ``_execute`` reloads config each attempt). The sequence stops only on a
+        software E-Stop (returns False) or Ctrl-C (KeyboardInterrupt propagates
+        out of the sleep / motion). Each retry re-runs the full pick, which lifts
+        to transport z first, so it re-approaches from above rather than pressing
+        in place. Failed attempts are still recorded as failed episodes.
+        """
+        attempt = 0
+        while True:
+            if self._mover.software_estop_active():
+                logger.error("[{}] software E-Stop active — stopping (no retry).", move.label)
+                return False
+            attempt += 1
+            if self._execute(move):
+                if attempt > 1:
+                    logger.success("[{}] recovered on attempt {}.", move.label, attempt)
+                return True
+            if not getattr(cfg, "RETRY_FAILED_PHASE", True):
+                return False  # retry disabled — propagate the failure (old behaviour)
+            delay = float(getattr(cfg, "PHASE_RETRY_DELAY_S", 2.0))
+            logger.warning(
+                "[{}] failed (attempt {}) — retrying in {:.0f}s. "
+                "Ctrl-C or E-Stop to stop.", move.label, attempt, delay,
+            )
+            time.sleep(delay)
 
     def run_forward(self, repeat: int = 0) -> bool:
         _publish_target_height(repeat)
         for move in build_forward_moves(repeat):
-            if not self._execute(move):
+            if not self._execute_with_retry(move):
                 return False
         logger.info("Forward sequence complete (repeat={}).", repeat)
         return True
@@ -354,7 +446,7 @@ class TaskOrchestrator:
                 for m in reversed(build_forward_moves(repeat=k)):
                     moves_to_undo.append(m.reversed())
         for move in moves_to_undo:
-            if not self._execute(move):
+            if not self._execute_with_retry(move):
                 return False
         # Clear so a follow-up forward run starts with a fresh history (used by
         # --loop to alternate forward/undo repeatedly).

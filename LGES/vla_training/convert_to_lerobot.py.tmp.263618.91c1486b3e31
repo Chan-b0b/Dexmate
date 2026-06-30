@@ -1,0 +1,234 @@
+#!/usr/bin/env python3
+"""Convert case_battery_demo recorded takes into a LeRobotDataset.
+
+Scope (decided 2026-06-12): suction-only left-arm sub-tasks. Actions are
+next-state EE deltas (the /tmp trace was lost to a reboot; observed deltas
+are the standard substitute). Force enters the state as the RAW 6-axis
+wrench — the tared value depends on script-side tare events the policy
+cannot reproduce at deployment.
+
+Per frame t (last frame of each take dropped — no next state):
+  observation.images.head : head RGB resized to 512x320
+  observation.state (14)  : ee pos(3) + ee quat wxyz(4, sign-continuous)
+                            + suction(1) + raw wrench fx..tz(6)
+  action (7)              : delta pos(3, base frame) + delta rot(3, rotvec
+                            of R_{t+1} R_t^T, base frame) + suction_cmd[t+1]
+  task                    : per-take instruction from meta.json
+
+Frames are stored as images, not video: lerobot's pyav decode path needs
+torchvision.io.VideoReader, removed in our torchvision 0.26, and torchcodec
+has no aarch64 build. Image mode sidesteps decoding entirely.
+
+Run with the vla_venv python:
+  /home/dexmate/vla_venv/bin/python LGES/vla_training/convert_to_lerobot.py \
+      [--recordings DIR] [--out DIR] [--val-per-task 2]
+"""
+
+import argparse
+import json
+import shutil
+from pathlib import Path
+
+import cv2
+import numpy as np
+
+VLA_DIR = Path(__file__).resolve().parent
+DEFAULT_RECORDINGS = VLA_DIR.parent / "recordings"
+DEFAULT_OUT = VLA_DIR / "datasets"
+
+SUCTION_TASKS = [
+    "case_pick",
+    "case_place",
+    "battery_1_pick",
+    "battery_1_place",
+    "battery_2_pick",
+    "battery_2_place",
+]
+
+IMG_W, IMG_H = 512, 320
+FPS = 15
+
+# Depth colorize range (mm), matching the dashboard publisher's _colorize_depth
+# and the recorded head_depth span (workspace ~300-1000 mm). Invalid (0) -> black.
+DEPTH_NEAR_MM, DEPTH_FAR_MM = 300.0, 1000.0
+
+STATE_NAMES = [
+    "ee_x", "ee_y", "ee_z",
+    "ee_qw", "ee_qx", "ee_qy", "ee_qz",
+    "suction",
+    "vacuum_sealed",   # physical DI0 seal — exteroceptive grasp feedback
+    "fx", "fy", "fz", "tx", "ty", "tz",
+]
+ACTION_NAMES = ["dx", "dy", "dz", "drx", "dry", "drz", "suction"]
+
+
+def features(with_depth: bool) -> dict:
+    f = {
+        "observation.images.head": {
+            "dtype": "image", "shape": (IMG_H, IMG_W, 3),
+            "names": ["height", "width", "channels"],
+        },
+        "observation.state": {
+            "dtype": "float32", "shape": (len(STATE_NAMES),), "names": STATE_NAMES,
+        },
+        "action": {
+            "dtype": "float32", "shape": (len(ACTION_NAMES),), "names": ACTION_NAMES,
+        },
+    }
+    if with_depth:  # colorized head depth -> SmolVLA's second camera slot
+        f["observation.images.head_depth"] = {
+            "dtype": "image", "shape": (IMG_H, IMG_W, 3),
+            "names": ["height", "width", "channels"],
+        }
+    return f
+
+
+def colorize_depth(path: Path) -> np.ndarray:
+    """16-bit-mm depth PNG -> 3-channel RGB (turbo over [NEAR,FAR], invalid=black,
+    resized to IMG_W x IMG_H). Mirrors the dashboard so train/deploy match."""
+    d = cv2.imread(str(path), cv2.IMREAD_UNCHANGED).astype(np.float32)
+    valid = d > 0
+    norm = np.clip((d - DEPTH_NEAR_MM) / (DEPTH_FAR_MM - DEPTH_NEAR_MM), 0.0, 1.0)
+    norm[~valid] = 0.0
+    color = cv2.applyColorMap((norm * 255).astype(np.uint8), cv2.COLORMAP_TURBO)  # BGR
+    color[~valid] = (0, 0, 0)
+    color = cv2.resize(color, (IMG_W, IMG_H))
+    return cv2.cvtColor(color, cv2.COLOR_BGR2RGB)
+
+
+# ── quaternion helpers (wxyz) ────────────────────────────────────────
+
+
+def quat_mul(a: np.ndarray, b: np.ndarray) -> np.ndarray:
+    w1, x1, y1, z1 = a
+    w2, x2, y2, z2 = b
+    return np.array([
+        w1 * w2 - x1 * x2 - y1 * y2 - z1 * z2,
+        w1 * x2 + x1 * w2 + y1 * z2 - z1 * y2,
+        w1 * y2 - x1 * z2 + y1 * w2 + z1 * x2,
+        w1 * z2 + x1 * y2 - y1 * x2 + z1 * w2,
+    ])
+
+
+def quat_conj(q: np.ndarray) -> np.ndarray:
+    return np.array([q[0], -q[1], -q[2], -q[3]])
+
+
+def quat_to_rotvec(q: np.ndarray) -> np.ndarray:
+    q = q / np.linalg.norm(q)
+    if q[0] < 0:  # shortest path
+        q = -q
+    v = q[1:]
+    s = np.linalg.norm(v)
+    if s < 1e-12:
+        return np.zeros(3)
+    angle = 2.0 * np.arctan2(s, q[0])
+    return v / s * angle
+
+
+# ── take loading ─────────────────────────────────────────────────────
+
+
+def load_take(take_dir: Path):
+    """Return (instruction, rgb_paths, states[N,14], actions[N-1,7]) or None."""
+    meta = json.loads((take_dir / "meta.json").read_text())
+    if meta.get("success") is not True:
+        return None
+
+    frames = [json.loads(line) for line in (take_dir / "states.jsonl").open()]
+    rgb_paths = sorted((take_dir / "head_rgb").glob("*.jpg"))
+    n = min(len(frames), len(rgb_paths))
+    if n < 2:
+        print(f"  SKIP {take_dir.name}: only {n} frames")
+        return None
+    frames, rgb_paths = frames[:n], rgb_paths[:n]
+
+    pos = np.array([f["ee"]["pos"] for f in frames], dtype=np.float64)
+    quat = np.array([f["ee"]["quat_wxyz"] for f in frames], dtype=np.float64)
+    quat /= np.linalg.norm(quat, axis=1, keepdims=True)
+    # sign continuity so the state input doesn't jump between q and -q
+    if quat[0, 0] < 0:
+        quat[0] = -quat[0]
+    for i in range(1, n):
+        if np.dot(quat[i], quat[i - 1]) < 0:
+            quat[i] = -quat[i]
+
+    suction = np.array([1.0 if f["suction_cmd"] else 0.0 for f in frames])
+    wrench = np.array(
+        [[f["wrench"][k] for k in ("fx", "fy", "fz", "tx", "ty", "tz")] for f in frames],
+        dtype=np.float64,
+    )
+
+    states = np.concatenate([pos, quat, suction[:, None], wrench], axis=1).astype(np.float32)
+
+    dpos = pos[1:] - pos[:-1]
+    drot = np.stack(
+        [quat_to_rotvec(quat_mul(quat[i + 1], quat_conj(quat[i]))) for i in range(n - 1)]
+    )
+    actions = np.concatenate([dpos, drot, suction[1:, None]], axis=1).astype(np.float32)
+
+    return meta["instruction"], rgb_paths, states, actions
+
+
+def write_episode(dataset, instruction, rgb_paths, states, actions):
+    for i in range(len(actions)):  # last frame dropped (no next state)
+        img = cv2.imread(str(rgb_paths[i]))
+        img = cv2.cvtColor(cv2.resize(img, (IMG_W, IMG_H)), cv2.COLOR_BGR2RGB)
+        dataset.add_frame({
+            "observation.images.head": img,
+            "observation.state": states[i],
+            "action": actions[i],
+            "task": instruction,
+        })
+    dataset.save_episode()
+
+
+def main():
+    ap = argparse.ArgumentParser(description=__doc__)
+    ap.add_argument("--recordings", type=Path, default=DEFAULT_RECORDINGS)
+    ap.add_argument("--out", type=Path, default=DEFAULT_OUT)
+    ap.add_argument("--tasks", nargs="+", default=SUCTION_TASKS)
+    ap.add_argument("--val-per-task", type=int, default=2,
+                    help="hold out the N most recent takes per task into <name>_val")
+    ap.add_argument("--name", default="lges_suction")
+    args = ap.parse_args()
+
+    from lerobot.datasets.lerobot_dataset import LeRobotDataset
+
+    splits = {"train": [], "val": []}
+    for task in args.tasks:
+        takes = sorted(p for p in (args.recordings / task).iterdir() if p.is_dir())
+        n_val = args.val_per_task
+        splits["train"] += takes[:-n_val] if n_val else takes
+        splits["val"] += takes[-n_val:] if n_val else []
+
+    for split, takes in splits.items():
+        if not takes:
+            continue
+        name = args.name if split == "train" else f"{args.name}_val"
+        root = args.out / name
+        if root.exists():
+            shutil.rmtree(root)
+        dataset = LeRobotDataset.create(
+            repo_id=f"local/{name}",
+            fps=FPS,
+            features=FEATURES,
+            root=root,
+            robot_type="dexmate_vega_1p",
+            use_videos=False,
+        )
+        n_frames = 0
+        for take_dir in takes:
+            loaded = load_take(take_dir)
+            if loaded is None:
+                continue
+            instruction, rgb_paths, states, actions = loaded
+            write_episode(dataset, instruction, rgb_paths, states, actions)
+            n_frames += len(actions)
+            print(f"  [{split}] {take_dir.parent.name}/{take_dir.name}: {len(actions)} frames")
+        dataset.finalize()
+        print(f"{split}: {dataset.num_episodes} episodes, {n_frames} frames -> {root}")
+
+
+if __name__ == "__main__":
+    main()

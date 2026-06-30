@@ -1,8 +1,18 @@
-"""Episode recorder for VLA data collection (manual, keyboard/dashboard driven).
+"""Episode recorder for VLA data collection.
 
-A recording "take" is one episode: you press start, the demo keeps running, you
-press stop, then decide keep/discard. Frames are streamed straight to a temp dir
-so "discard" is just a delete and there is no big RAM buffer.
+Episodes are normally cut AUTOMATICALLY: the TaskOrchestrator calls
+``episode_begin(phase)`` / ``episode_end(success)`` at each sub-task boundary
+(case_pick, case_place, battery_N_pick, battery_N_place, hand_off,
+gripper_battery_handling), so one demo pass yields one labeled take per
+sub-task with its own instruction (cfg.PHASE_INSTRUCTIONS) and success flag.
+Auto takes skip the keep/discard prompt: they are always kept, failures just
+carry ``success: false`` in meta.json (filter offline). SPACE arms/disarms
+auto cutting; ``d`` discards the most recently saved take.
+
+Manual takes (dashboard Record button → start/stop, then keep/discard) remain
+as a fallback for ad-hoc recordings outside the scripted demo. Frames are
+streamed straight to a temp dir so "discard" is just a delete and there is no
+big RAM buffer.
 
 The recorder is *fed* the DashboardPublisher's existing per-tick samples (RGB,
 depth, joints, EE pose, wrench) — it never opens its own Robot/camera. Per the
@@ -19,12 +29,13 @@ The worker also writes ``<spool>/record.json`` so the dashboard can show state.
     IDLE --start--> RECORDING --stop--> DECIDING --keep|discard--> IDLE
 DECIDING auto-keeps after DECIDE_TIMEOUT_S so an unanswered take is never lost.
 
-On-disk per take (one episode):
-    <out_dir>/<YYYYmmdd-HHMMSS_epNNNN>/
+On-disk per take (one episode), grouped by task — auto takes go under their
+phase folder, manual takes under ``manual/``:
+    <out_dir>/<phase|manual>/<YYYYmmdd-HHMMSS_epNNNN[_phase]>/
         meta.json                 # task / frame conventions / how to recover actions
         head_rgb/000000.jpg ...
         head_depth/000000.png     # 16-bit millimetres (0 = invalid), if depth present
-        states.jsonl              # one line/frame: t, joints, ee(pos+quat), wrench, suction, gripper_pos
+        states.jsonl              # one line/frame: t, joints, ee(pos+quat), wrench, suction_cmd, vacuum_sealed, barcode_confirmed, gripper_pos
 """
 
 from __future__ import annotations
@@ -101,14 +112,32 @@ class RecordController:
         # worker-thread-only state (no locks needed)
         self._state = IDLE
         self._recording = False        # read by feed() on the publisher thread
+        self._armed = True             # gates auto episode_begin only, not manual cmds
         self._cur: dict | None = None   # active take: dirs, frame index, states file, t0
         self._ep_index = 0
         self._takes_saved = 0
         self._last_saved = ""
+        self._last_final = ""          # path of last kept take, for discard_last
         self._dropped = 0
         self._decide_t0 = 0.0
         self._last_cmd_stamp = 0.0
         self._last_status = 0.0
+        self._meta_extra: dict = {}   # merged into every take's meta.json
+        self._vac = None              # VacuumMonitor for per-frame seal logging
+        self._barcode_confirmed = False  # set by the orchestrator; logged per frame
+
+    def set_meta_extra(self, extra: dict) -> None:
+        """Run-level context (e.g. the episode x,y shift) stamped into every
+        take's meta.json. Set once at startup, before any take begins."""
+        self._meta_extra = dict(extra)
+
+    def set_barcode_confirmed(self, confirmed: bool) -> None:
+        """Orchestrator-owned task state: whether the battery's barcode has been
+        read this move. Logged per frame as `barcode_confirmed` (invisible to
+        the camera, so a future policy needs it in the state). Plain bool, set
+        from the orchestrator thread and read on the recorder thread — atomic
+        under the GIL, same as _armed/_recording."""
+        self._barcode_confirmed = bool(confirmed)
 
     # -- lifecycle ---------------------------------------------------------
 
@@ -116,6 +145,15 @@ class RecordController:
         if self._thread is not None:
             return self
         os.makedirs(self._pending_dir, exist_ok=True)
+        # Persistent vacuum-seal monitor (DI0 over socketio) so each frame logs
+        # the physical seal alongside the commanded suction. Best-effort: if the
+        # suction server isn't reachable, seal is logged as null.
+        try:
+            self._vac = suction_io.VacuumMonitor()
+            self._vac.start()
+        except Exception as e:  # noqa: BLE001
+            logger.warning("[record] vacuum monitor unavailable: {} (seal -> null)", e)
+            self._vac = None
         # Ignore any stale command file left from a previous run.
         self._last_cmd_stamp = time.time()
         self._thread = threading.Thread(target=self._run, name="recorder", daemon=True)
@@ -133,6 +171,12 @@ class RecordController:
         if self._thread is not None:
             self._thread.join(timeout=3.0)
             self._thread = None
+        if self._vac is not None:
+            try:
+                self._vac.stop()
+            except Exception:  # noqa: BLE001
+                pass
+            self._vac = None
 
     def __enter__(self) -> "RecordController":
         return self.start()
@@ -156,6 +200,22 @@ class RecordController:
 
     def cmd_discard(self) -> None:
         self._cmd_q.put("discard")
+
+    def cmd_arm_toggle(self) -> None:
+        self._cmd_q.put("arm_toggle")
+
+    def cmd_discard_last(self) -> None:
+        self._cmd_q.put("discard_last")
+
+    # -- auto-episode API (called from the orchestrator thread) -------------
+
+    def episode_begin(self, phase: str) -> None:
+        """Cut a new auto episode for ``phase``. No-op while disarmed."""
+        self._cmd_q.put(("ep_begin", str(phase)))
+
+    def episode_end(self, success: bool) -> None:
+        """Finish the current auto episode; always kept, success goes to meta."""
+        self._cmd_q.put(("ep_end", bool(success)))
 
     # -- sample sink (called on the publisher thread) ----------------------
 
@@ -206,7 +266,14 @@ class RecordController:
             self._last_cmd_stamp = stamp
             self._cmd_q.put(str(d.get("cmd", "")))
 
-    def _apply(self, cmd: str) -> None:
+    def _apply(self, cmd) -> None:
+        if isinstance(cmd, tuple):
+            op, arg = cmd
+            if op == "ep_begin":
+                self._ep_begin(arg)
+            elif op == "ep_end":
+                self._ep_end(arg)
+            return
         if cmd == "toggle":
             cmd = {IDLE: "start", RECORDING: "stop", DECIDING: "keep"}.get(self._state, "")
         if cmd == "start":
@@ -217,14 +284,20 @@ class RecordController:
             self._resolve(keep=True)
         elif cmd == "discard":
             self._resolve(keep=False)
+        elif cmd == "arm_toggle":
+            self._arm_toggle()
+        elif cmd == "discard_last":
+            self._discard_last()
 
     # -- state transitions (worker thread only) ----------------------------
 
-    def _begin(self) -> None:
+    def _begin(self, phase: str | None = None) -> None:
         if self._state != IDLE:
             return
         self._ep_index += 1
         name = f"{datetime.now(_KST).strftime('%Y%m%d-%H%M%S')}_ep{self._ep_index:04d}"
+        if phase:
+            name += f"_{phase}"
         path = os.path.join(self._pending_dir, name)
         rgb_dir = os.path.join(path, "head_rgb")
         depth_dir = os.path.join(path, "head_depth")
@@ -233,12 +306,49 @@ class RecordController:
         states = open(os.path.join(path, "states.jsonl"), "w")
         self._cur = {
             "name": name, "path": path, "rgb_dir": rgb_dir, "depth_dir": depth_dir,
-            "states": states, "idx": 0, "t0": time.time(), "final": os.path.join(self.out_dir, name),
+            "states": states, "idx": 0, "t0": time.time(),
+            # Takes are grouped by task: auto takes under their phase folder,
+            # manual takes under manual/.
+            "final": os.path.join(self.out_dir, phase or "manual", name),
+            "phase": phase, "success": None,
         }
-        self._write_meta(path, name)
+        self._write_meta(path, name, phase=phase)
         self._state = RECORDING
         self._recording = True
         logger.info("[record] ● recording {}", name)
+
+    def _ep_begin(self, phase: str) -> None:
+        if not self._armed:
+            return
+        # An auto cut supersedes whatever take is open: keep it and move on.
+        if self._state in (RECORDING, DECIDING):
+            self._resolve(keep=True)
+        self._begin(phase=phase)
+
+    def _ep_end(self, success: bool) -> None:
+        # Only closes auto takes; never stomps a manual take or the IDLE state.
+        if self._state != RECORDING or self._cur is None or self._cur.get("phase") is None:
+            return
+        self._cur["success"] = success
+        self._resolve(keep=True)
+
+    def _arm_toggle(self) -> None:
+        self._armed = not self._armed
+        if not self._armed and self._state == RECORDING and self._cur is not None \
+                and self._cur.get("phase") is not None:
+            self._resolve(keep=True)  # close the in-flight auto take
+        logger.info("[record] auto episodes {}", "ARMED" if self._armed else "disarmed")
+
+    def _discard_last(self) -> None:
+        if not self._last_final or not os.path.isdir(self._last_final):
+            logger.warning("[record] no saved take to discard")
+            return
+        shutil.rmtree(self._last_final, ignore_errors=True)
+        logger.warning("[record] ✗ discarded saved take {}", os.path.basename(self._last_final))
+        self._takes_saved = max(0, self._takes_saved - 1)
+        self._last_saved = ""
+        self._last_final = ""
+        self._write_status()
 
     def _end(self) -> None:
         if self._state != RECORDING:
@@ -268,10 +378,13 @@ class RecordController:
             preview_frame = self._write_depth_preview(cur)
             self._write_meta(cur["path"], cur["name"], final=True,
                              frames=cur["idx"], duration=time.time() - cur["t0"],
-                             depth_preview_frame=preview_frame)
+                             depth_preview_frame=preview_frame,
+                             phase=cur.get("phase"), success=cur.get("success"))
+            os.makedirs(os.path.dirname(cur["final"]), exist_ok=True)
             os.replace(cur["path"], cur["final"])
             self._takes_saved += 1
             self._last_saved = cur["name"]
+            self._last_final = cur["final"]
             logger.success("[record] ✓ kept {} ({} frames) -> {}", cur["name"], cur["idx"], cur["final"])
         else:
             shutil.rmtree(cur["path"], ignore_errors=True)
@@ -306,6 +419,8 @@ class RecordController:
             "joints": state.get("joints", {}),
             "wrench": state.get("wrench"),
             "suction_cmd": suction_io.is_suction_commanded_on(),
+            "vacuum_sealed": self._seal_state(),      # physical DI0 seal (null if monitor down)
+            "barcode_confirmed": self._barcode_confirmed,  # battery barcode read this move?
             "gripper_pos": robotiq.commanded_pos(),   # 0=open..255=closed, null=never commanded
         }
         for key in ("ee", "ee_right"):  # suction/configured arm + right gripper
@@ -314,6 +429,15 @@ class RecordController:
                 row[key] = {"pos": ee["pos"], "quat_wxyz": _rpy_to_quat_wxyz(ee["rpy"])}
         cur["states"].write(json.dumps(row) + "\n")
         cur["idx"] = i + 1
+
+    def _seal_state(self) -> bool | None:
+        """Physical vacuum seal (DI0) for this frame, or None if no monitor."""
+        if self._vac is None:
+            return None
+        try:
+            return bool(self._vac.is_sealed())
+        except Exception:  # noqa: BLE001
+            return None
 
     def _write_depth_preview(self, cur: dict) -> int | None:
         """Colorize one depth frame (random, near the take's middle) as a sample.
@@ -344,16 +468,25 @@ class RecordController:
 
     def _write_meta(self, path: str, name: str, final: bool = False,
                     frames: int = 0, duration: float = 0.0,
-                    depth_preview_frame: int | None = None) -> None:
+                    depth_preview_frame: int | None = None,
+                    phase: str | None = None, success: bool | None = None) -> None:
+        if phase is not None:
+            instruction = cfg.PHASE_INSTRUCTIONS.get(phase, self.instruction)
+            scope = "auto (orchestrator-cut sub-task)"
+        else:
+            instruction = self.instruction
+            scope = "manual take (one start->stop = one episode)"
         meta = {
             "name": name,
             "created": datetime.now(_KST).strftime("%Y-%m-%dT%H:%M:%S%z"),
-            "instruction": self.instruction,
+            "instruction": instruction,
+            "phase": phase,
+            "success": success,
             "arm_side": cfg.ARM_SIDE,
             "ee_frame": cfg.EE_FRAME,
             "urdf": cfg.URDF_PATH,
             "action_space": "ee_delta+suction",
-            "episode_scope": "manual take (one start->stop = one episode)",
+            "episode_scope": scope,
             "ee_rotation": "quat_wxyz, base_link",
             "depth_units": "uint16 millimetres (0 = invalid)",
             "gripper_units": "Robotiq commanded finger pos, 0=open..255=closed, null=never commanded",
@@ -361,6 +494,7 @@ class RecordController:
             "note": ("phase labels and commanded-joint actions are recovered offline by "
                      "joining states.jsonl 't' against trace_path rows (t, leg, cmd, actual)."),
         }
+        meta.update(self._meta_extra)
         if final:
             meta["frames"] = frames
             meta["duration_s"] = round(duration, 3)
@@ -374,6 +508,8 @@ class RecordController:
         st = {
             "stamp": time.time(),
             "state": self._state,
+            "armed": self._armed,
+            "phase": None if self._cur is None else self._cur.get("phase"),
             "episode": None if self._cur is None else self._cur["name"],
             "frames": 0 if self._cur is None else self._cur["idx"],
             "takes_saved": self._takes_saved,
@@ -392,7 +528,8 @@ class RecordController:
 
 
 class KeyListener:
-    """Terminal hotkeys for the recorder: SPACE toggle, y keep, n discard.
+    """Terminal hotkeys: SPACE arm/disarm auto episodes, d discard last saved
+    take, y/n keep/discard a manual take awaiting decision.
 
     Uses cbreak (not raw) so the demo's log output stays readable, and only
     runs on a real TTY. Start it AFTER any input() prompts so it doesn't fight
@@ -419,7 +556,7 @@ class KeyListener:
             return self
         self._thread = threading.Thread(target=self._run, name="record-keys", daemon=True)
         self._thread.start()
-        logger.info("[record] keys:  SPACE start/stop · y keep · n discard")
+        logger.info("[record] keys:  SPACE arm/disarm auto-record · d discard last take · y/n manual keep/discard")
         return self
 
     def _run(self) -> None:
@@ -434,7 +571,9 @@ class KeyListener:
                     continue
                 ch = sys.stdin.read(1)
                 if ch == " ":
-                    self._c.cmd_toggle()
+                    self._c.cmd_arm_toggle()
+                elif ch in ("d", "D"):
+                    self._c.cmd_discard_last()
                 elif ch in ("y", "Y"):
                     self._c.cmd_keep()
                 elif ch in ("n", "N"):

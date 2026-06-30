@@ -16,6 +16,7 @@ back to the taught src z rather than a recorded pick z).
 from __future__ import annotations
 
 import os
+import random
 import sys
 
 import tyro
@@ -31,7 +32,7 @@ from utils import set_head_pitch  # noqa: E402
 
 from .grasp import GripperMover, SuctionMover
 from .home_pose import go_to_default_pose
-from .sequence import TaskOrchestrator
+from .sequence import TaskOrchestrator, set_episode_shift
 from . import suction_io
 from . import config as cfg
 
@@ -50,19 +51,36 @@ def main(undo: bool = False, undo_only: bool = False, loop: bool = False, skip_c
             viewer (run ``python -m case_battery_demo.dashboard.server``
             in a separate terminal to watch it).
         record: If True, enable the episode recorder (implies the dashboard
-            spool). Press SPACE in this terminal — or the dashboard's Record
-            button — to start/stop a take, then y/n to keep or discard it.
+            spool). Episodes are cut automatically at each sub-task boundary
+            (case/battery pick & place, hand_off, gripper handling), each with
+            its own instruction and success flag. SPACE arms/disarms auto
+            cutting; 'd' discards the last saved take. The dashboard Record
+            button still drives ad-hoc manual takes.
         record_dir: Where kept takes are written (one dir per episode).
-        instruction: Language instruction stored in each take's meta.json.
+        instruction: Fallback instruction for manual takes / unknown phases
+            (auto episodes use cfg.PHASE_INSTRUCTIONS).
     """
     if loop:
         undo = True
     if undo_only and loop:
         logger.error("--undo-only is incompatible with --loop.")
         return False
+    # Per-run episode shift for VLA spatial diversity: sampled and announced
+    # BEFORE the confirmation prompt so the operator can place the physical
+    # case/battery stacks shifted by the same amount, then confirm.
+    shift_xy = (0.0, 0.0)
+    shift_max = float(getattr(cfg, "EPISODE_XY_SHIFT_MAX_M", 0.0))
+    if shift_max > 0.0:
+        shift_xy = (random.uniform(-shift_max, shift_max),
+                    random.uniform(-shift_max, shift_max))
+        set_episode_shift(*shift_xy)
+
     logger.warning("=" * 60)
     logger.warning("About to move the REAL robot arm with suction.")
     logger.warning("Ensure the workspace is clear and the e-stop is reachable.")
+    if shift_max > 0.0:
+        logger.warning("EPISODE SHIFT (base_link): dx={:+.1f} mm, dy={:+.1f} mm", shift_xy[0] * 1000.0, shift_xy[1] * 1000.0)
+        logger.warning("-> Place the case + battery stacks shifted by this from their taught spots.")
     if loop:
         logger.warning("LOOP MODE: forward + undo will repeat until Ctrl-C.")
     logger.warning("=" * 60)
@@ -105,9 +123,7 @@ def main(undo: bool = False, undo_only: bool = False, loop: bool = False, skip_c
             # original suction-only behaviour (no scanning, no diversion).
             gripper = GripperMover(bot)
             gripper.ensure_ready(release_estop=release)
-            if gripper.gripper.available and gripper.gripper.activate():
-                logger.info("Right Robotiq gripper ready.")
-            else:
+            if not gripper.initialize():
                 logger.warning("Right gripper unavailable — barcode handoff disabled.")
                 gripper = None
 
@@ -121,12 +137,16 @@ def main(undo: bool = False, undo_only: bool = False, loop: bool = False, skip_c
                     from .dashboard.recorder import KeyListener, RecordController
                     recorder = RecordController(
                         out_dir=record_dir, spool_dir=DEFAULT_SPOOL_DIR, instruction=instruction
-                    ).start()
+                    )
+                    recorder.set_meta_extra({
+                        "episode_xy_shift_m": [round(shift_xy[0], 4), round(shift_xy[1], 4)],
+                    })
+                    recorder.start()
                     sink = recorder.feed
                     keys = KeyListener(recorder).start()
                 publisher = DashboardPublisher(bot, on_sample=sink).start()
 
-            orch = TaskOrchestrator(mover, gripper)
+            orch = TaskOrchestrator(mover, gripper, recorder=recorder)
             iteration = 0
             try:
                 while True:
