@@ -10,6 +10,7 @@ Research/condition_driven/rollouts_gated/**
 **/outputs/**
 **/rollouts/**
 **/rollouts**/**
+**/intervention/**
 **/data/**
 
 # Python & cache
