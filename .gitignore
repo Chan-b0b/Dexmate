@@ -26,4 +26,4 @@ __pycache__/
 *.egg-info/
 .pytest_cache/
 .DS_Store
-*.log
+*.logLGES/vla_training/token.txt
