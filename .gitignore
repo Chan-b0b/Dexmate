@@ -1,6 +1,11 @@
 # Data & recordings
 LGES/recordings/**
 LGES/case_detection/data/**
+LGES/case_detection/dataset_case/**
+LGES/case_detection/labeled_case/**
+LGES/case_detection/checkpoints/**
+LGES/case_detection/runs/**
+LGES/case_detection/*.pt
 Research/condition_driven/rollouts/**
 Research/condition_driven/rollouts_gated/**
 
@@ -12,6 +17,7 @@ Research/condition_driven/rollouts_gated/**
 **/rollouts**/**
 **/intervention/
 **/data/**
+**/out/**
 
 # Python & cache
 __pycache__/
