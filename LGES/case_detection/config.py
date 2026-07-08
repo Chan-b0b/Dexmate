@@ -39,6 +39,34 @@ CASE_FOOTPRINT_M: tuple[float, float] = (0.20, 0.12)  # <-- TODO measure
 # depth inside the search ROI each frame (works if the floor dominates the ROI).
 FLOOR_Z_M: float | None = None  # <-- set to a measured value for best results
 
+# base_link z (m) of the EMPTY box floor, measured by measure_floor_z.py
+# (median of the densest depth cluster; std ~4 mm, 2026-07-02). This is the
+# stack anchor: layer tops sit above it by the ik_demo layer pitch. Distinct
+# from FLOOR_Z_M above, which is a camera-frame depth for the old detector.
+# Orange ~0.5687, paper ~0.5641 — within noise, so ONE shared value is used.
+FLOOR_Z_BASE_M: float = 0.566
+# Per-layer stack pitch (m), from ik_demo (measured ~0.0131, config 0.0138).
+LAYER_PITCH_M: float = 0.0138
+
+# ----------------------------------------------------------------------------
+# Bird-eye-view (BEV) rectification — bev.py.
+# The head camera looks down at the floor plane; we warp the frame to a metric
+# top-down image so bin detection + case OBB run in a frame where pixel<->base
+# XY is linear and the OBB angle IS the true base yaw. Homography is built from
+# the per-frame (q_torso, q_head) via camera_geometry, on the plane at the
+# current top-face height (FLOOR_Z_BASE_M + k*LAYER_PITCH_M).
+# ----------------------------------------------------------------------------
+# base_link floor ROI the BEV canvas covers (orange box + margin; paper fits in).
+# Box center ~ (x 0.87, y 0.06); orange footprint 0.67 (x) x 0.38 (y).
+BEV_X_RANGE: tuple[float, float] = (0.50, 1.70)   # base x (forward) extent, m
+BEV_Y_RANGE: tuple[float, float] = (-0.40, 0.40)  # base y (left) extent, m
+BEV_PX_PER_M: int = 600                            # canvas resolution
+# Two box types; only footprint differs (floor_z is shared). Paper TBD.
+BOX_FOOTPRINT_M: dict[str, tuple[float, float]] = {
+    "orange": (0.67, 0.38),
+    # "paper": (?, ?),  # <-- measure
+}
+
 # ----------------------------------------------------------------------------
 # Hole-detection thresholds.
 # ----------------------------------------------------------------------------
@@ -91,7 +119,7 @@ BIN_ROI: tuple[int, int, int, int] | None = None
 # YOLO-OBB case detector (learned backend, detect_case_obb.py).
 # ----------------------------------------------------------------------------
 # Trained weights — set after running train.py.
-OBB_MODEL_PATH: str = "runs/detect/case/weight/case_detector.pt"
+OBB_MODEL_PATH: str = "runs/obb/case/weights/best.pt"
 # Min detection confidence.
 OBB_CONF: float = 0.40
 
@@ -109,8 +137,8 @@ USE_BIN_MODEL: bool = True
 # SAM2 auto-labeling (sam2_autolabel.py) — runs offline on a GPU box, not at
 # robot runtime. Set these to your downloaded checkpoint + its model cfg.
 # ----------------------------------------------------------------------------
-SAM2_CHECKPOINT: str = "checkpoints/sam2.1_hiera_small.pt"
-SAM2_MODEL_CFG: str = "configs/sam2.1/sam2.1_hiera_s.yaml"
+SAM2_CHECKPOINT: str = "checkpoints/sam2.1_hiera_large.pt"
+SAM2_MODEL_CFG: str = "configs/sam2.1/sam2.1_hiera_l.yaml"
 
 # Label sanity thresholds (fraction of the crop area), used by review.py to
 # flag likely-bad auto-labels (mask too small/large) and by obb_label.py.

@@ -82,6 +82,96 @@ def strafe_right(bot, distance_m: float = None, speed: float = None) -> None:
     logger.info("Settle complete")
 
 
+def move_forward(bot, distance_m: float = None, speed: float = None) -> None:
+    """Move chassis forward (positive straight velocity).
+
+    Args:
+        bot: Robot instance (from Robot() context).
+        distance_m: Distance in meters. If provided, calculates time = distance / speed.
+                   Overrides cfg.CHASSIS_STRAFE_TIME_S.
+        speed: Speed in m/s. If None, uses cfg.CHASSIS_STRAFE_SPEED_MS.
+    """
+    if speed is None:
+        speed = cfg.CHASSIS_STRAFE_SPEED_MS
+
+    if distance_m is not None:
+        wait_time = distance_m / speed
+        logger.info("Move FORWARD: {} m @ {:.3f} m/s = {:.1f} s", distance_m, speed, wait_time)
+    else:
+        wait_time = cfg.CHASSIS_STRAFE_TIME_S
+        distance_m = speed * wait_time
+        logger.info("Move FORWARD: {:.3f} m/s x {:.1f} s = {} m", speed, wait_time, distance_m)
+
+    bot.chassis.move_straight(speed, wait_time=wait_time)
+    time.sleep(cfg.CHASSIS_SETTLE_S)
+    logger.info("Settle complete")
+
+
+def move_backward(bot, distance_m: float = None, speed: float = None) -> None:
+    """Move chassis backward (negative straight velocity).
+
+    Args:
+        bot: Robot instance (from Robot() context).
+        distance_m: Distance in meters. If provided, calculates time = distance / speed.
+                   Overrides cfg.CHASSIS_STRAFE_TIME_S.
+        speed: Speed in m/s. If None, uses cfg.CHASSIS_STRAFE_SPEED_MS.
+    """
+    if speed is None:
+        speed = cfg.CHASSIS_STRAFE_SPEED_MS
+
+    if distance_m is not None:
+        wait_time = distance_m / speed
+        logger.info("Move BACKWARD: {} m @ {:.3f} m/s = {:.1f} s", distance_m, speed, wait_time)
+    else:
+        wait_time = cfg.CHASSIS_STRAFE_TIME_S
+        distance_m = speed * wait_time
+        logger.info("Move BACKWARD: {:.3f} m/s x {:.1f} s = {} m", speed, wait_time, distance_m)
+
+    bot.chassis.move_straight(-speed, wait_time=wait_time)
+    time.sleep(cfg.CHASSIS_SETTLE_S)
+    logger.info("Settle complete")
+
+
+def turn_ccw(bot, angle_deg: float = None, speed: float = None) -> None:
+    """Turn the chassis in place counter-clockwise (yaw left).
+
+    Args:
+        bot: Robot instance (from Robot() context).
+        angle_deg: Turn angle in DEGREES. If provided, time = angle_rad / speed.
+        speed: Angular speed in rad/s. If None, uses cfg.CHASSIS_TURN_SPEED_RADS.
+    """
+    import numpy as np
+    if speed is None:
+        speed = cfg.CHASSIS_TURN_SPEED_RADS
+    if angle_deg is not None:
+        wait_time = abs(np.deg2rad(angle_deg)) / speed
+        logger.info("Turn CCW: {} deg @ {:.2f} rad/s = {:.1f} s", angle_deg, speed, wait_time)
+    else:
+        wait_time = cfg.CHASSIS_STRAFE_TIME_S
+        logger.info("Turn CCW: {:.2f} rad/s x {:.1f} s = {:.1f} deg",
+                    speed, wait_time, np.rad2deg(speed * wait_time))
+    bot.chassis.turn(speed, wait_time=wait_time)
+    time.sleep(cfg.CHASSIS_SETTLE_S)
+    logger.info("Settle complete")
+
+
+def turn_cw(bot, angle_deg: float = None, speed: float = None) -> None:
+    """Turn the chassis in place clockwise (yaw right). Args as turn_ccw."""
+    import numpy as np
+    if speed is None:
+        speed = cfg.CHASSIS_TURN_SPEED_RADS
+    if angle_deg is not None:
+        wait_time = abs(np.deg2rad(angle_deg)) / speed
+        logger.info("Turn CW: {} deg @ {:.2f} rad/s = {:.1f} s", angle_deg, speed, wait_time)
+    else:
+        wait_time = cfg.CHASSIS_STRAFE_TIME_S
+        logger.info("Turn CW: {:.2f} rad/s x {:.1f} s = {:.1f} deg",
+                    speed, wait_time, np.rad2deg(speed * wait_time))
+    bot.chassis.turn(-speed, wait_time=wait_time)
+    time.sleep(cfg.CHASSIS_SETTLE_S)
+    logger.info("Settle complete")
+
+
 def interactive_mode(bot) -> None:
     """Interactive CLI for chassis movement testing.
 
@@ -97,10 +187,11 @@ def interactive_mode(bot) -> None:
     logger.info("Commands:")
     logger.info("  l              - strafe LEFT (default speed/time)")
     logger.info("  r              - strafe RIGHT (default speed/time)")
-    logger.info("  l <distance>   - strafe LEFT <distance_m> at default speed")
-    logger.info("  r <distance>   - strafe RIGHT <distance_m> at default speed")
-    logger.info("  l <distance> <speed> - strafe LEFT <distance_m> at <speed> m/s")
-    logger.info("  r <distance> <speed> - strafe RIGHT <distance_m> at <speed> m/s")
+    logger.info("  f              - move FORWARD (default speed/time)")
+    logger.info("  b              - move BACKWARD (default speed/time)")
+    logger.info("  l|r|f|b <distance>          - move <distance_m> at default speed")
+    logger.info("  l|r|f|b <distance> <speed>  - move <distance_m> at <speed> m/s")
+    logger.info("  tl|tr <angle_deg> [rad_s]   - turn in place CCW|CW by <angle_deg>")
     logger.info("  q              - quit")
     logger.info("=" * 60)
     logger.warning("Make sure the strafe path is CLEAR before moving!")
@@ -148,8 +239,32 @@ def interactive_mode(bot) -> None:
                 else:
                     logger.warning("Invalid format: r [distance] [speed]")
 
+            elif cmd in ("f", "b"):
+                # Parse: f|b [distance] [speed]
+                fn = move_forward if cmd == "f" else move_backward
+                if len(user_input) == 1:
+                    fn(bot)
+                elif len(user_input) == 2:
+                    fn(bot, distance_m=float(user_input[1]))
+                elif len(user_input) == 3:
+                    fn(bot, distance_m=float(user_input[1]), speed=float(user_input[2]))
+                else:
+                    logger.warning("Invalid format: {} [distance] [speed]", cmd)
+
+            elif cmd in ("tl", "tr"):
+                # Parse: tl|tr [angle_deg] [speed_rad_s]
+                fn = turn_ccw if cmd == "tl" else turn_cw
+                if len(user_input) == 1:
+                    fn(bot)
+                elif len(user_input) == 2:
+                    fn(bot, angle_deg=float(user_input[1]))
+                elif len(user_input) == 3:
+                    fn(bot, angle_deg=float(user_input[1]), speed=float(user_input[2]))
+                else:
+                    logger.warning("Invalid format: {} [angle_deg] [speed_rad_s]", cmd)
+
             else:
-                logger.warning("Unknown command: {}. Try 'l', 'r', or 'q'.", cmd)
+                logger.warning("Unknown command: {}. Try 'l', 'r', 'f', 'b', 'tl', 'tr', or 'q'.", cmd)
 
         except ValueError as e:
             logger.warning("Parse error: {}. Expected: l|r [distance] [speed]", e)

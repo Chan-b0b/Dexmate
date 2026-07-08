@@ -45,57 +45,48 @@ _NAME_RE = re.compile(r"^[A-Za-z0-9._-]+$")   # take dir names; rejects path tra
 
 
 # ---- take discovery / disk helpers ----------------------------------------
-# The recorder groups takes by task: <root>/<phase|manual>/<take>/. Take names
-# stay globally unique (timestamp + ep counter), so they remain the identifier
-# everywhere (URLs, ratings sidecar, depth cache, trash) and only the on-disk
-# location gains a task level. Legacy flat takes (<root>/<take>/) still work.
+# The recorder groups takes by task: <root>/<phase|manual>/<take>/, and the
+# ik_demo collector adds a date level: <root>/<YYYYMMDD>/<task>/<take>/. Take
+# names stay globally unique (timestamp + ep counter), so they remain the
+# identifier everywhere (URLs, ratings sidecar, depth cache, trash) and only
+# the on-disk location gains grouping levels. Legacy flat takes
+# (<root>/<take>/) still work.
 
 def _ok_name(name: str) -> bool:
     return bool(_NAME_RE.match(name)) and name not in (TRASH, ".pending")
 
 
 def _discover(root: str) -> dict[str, str]:
-    """Map take name -> task subfolder ('' for legacy flat takes)."""
+    """Map take name -> subfolder path ('' flat, 'task' or 'date/task')."""
     out: dict[str, str] = {}
-    try:
-        entries = os.listdir(root)
-    except OSError:
-        return out
-    for e in entries:
-        if not _ok_name(e):
-            continue
-        p = os.path.join(root, e)
-        if os.path.isfile(os.path.join(p, "meta.json")):
-            out[e] = ""          # legacy flat take
-        elif os.path.isdir(p):
-            try:
-                subs = os.listdir(p)
-            except OSError:
+
+    def scan(rel: str, depth: int) -> None:
+        base = os.path.join(root, rel) if rel else root
+        try:
+            entries = os.listdir(base)
+        except OSError:
+            return
+        for e in entries:
+            if not _ok_name(e):
                 continue
-            for n in subs:
-                if _ok_name(n) and os.path.isfile(os.path.join(p, n, "meta.json")):
-                    out[n] = e
+            p = os.path.join(base, e)
+            if os.path.isfile(os.path.join(p, "meta.json")):
+                out[e] = rel
+            elif os.path.isdir(p) and depth < 2:
+                scan(os.path.join(rel, e) if rel else e, depth + 1)
+
+    scan("", 0)
     return out
 
 
 def _find_take(root: str, name: str) -> str | None:
-    """Return the take's directory (flat or one task-folder deep), or None."""
+    """Return the take's directory (any discovered grouping depth), or None."""
     if not _ok_name(name):
         return None
-    p = os.path.join(root, name)
-    if os.path.isfile(os.path.join(p, "meta.json")):
-        return p
-    try:
-        entries = os.listdir(root)
-    except OSError:
+    task = _discover(root).get(name)
+    if task is None:
         return None
-    for task in entries:
-        if not _ok_name(task):
-            continue
-        p = os.path.join(root, task, name)
-        if os.path.isfile(os.path.join(p, "meta.json")):
-            return p
-    return None
+    return os.path.join(root, task, name)
 
 
 def _read_json(path: str) -> dict:
@@ -463,6 +454,7 @@ function flatten(s){
     }
   }
   out["suction"]={group:"Other",label:"suction",unit:"",value:s.suction_cmd?1:0};
+  if(s.vacuum_sealed!=null) out["vacuum_sealed"]={group:"Other",label:"vacuum sealed",unit:"",value:s.vacuum_sealed?1:0};
   if(s.gripper_pos!=null) out["gripper.pos"]={group:"Other",label:"gripper pos",unit:"",value:s.gripper_pos};
   const j = s.joints||{};
   for(const comp of Object.keys(j))

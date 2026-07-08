@@ -6,7 +6,7 @@ Run from the LGES directory so the package import resolves:
     python -m case_battery_demo.run_demo --undo          # forward then undo
     python -m case_battery_demo.run_demo --undo-only     # undo from taught poses
     python -m case_battery_demo.run_demo --loop          # forward+undo, repeat
-    python -m case_battery_demo.run_demo --dashboard          # forward+undo, repeat
+    python -m case_battery_demo.run_demo --dashboard     
 
 ``--undo-only`` does not require a prior forward run in this process; it
 builds the undo sequence directly from the taught poses (so place z falls

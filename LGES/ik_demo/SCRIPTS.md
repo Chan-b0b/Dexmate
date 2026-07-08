@@ -110,10 +110,14 @@ python -m ik_demo.sequence
 python -m ik_demo.chassis_sequence
 ```
 
+**레이어 루프**: 소스 스택이 소진될 때까지 반복. 레이어마다 (case + battery 1/2) 실행 후 스택 높이 자동 갱신 (source −1, target +1) — BEV warp plane이 실제 top face를 따라감.
+
 각 아이템마다:
 1. 왼쪽 스트래프 + 감지 + Pick
 2. 오른쪽 스트래프 + 감지 + Place
 3. 왼쪽 스트래프 (다음 아이템용)
+
+**설정** (config.py): `SRC_LAYERS_REMAINING` / `TGT_LAYERS_REMAINING`은 **시작 스택 높이**만 지정 (실행 시작 시 물리 스택에 맞게 설정). 중단 시 재개용 값이 로그에 출력됨.
 
 ---
 

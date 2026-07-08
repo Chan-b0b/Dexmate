@@ -43,8 +43,11 @@ def _joints(robot):
             np.asarray(robot.head.get_joint_pos(), dtype=np.float64))
 
 
-def _save_frame(out, crops, idx, rgb, depth, q_torso, q_head, crop_bin):
-    """Write frame_<idx>.{npz,png} (+ bin crop). Returns the bin bbox or None."""
+def _save_frame(out, crops, idx, rgb, depth, q_torso, q_head, crop_bin, layer=None):
+    """Write frame_<idx>.{npz,png} (+ bin crop). Returns the bin bbox or None.
+
+    layer = layers remaining in the stack; stored so prewarp/BEV warps at the
+    right plane (top face = FLOOR_Z_BASE_M + layer*LAYER_PITCH_M)."""
     bbox = find_bin(rgb)  # yellow-bin ROI (x, y, w, h) or None
     stem = out / f"frame_{idx:03d}"
     np.savez_compressed(
@@ -52,6 +55,7 @@ def _save_frame(out, crops, idx, rgb, depth, q_torso, q_head, crop_bin):
         rgb=rgb, depth=np.asarray(depth, np.float32),
         q_torso=q_torso, q_head=q_head, timestamp=time.time(),
         bin_bbox=np.array(bbox if bbox is not None else (-1, -1, -1, -1)),
+        layers_remaining=np.int32(layer if layer is not None else -1),
     )
     # Stream is RGB (base_camera bgr=False); cv2 writes BGR -> convert.
     cv2.imwrite(str(stem.with_suffix(".png")), cv2.cvtColor(rgb, cv2.COLOR_RGB2BGR))
@@ -70,7 +74,7 @@ def _timed_loop(robot, out, crops, args) -> int:
             print(f"[{i}] no frame, retrying")
             time.sleep(args.interval)
             continue
-        bbox = _save_frame(out, crops, saved, rgb, depth, *_joints(robot), args.crop_bin)
+        bbox = _save_frame(out, crops, saved, rgb, depth, *_joints(robot), args.crop_bin, args.layer)
         saved += 1
         print(f"[{saved}/{args.n}] saved frame_{saved-1:03d}  bin={'ok' if bbox is not None else 'MISSING'}"
               f"  depth {np.nanmin(depth):.2f}..{np.nanmax(depth):.2f} m")
@@ -115,7 +119,7 @@ def _keyboard_loop(robot, out, crops, args) -> int:
         cv2.imshow(win, disp)
         key = cv2.waitKey(30) & 0xFF
         if key == ord(" "):
-            _save_frame(out, crops, saved, rgb, depth, *_joints(robot), args.crop_bin)
+            _save_frame(out, crops, saved, rgb, depth, *_joints(robot), args.crop_bin, args.layer)
             saved += 1
             print(f"[{saved}/{args.n}] saved frame_{saved-1:03d}  "
                   f"bin[{src}]={'ok' if bbox is not None else 'MISSING'}")
@@ -138,12 +142,16 @@ def main() -> None:
                     help="also save bin-ROI RGB crops (for labeling / training)")
     ap.add_argument("--keyboard", action="store_true",
                     help="capture on SPACE keypress in a preview window, not by time")
+    ap.add_argument("--layer", type=int, default=None,
+                    help="layers remaining in the stack for this sequence (top case "
+                         "height = FLOOR_Z_BASE_M + layer*LAYER_PITCH_M); recorded per "
+                         "frame so BEV warps at the right plane")
     args = ap.parse_args()
 
-    # data/<target>/<timestamp>/ so bin vs case captures stay separate and
-    # repeated runs don't clash.
-    out = (Path(__file__).resolve().parent / args.out / args.target
-           / time.strftime("%Y%m%d_%H%M%S"))
+    # data/<target>/<timestamp>[_L<layer>]/ so bin vs case captures stay separate,
+    # repeated runs don't clash, and each sequence's stack layer is obvious.
+    tag = time.strftime("%Y%m%d_%H%M%S") + (f"_L{args.layer}" if args.layer is not None else "")
+    out = (Path(__file__).resolve().parent / args.out / args.target / tag)
     out.mkdir(parents=True, exist_ok=True)
     crops = out / "crops"
     if args.crop_bin:

@@ -81,6 +81,25 @@ def stage(frames: list[Path], roi, staged: Path) -> tuple[Path, list[str]]:
     return staged, stems
 
 
+def stage_bev(frames: list[Path], staged: Path) -> tuple[Path, list[str]]:
+    """Warp every frame to the metric BEV canvas -> staged/<idx>.jpg. The warp
+    plane is the current top-face height from each frame's layers_remaining, so
+    the case lands at a consistent metric scale (train == runtime framing)."""
+    import bev
+    staged.mkdir(parents=True, exist_ok=True)
+    for p in staged.glob("*.jpg"):
+        p.unlink()
+    stems = []
+    for i, fp in enumerate(frames):
+        d = np.load(fp)
+        k = int(d["layers_remaining"]) if "layers_remaining" in d.files else 1
+        m = bev.build_mapper(d["q_torso"], d["q_head"], bev.top_face_z(k if k >= 0 else 1))
+        warped = m.warp(d["rgb"])
+        cv2.imwrite(str(staged / f"{i}.jpg"), cv2.cvtColor(warped, cv2.COLOR_RGB2BGR))
+        stems.append(fp.stem)
+    return staged, stems
+
+
 # ---------------------------------------------------------------------------
 # Interactive clicker (matplotlib) with live SAM2 mask preview
 # ---------------------------------------------------------------------------
@@ -129,6 +148,10 @@ def main() -> None:
                     help="capture run dir (default: newest data/<timestamp>/)")
     ap.add_argument("--no-stage", action="store_true",
                     help="reuse existing staged crops (skip re-staging)")
+    ap.add_argument("--bev", action="store_true",
+                    help="case only: warp each frame to the metric BEV canvas "
+                         "(per-frame plane from layers_remaining) instead of ROI-crop; "
+                         "OBB labels come out in base-consistent BEV pixels")
     args = ap.parse_args()
     target = args.target
 
@@ -141,23 +164,33 @@ def main() -> None:
         raise SystemExit(f"No frames in {data}. Capture with: python capture.py --target {target}")
     print(f"using {len(frames)} frames from {data}  [target={target}]")
 
+    # BEV: warp to the metric top-down canvas (no crop / no find_bin).
     # bin detector runs on the FULL frame (it finds the ROI) -> no crop;
     # case detector trains on the bin-ROI crop for resolution.
-    if target == "bin":
-        h0, w0 = np.load(frames[0])["rgb"].shape[:2]
-        roi = (0, 0, w0, h0)
-    else:
-        roi = resolve_roi(frames, args.roi)
-        rsrc = "cfg.BIN_ROI" if cfg.BIN_ROI is not None else args.roi
-        print(f"crop ROI (x,y,w,h) = {roi}  [{rsrc}]")
-        if cfg.BIN_ROI is None:
-            print(f"  -> to lock for runtime, set cfg.BIN_ROI = {tuple(int(v) for v in roi)}")
-
     staged = HERE / f"{cfg.STAGED_DIR}_{target}"
-    if args.no_stage:
-        stems = [fp.stem for fp in frames]
+    roi = None
+    if args.bev:
+        if target != "case":
+            raise SystemExit("--bev is for --target case only.")
+        import bev
+        _w, _h = bev.canvas_size()
+        print(f"BEV warp -> {_w}x{_h}px @ {cfg.BEV_PX_PER_M}px/m  x{cfg.BEV_X_RANGE} y{cfg.BEV_Y_RANGE}")
+        stems = [fp.stem for fp in frames] if args.no_stage else stage_bev(frames, staged)[1]
     else:
-        staged, stems = stage(frames, roi, staged)
+        if target == "bin":
+            h0, w0 = np.load(frames[0])["rgb"].shape[:2]
+            roi = (0, 0, w0, h0)
+        else:
+            roi = resolve_roi(frames, args.roi)
+            rsrc = "cfg.BIN_ROI" if cfg.BIN_ROI is not None else args.roi
+            print(f"crop ROI (x,y,w,h) = {roi}  [{rsrc}]")
+            if cfg.BIN_ROI is None:
+                print(f"  -> to lock for runtime, set cfg.BIN_ROI = {tuple(int(v) for v in roi)}")
+        stems = [fp.stem for fp in frames] if args.no_stage else stage(frames, roi, staged)[1]
+
+    # Prefix stems with the session dir so multi-session labeling accumulates in
+    # one labeled_<target>/ instead of overwriting (every session has frame_000..).
+    stems = [f"{data.name}__{s}" for s in stems]
 
     device = "cuda" if torch.cuda.is_available() else "cpu"
     predictor = build_sam2_video_predictor(cfg.SAM2_MODEL_CFG, cfg.SAM2_CHECKPOINT, device=device)
@@ -167,7 +200,7 @@ def main() -> None:
     (labeled / "labels").mkdir(parents=True, exist_ok=True)
     out = HERE / cfg.OUT_DIR
     out.mkdir(parents=True, exist_ok=True)
-    if target == "case":
+    if target == "case" and roi is not None:
         np.save(labeled / "roi.npy", np.array(roi))  # crop used, for runtime reference
 
     autocast = (torch.autocast("cuda", dtype=torch.bfloat16) if device == "cuda"

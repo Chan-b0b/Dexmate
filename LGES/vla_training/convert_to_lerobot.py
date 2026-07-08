@@ -66,19 +66,28 @@ STATE_NAMES = [
     "vacuum_sealed",
     "fx", "fy", "fz", "tx", "ty", "tz",
 ]
-ACTION_NAMES = ["dx", "dy", "dz", "drx", "dry", "drz", "suction"]
+ACTION_NAMES_DELTA = ["dx", "dy", "dz", "drx", "dry", "drz", "suction"]
+ACTION_NAMES_ABS = ["x", "y", "z", "qw", "qx", "qy", "qz", "suction"]
+
+# Canonical quaternion sign anchor. The straight-down grasp (roll=pi) has qw~0,
+# so a qw-sign rule is a per-episode coin flip: the same pose lands as qx~+1 in
+# some episodes and qx~-1 in others (the training cost behind the "roll jumps
+# between -178 and 178" symptom). Flip when dot(q, Q_REF) = qx < 0 instead —
+# qx = cos(yaw/2) >= ~0.57 over the demo's yaw range, far from any knife edge.
+# run_policy.ObsBuilder applies the SAME rule at deployment.
+Q_REF = np.array([0.0, 1.0, 0.0, 0.0])
 
 IMAGE_FEATURE = {"dtype": "image", "shape": (IMG_H, IMG_W, 3),
                  "names": ["height", "width", "channels"]}
 
 
-def build_features(with_depth: bool) -> dict:
+def build_features(with_depth: bool, action_names) -> dict:
     feats = {
         "observation.images.head": dict(IMAGE_FEATURE),
         "observation.state": {"dtype": "float32", "shape": (len(STATE_NAMES),),
                               "names": STATE_NAMES},
-        "action": {"dtype": "float32", "shape": (len(ACTION_NAMES),),
-                   "names": ACTION_NAMES},
+        "action": {"dtype": "float32", "shape": (len(action_names),),
+                   "names": list(action_names)},
     }
     if with_depth:
         feats["observation.images.head_depth"] = dict(IMAGE_FEATURE)
@@ -133,9 +142,14 @@ def quat_to_rotvec(q: np.ndarray) -> np.ndarray:
 # ── take loading ─────────────────────────────────────────────────────
 
 
-def load_take(take_dir: Path, with_depth: bool):
+def load_take(take_dir: Path, with_depth: bool, action_space: str = "delta"):
     """Return (instruction, rgb_paths, depth_paths|None, states[N,15],
-    actions[N-1,7]) or None."""
+    actions[N-1,7 delta | N-1,8 abs]) or None.
+
+    action_space 'delta': next-state EE deltas (pos delta + rotvec + suction).
+    action_space 'abs'  : next-state ABSOLUTE EE pose (pos + canonical quat
+    wxyz + suction) — orientation stays a quaternion because the grasp is a
+    ~180 deg rotation, exactly where an absolute rotvec is ill-conditioned."""
     meta = json.loads((take_dir / "meta.json").read_text())
     if meta.get("success") is not True:
         return None
@@ -157,11 +171,12 @@ def load_take(take_dir: Path, with_depth: bool):
     quat = np.array([f["ee"]["quat_wxyz"] for f in frames], dtype=np.float64)
     quat /= np.linalg.norm(quat, axis=1, keepdims=True)
     # sign continuity so the state input doesn't jump between q and -q
-    if quat[0, 0] < 0:
-        quat[0] = -quat[0]
     for i in range(1, n):
         if np.dot(quat[i], quat[i - 1]) < 0:
             quat[i] = -quat[i]
+    # canonical sign for the WHOLE episode (see Q_REF note above)
+    if np.dot(quat[0], Q_REF) < 0:
+        quat = -quat
 
     suction = np.array([1.0 if f["suction_cmd"] else 0.0 for f in frames])
     sealed = np.array([1.0 if f.get("vacuum_sealed") else 0.0 for f in frames])
@@ -173,11 +188,14 @@ def load_take(take_dir: Path, with_depth: bool):
         [pos, quat, suction[:, None], sealed[:, None], wrench], axis=1
     ).astype(np.float32)
 
-    dpos = pos[1:] - pos[:-1]
-    drot = np.stack(
-        [quat_to_rotvec(quat_mul(quat[i + 1], quat_conj(quat[i]))) for i in range(n - 1)]
-    )
-    actions = np.concatenate([dpos, drot, suction[1:, None]], axis=1).astype(np.float32)
+    if action_space == "abs":
+        actions = np.concatenate([pos[1:], quat[1:], suction[1:, None]], axis=1).astype(np.float32)
+    else:
+        dpos = pos[1:] - pos[:-1]
+        drot = np.stack(
+            [quat_to_rotvec(quat_mul(quat[i + 1], quat_conj(quat[i]))) for i in range(n - 1)]
+        )
+        actions = np.concatenate([dpos, drot, suction[1:, None]], axis=1).astype(np.float32)
 
     return meta["instruction"], rgb_paths, depth_paths, states, actions
 
@@ -209,8 +227,12 @@ def main():
     ap.add_argument("--name", default="lges_suction")
     ap.add_argument("--no-depth", action="store_true",
                     help="omit the colorized depth camera (depth is on by default)")
+    ap.add_argument("--action-space", choices=("delta", "abs"), default="delta",
+                    help="delta: next-state EE deltas (7d); abs: next-state "
+                         "absolute EE pose pos+quat_wxyz+suction (8d)")
     args = ap.parse_args()
     with_depth = not args.no_depth
+    action_names = ACTION_NAMES_ABS if args.action_space == "abs" else ACTION_NAMES_DELTA
 
     from lerobot.datasets.lerobot_dataset import LeRobotDataset
 
@@ -231,14 +253,14 @@ def main():
         dataset = LeRobotDataset.create(
             repo_id=f"local/{name}",
             fps=FPS,
-            features=build_features(with_depth),
+            features=build_features(with_depth, action_names),
             root=root,
             robot_type="dexmate_vega_1p",
             use_videos=False,
         )
         n_frames = 0
         for take_dir in takes:
-            loaded = load_take(take_dir, with_depth)
+            loaded = load_take(take_dir, with_depth, args.action_space)
             if loaded is None:
                 continue
             instruction, rgb_paths, depth_paths, states, actions = loaded

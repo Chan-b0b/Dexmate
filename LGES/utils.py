@@ -16,7 +16,7 @@ def set_head_pitch(bot, pitch_deg: float = 30.0, wait_time: float = 6.0) -> None
         wait_time: Maximum time (seconds) to wait for the head to reach
                    the target position.
     """
-    forward_sum_deg = 30.0
+    forward_sum_deg = pitch_deg
     torso_pitch_deg = float(np.rad2deg(bot.torso.pitch_angle))
     current_head_pos = np.asarray(bot.head._get_state()["pos"], dtype=float)
     print(current_head_pos)
