@@ -1,0 +1,15 @@
+[build-system]
+requires = ["setuptools>=64"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "smolvla-meanflow"
+version = "0.1.0"
+description = "SmolVLA trained with MeanFlow (average-velocity flow matching) for one-step action generation. LeRobot plugin, no lerobot sources modified."
+requires-python = ">=3.10"
+# lerobot (and its deps) must already be installed; we deliberately declare no
+# dependencies so installing this package can never alter the existing environment.
+dependencies = []
+
+[tool.setuptools.packages.find]
+include = ["smolvla_meanflow*"]
