@@ -14,7 +14,7 @@
 # Don't train while the robot demo is running — they share the GPU.
 set -euo pipefail
 
-VENV=/home/dexmate/vla_venv
+VENV="${VENV:-/home/dexmate/vla_venv}"
 DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
 # Pull our own --resume flag out of the args forwarded to lerobot-train.
@@ -95,7 +95,7 @@ else
     --steps=60000 \
     --save_freq=2000 \
     --log_freq=50 \
-    --num_workers=12 \
+    --num_workers=32 \
     --output_dir="$OUT" \
     --job_name="$RUN" \
     ${ARGS[@]+"${ARGS[@]}"} 2>&1 | tee "$LOG"

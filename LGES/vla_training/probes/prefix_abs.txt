@@ -1,0 +1,50 @@
+`torch_dtype` is deprecated! Use `dtype` instead!
+[probe] FiLM cond=('contact', 'fz', 'seal') inject=prefix mask_force=False  ckpt=outputs/smolvla_film_0708_abs_prefix/checkpoints/last
+Loading  HuggingFaceTB/SmolVLM2-500M-Video-Instruct weights ...
+Loading weights:   0%|          | 0/489 [00:00<?, ?it/s]Loading weights:  99%|█████████▉| 483/489 [00:00<00:00, 4827.28it/s]Loading weights: 100%|██████████| 489/489 [00:00<00:00, 4868.05it/s]
+Reducing the number of VLM layers to 16 ...
+Loading weights from local directory
+
+── Tier 0  (static, no data) ───────────────────────────────────────
+  |Δγ| max=0.3682 mean=0.0828   |Δβ| max=0.2039 mean=0.0496   (c: 0 -> 1)
+  γ is a multiplicative gain on the action-token embedding; ~0 => FiLM ignores its own input.
+
+── Tier 1  (counterfactual on training data) ───────────────────────
+  episode 0: "pick up the case with the suction cup"  frames 0..262
+
+   frame    ee_z   |F|N | expert_dz  dz(c=0)  dz(c=1)      Δdz  dz(real)
+  --------------------------------------------------------------------------
+       0   1.092   13.5 |   1092.3m  1082.9m  1085.4m     2.6m   1083.0m
+       9   1.129   12.4 |   1131.9m  1124.1m  1130.9m     6.7m   1125.3m
+      18   1.147   12.5 |   1145.4m  1141.4m  1144.6m     3.2m   1141.2m
+      27   1.128   13.4 |   1124.1m  1121.9m  1119.6m    -2.3m   1121.3m
+      36   1.105   13.2 |   1103.0m  1103.9m  1091.5m   -12.4m   1102.7m
+      45   1.102   13.1 |   1102.1m  1103.5m  1087.5m   -16.0m   1101.4m
+      54   1.077   12.5 |   1071.5m  1075.4m  1061.8m   -13.6m   1070.3m
+      63   1.010   11.5 |   1004.1m  1002.5m   992.2m   -10.2m    999.0m
+      72   0.944   10.1 |    934.8m   934.8m   927.6m    -7.3m    932.4m
+      81   0.903   10.5 |    901.9m   902.8m   899.1m    -3.7m    901.2m
+      90   0.901   10.6 |    901.4m   901.1m   898.1m    -3.0m    899.8m
+      99   0.889   10.0 |    887.9m   888.3m   887.0m    -1.3m    887.4m
+     108   0.875    9.9 |    873.5m   874.2m   873.9m    -0.2m    874.1m
+     117   0.862   10.1 |    860.5m   859.4m   860.7m     1.3m    859.6m
+     126   0.849    9.9 |    847.0m   847.3m   849.6m     2.3m    847.7m
+     135   0.834   10.3 |    833.4m   833.7m   836.5m     2.8m    833.8m
+     144   0.822   10.2 |    820.2m   819.2m   823.2m     4.0m    819.6m
+     153   0.807    9.9 |    806.4m   804.6m   811.1m     6.5m    805.7m
+     162   0.794    9.9 |    792.3m   790.8m   798.2m     7.4m    791.9m
+     171   0.782    1.1 |    781.7m   782.1m   786.6m     4.5m    786.0m
+     180   0.782   10.9 |    781.6m   781.1m   785.3m     4.2m    782.6m
+     189   0.782   12.1 |    782.0m   783.4m   785.9m     2.5m    785.2m
+     198   0.783   12.5 |    782.5m   785.3m   786.9m     1.5m    786.3m
+     207   0.783   11.9 |    782.6m   783.1m   787.3m     4.3m    782.8m
+     216   0.783   11.9 |    782.5m   784.0m   788.2m     4.2m    784.1m
+     225   0.813   14.0 |    819.3m   821.3m   820.8m    -0.5m    819.8m
+  --------------------------------------------------------------------------
+  mean over 227 pre-contact frames:  dz(c=0)=+912.16mm  dz(c=1)=+911.48mm  meanΔdz=-0.68mm  max|Δdz|=16.54mm
+
+  phase split (the transition must fire in the COMMITTED-descent band):
+    approach/hover  dz(c=0)>=-3mm: n=227  dz(c=0)=+912.16mm  dz(c=1)=+911.48mm  Δdz= -0.68mm
+
+── verdict ─────────────────────────────────────────────────────────
+  INCONCLUSIVE: no committed-descent frames in this episode.

@@ -16,7 +16,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 import film_contact  # noqa: E402
 
 _variant = os.environ.get("FILM_VARIANT", "v2")
-_mask_force = os.environ.get("FILM_MASK_FORCE", "1") not in ("0", "false", "False")
+_mask_force = os.environ.get("FILM_MASK_FORCE", "0") not in ("0", "false", "False")
 _cond = tuple(c.strip() for c in os.environ.get("FILM_COND", "contact,fz,seal").split(",") if c.strip())
 _inject = os.environ.get("FILM_INJECT", "suffix")
 _f0 = float(os.environ.get("FILM_F0", "12"))

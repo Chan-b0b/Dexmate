@@ -32,7 +32,10 @@ def main():
         sys.exit("usage: tb_log.py <train.log> <tb_logdir>")
     log_path = Path(sys.argv[1])
     writer = SummaryWriter(log_dir=sys.argv[2])
-    done_marker = log_path.with_suffix(".done")
+    # NB: "<log>.done" appended — with_suffix(".done") would REPLACE ".log",
+    # so the marker the train script touches (train.log.done) is never seen
+    # and this process (and the trap waiting on it) hangs forever.
+    done_marker = Path(str(log_path) + ".done")
 
     # Wait for the log to appear, then follow it.
     while not log_path.exists():
