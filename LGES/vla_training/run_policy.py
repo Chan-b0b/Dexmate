@@ -180,6 +180,32 @@ def integrate(cur_pos, cur_quat_wxyz, act):
     return pos_tgt, Rotation.from_matrix(R_tgt).as_euler("xyz"), R_tgt
 
 
+def clamp_abs_action(pred: np.ndarray, cur_pos: np.ndarray, cur_quat_wxyz: np.ndarray):
+    """Safety-clamp an absolute-action policy's prediction (pred = [x,y,z,
+    qw,qx,qy,qz,suction], matching convert_to_lerobot.py's --action-space abs).
+    Unlike delta actions, the model's raw target is an ABSOLUTE pose with no
+    built-in per-tick bound, so cap the IMPLIED step from the live pose to the
+    same MAX_DPOS_M/MAX_DROT_RAD clamp_action() uses. Returns (pos_tgt, rpy_tgt,
+    dpos_clamped, drot_clamped, clipped) -- the deltas are for RolloutLog/print
+    parity with the delta path, not because abs actions integrate onto a
+    running reference (they don't: each chunk step is already a target)."""
+    pred_pos = pred[0:3]
+    pred_quat = pred[3:7] / np.linalg.norm(pred[3:7])
+    raw_dpos = pred_pos - cur_pos
+    dpos = np.clip(raw_dpos, -MAX_DPOS_M, MAX_DPOS_M)
+    w0, x0, y0, z0 = cur_quat_wxyz
+    w1, x1, y1, z1 = pred_quat
+    q_cur = Rotation.from_quat([x0, y0, z0, w0])
+    q_tgt = Rotation.from_quat([x1, y1, z1, w1])
+    raw_drot = (q_tgt * q_cur.inv()).as_rotvec()
+    drot = np.clip(raw_drot, -MAX_DROT_RAD, MAX_DROT_RAD)
+    pos_tgt = cur_pos + dpos
+    R_tgt = Rotation.from_rotvec(drot).as_matrix() @ q_cur.as_matrix()
+    rpy_tgt = Rotation.from_matrix(R_tgt).as_euler("xyz")
+    clipped = not (np.allclose(dpos, raw_dpos) and np.allclose(drot, raw_drot))
+    return pos_tgt, rpy_tgt, dpos, drot, clipped
+
+
 def workspace_ok(pos, box) -> bool:
     lo, hi = box
     return bool(np.all(pos >= lo) and np.all(pos <= hi))
@@ -188,23 +214,127 @@ def workspace_ok(pos, box) -> bool:
 # ── policy wrapper ────────────────────────────────────────────────────
 
 
+def _peek_policy_type(model_dir: str) -> str:
+    """Read just the `type` field of config.json, before the config class for that
+    type is necessarily registered (PreTrainedConfig.from_pretrained needs it
+    registered *before* it can decode the rest of the file)."""
+    from lerobot.configs.policies import CONFIG_NAME
+    if Path(model_dir).is_dir():
+        config_file = Path(model_dir) / CONFIG_NAME
+    else:
+        from huggingface_hub import hf_hub_download
+        config_file = hf_hub_download(repo_id=model_dir, filename=CONFIG_NAME)
+    return json.loads(Path(config_file).read_text())["type"]
+
+
+def _peek_film_structure(model_dir: str):
+    """Auto-detect the STRUCTURAL FiLM settings (`cond`, `inject`) a checkpoint
+    was actually trained with, straight from its own saved tensors: `cond`
+    fixes which buffers exist (_contact_F0/_fz_tau/_seal_mean only get
+    registered for channels in cond -- see film_contact.apply's new_init), and
+    `inject` fixes contact_film's hidden width (state_proj.out_features=960 for
+    'prefix' vs vlm_with_expert.expert_hidden_size=720 for 'suffix'/'output').
+    Unlike FILM_COND/FILM_INJECT env vars (which silently mismatch if the
+    operator guesses wrong), this can't drift from what's actually in the
+    checkpoint. `mask_force` has NO shape footprint at all -- pure runtime
+    masking behavior -- so it genuinely can't be recovered this way; default
+    it from the "_mask1" repo-name convention and let FILM_MASK_FORCE override."""
+    from safetensors import safe_open
+    if Path(model_dir).is_dir():
+        st_path = Path(model_dir) / "model.safetensors"
+    else:
+        from huggingface_hub import hf_hub_download
+        st_path = hf_hub_download(repo_id=model_dir, filename="model.safetensors")
+    with safe_open(st_path, framework="pt") as f:
+        keys = set(f.keys())
+        cond = tuple(ch for ch, buf in (("contact", "_contact_F0"), ("fz", "_fz_tau"),
+                                         ("seal", "_seal_mean")) if any(k.endswith(buf) for k in keys))
+        hidden = f.get_slice("model.contact_film.scale.2.weight").get_shape()[0]
+    inject = "prefix" if hidden == 960 else "suffix"
+    mask_force_default = "mask1" in Path(model_dir).name.lower()
+    return cond, inject, mask_force_default, hidden
+
+
+def _has_film_weights(model_dir: str) -> bool:
+    """Cheap check (safetensors header only, no full tensor load) for whether a
+    checkpoint has contact_film.* weights. Lets load_policy() catch a missing
+    or extra --film flag with a clear error, instead of torch's silent
+    non-strict 'Unexpected key(s)'/'missing key(s)' warning -- which loads
+    "successfully" while dropping (or failing to fill) the FiLM weights."""
+    from safetensors import safe_open
+    if Path(model_dir).is_dir():
+        st_path = Path(model_dir) / "model.safetensors"
+    else:
+        from huggingface_hub import hf_hub_download
+        st_path = hf_hub_download(repo_id=model_dir, filename="model.safetensors")
+    with safe_open(st_path, framework="pt") as f:
+        return any("contact_film" in k for k in f.keys())
+
+
 def load_policy(checkpoint: Path, film: bool = False):
-    from lerobot.policies.smolvla.modeling_smolvla import SmolVLAPolicy
-    from lerobot.policies.factory import make_pre_post_processors
+    from lerobot.configs.parser import load_plugin
+    from lerobot.configs.policies import PreTrainedConfig
+    from lerobot.policies.factory import get_policy_class, make_pre_post_processors
+
+    # checkpoint may be a local training-output dir (outputs/<run>/checkpoints/<n>,
+    # containing pretrained_model/), a local pretrained_model dir, or a HF Hub repo
+    # id (e.g. "Chanho-Lee/smolvla_meanflow_0708") -- from_pretrained resolves that
+    # itself. Loading through the config/policy registry (not a hardcoded
+    # SmolVLAPolicy import) is what lets this run smolvla_meanflow checkpoints too.
+    nested = Path(checkpoint) / "pretrained_model"
+    model_dir = str(nested) if nested.exists() else str(checkpoint)
+    policy_type = _peek_policy_type(model_dir)
+    if policy_type != "smolvla":
+        # VLA_DIR (on sys.path since module import, for convert_to_lerobot etc.)
+        # contains a same-named "smolvla_meanflow/" subdirectory (the plugin's
+        # project root, no top-level __init__.py) which PathFinder resolves as a
+        # namespace package before ever reaching the pip -e install's meta_path
+        # finder -- drop it from sys.path for this one import so the real package
+        # (registering the type via load_plugin) is what actually loads.
+        saved_path, sys.path[:] = sys.path[:], [p for p in sys.path if p != str(VLA_DIR)]
+        try:
+            load_plugin(policy_type)  # registers third-party policy types, e.g. smolvla_meanflow
+        finally:
+            sys.path[:] = saved_path
+    cfg = PreTrainedConfig.from_pretrained(model_dir)
+
+    if film and cfg.type != "smolvla":
+        raise SystemExit(f"--film is only for smolvla checkpoints, got type={cfg.type}")
+    has_film_weights = cfg.type == "smolvla" and _has_film_weights(model_dir)
+    if has_film_weights and not film:
+        raise SystemExit(f"{model_dir} has FiLM weights (contact_film.*) but --film was not passed "
+                          f"-- add --film, or it silently loads as plain smolvla and drops them.")
+    if film and not has_film_weights:
+        raise SystemExit(f"--film was passed but {model_dir} has no FiLM weights (contact_film.*) "
+                          f"-- this is a plain smolvla checkpoint, drop --film.")
+
     if film:
         # FiLM condition-conditioned policy (V1/V2): patch VLAFlowMatching BEFORE
         # from_pretrained so contact_film + buffers exist and load from the checkpoint.
         # c-hat is then computed live from the obs. Variant is train-time only, so 'v2' is
-        # fine here. FILM_COND + FILM_MASK_FORCE MUST match what the checkpoint was trained with.
+        # fine here. cond/inject are auto-detected from the checkpoint's own tensors
+        # (see _peek_film_structure) -- they're structural, so this can't mismatch.
+        # mask_force has no shape footprint; only FILM_MASK_FORCE / the "_mask1"
+        # repo-name convention can tell us, so double-check it if in doubt.
         import os
         import film_contact
-        mask_force = os.environ.get("FILM_MASK_FORCE", "1") not in ("0", "false", "False")
-        cond = tuple(c.strip() for c in os.environ.get("FILM_COND", "contact,fz,seal").split(",") if c.strip())
-        inject = os.environ.get("FILM_INJECT", "suffix")
+        det_cond, det_inject, det_mask_default, det_hidden = _peek_film_structure(model_dir)
+        cond = (tuple(c.strip() for c in os.environ["FILM_COND"].split(",") if c.strip())
+                if "FILM_COND" in os.environ else det_cond)
+        inject = os.environ.get("FILM_INJECT", det_inject)
+        mask_force = (os.environ["FILM_MASK_FORCE"] not in ("0", "false", "False")
+                      if "FILM_MASK_FORCE" in os.environ else det_mask_default)
+        print(f"[run_policy] FiLM structure from checkpoint tensors: cond={cond} "
+              f"inject={inject} (contact_film hidden={det_hidden}) | mask_force={mask_force} "
+              f"({'FILM_MASK_FORCE env' if 'FILM_MASK_FORCE' in os.environ else '\"_mask1\" in repo name'} "
+              f"-- NOT verifiable from weights, override with FILM_MASK_FORCE=0/1 if wrong)")
         f0 = float(os.environ.get("FILM_F0", "12"))
         tau = float(os.environ.get("FILM_TAU", "10"))        # contact-DROP scale; MUST match training
         fz_tau = float(os.environ.get("FILM_FZ_TAU", "30"))  # fz scale; MUST match training
-        ds = VLA_DIR / "datasets/lges_suction"
+        # wrench/seal stats only depend on observation.state (shared by delta and
+        # abs conversions of the same recordings), so either dataset variant works;
+        # lges_suction (pre-0708) no longer exists on this machine.
+        ds = VLA_DIR / "datasets" / os.environ.get("FILM_DATASET", "lges_case_pick_0708")
         wm, ws = film_contact.load_wrench_stats(ds)
         sm, ss = film_contact.load_seal_stats(ds)
         film_contact.apply("v2", wm, ws, seal_mean=sm, seal_std=ss, cond=cond,
@@ -212,14 +342,15 @@ def load_policy(checkpoint: Path, film: bool = False):
                            mask_force=mask_force, inject=inject)
         print(f"[run_policy] FiLM ENABLED (cond={cond} inject={inject} mask_force={mask_force} "
               f"F0={f0:.0f} tau={tau:.0f} fz_tau={fz_tau:.0f})")
-    model_dir = checkpoint / "pretrained_model"
-    policy = SmolVLAPolicy.from_pretrained(model_dir)
+
+    policy = get_policy_class(cfg.type).from_pretrained(model_dir, config=cfg)
     policy.eval()
     pre, post = make_pre_post_processors(
         policy_cfg=policy.config,
-        pretrained_path=str(model_dir),
+        pretrained_path=model_dir,
         preprocessor_overrides={"device_processor": {"device": str(policy.config.device)}},
     )
+    print(f"[run_policy] loaded {cfg.type} checkpoint from {model_dir}")
     return policy, pre, post
 
 
@@ -252,7 +383,7 @@ def latest_checkpoint() -> Path:
 # ── self-test (offline, no robot) ─────────────────────────────────────
 
 
-def self_test(take_dir: Path, checkpoint: Path):
+def self_test(take_dir: Path, checkpoint: Path, film: bool = False):
     print(f"self-test on {take_dir.name}\ncheckpoint: {checkpoint}\n")
     instruction = json.loads((take_dir / "meta.json").read_text())["instruction"]
     frames = [json.loads(l) for l in (take_dir / "states.jsonl").open()]
@@ -325,8 +456,11 @@ def self_test(take_dir: Path, checkpoint: Path):
 
     # 3. policy predictions vs recorded actions on this take.
     print("== policy predicted vs recorded action (first 5 + summary) ==")
-    policy, pre, post = load_policy(checkpoint)
+    policy, pre, post = load_policy(checkpoint, film=film)
     policy.reset()
+    abs_action = int(policy.config.action_feature.shape[0]) == 8
+    suction_idx = 7 if abs_action else 6
+    print(f"  action space: {'absolute pose+suction (8d)' if abs_action else 'delta pose+suction (7d)'}")
     errs = []
     n = min(len(frames) - 1, len(rgb_paths))
     import cv2
@@ -344,13 +478,18 @@ def self_test(take_dir: Path, checkpoint: Path):
         pred = predict(policy, pre, post, s, ObsBuilder.image(img), instruction, depth_img)
         # recorded action
         cur_pos, nxt_pos = np.array(f["ee"]["pos"]), np.array(frames[i + 1]["ee"]["pos"])
-        rec = nxt_pos - cur_pos
+        if abs_action:
+            rec, err = nxt_pos, pred[:3] - nxt_pos
+        else:
+            rec = nxt_pos - cur_pos
+            err = pred[:3] - rec
         if i < 5:
-            print(f"  t={i:3d} pred dpos(mm)={pred[:3]*1000} suction={pred[6]:.2f} "
-                  f"| rec dpos(mm)={rec*1000}")
-        errs.append(np.abs(pred[:3] - rec))
+            label = "abs pos" if abs_action else "dpos"
+            print(f"  t={i:3d} pred {label}(mm)={pred[:3]*1000} suction={pred[suction_idx]:.2f} "
+                  f"| rec {label}(mm)={rec*1000}")
+        errs.append(np.abs(err))
     errs = np.array(errs)
-    print(f"  mean |dpos err| over take = {errs.mean()*1000:.2f} mm "
+    print(f"  mean |{'pos' if abs_action else 'dpos'} err| over take = {errs.mean()*1000:.2f} mm "
           f"(matches eval_offline scale)\n")
 
 
@@ -415,11 +554,12 @@ class RolloutLog:
     sub-task (mirroring the demo recordings), named <stamp>_ep<NN>_<task>."""
 
     def __init__(self, root: Path, checkpoint: Path, save_images: bool = False,
-                 run_num: int = 0):
+                 run_num: int = 0, action_space_label: str = "ee_delta+suction"):
         self.root = Path(root)
         suffix = f"_r{run_num:02d}" if run_num > 1 else ""
         self.stamp = time.strftime("%Y%m%d-%H%M%S") + suffix
         self.checkpoint = str(checkpoint)
+        self.action_space_label = action_space_label
         self.save_images = save_images
         self.f = None
         self.take_dir = None
@@ -480,7 +620,7 @@ class RolloutLog:
         self.f = None
         meta = {
             "phase": self.task, "instruction": self.instruction,
-            "action_space": "ee_delta+suction", "ee_rotation": "quat_wxyz, base_link",
+            "action_space": self.action_space_label, "ee_rotation": "quat_wxyz, base_link",
             "source": "run_policy.py rollout", "checkpoint": self.checkpoint,
             "frames": self.n, "success": success,
         }
@@ -548,6 +688,12 @@ def run_live(checkpoint: Path, tasks: list[str], *, commit: bool,
         policy.config.n_action_steps = n_action_steps
     chunk_steps = int(getattr(policy.config, "n_action_steps", 1))
     layers = int(ikcfg.SRC_LAYERS_REMAINING if layers is None else layers)
+    # abs-action checkpoints (convert_to_lerobot.py --action-space abs) predict
+    # the ABSOLUTE next EE pose [x,y,z,qw,qx,qy,qz,suction] instead of a delta
+    # -- no running reference to integrate onto, just a per-tick safety clamp.
+    abs_action = int(policy.config.action_feature.shape[0]) == 8
+    suction_idx = 7 if abs_action else 6
+    print(f"[run_policy] action space: {'absolute pose+suction (8d)' if abs_action else 'delta pose+suction (7d)'}")
 
     robot_configs = get_robot_config()
     robot_configs.enable_sensor("head_camera")
@@ -624,7 +770,9 @@ def run_live(checkpoint: Path, tasks: list[str], *, commit: bool,
                         break
                     continue
 
-            log = RolloutLog(log_dir, checkpoint, save_images=log_images, run_num=run_num) if log_dir is not None else None
+            log = RolloutLog(log_dir, checkpoint, save_images=log_images, run_num=run_num,
+                              action_space_label="ee_abs+suction" if abs_action else "ee_delta+suction"
+                              ) if log_dir is not None else None
             # Poll stdin each tick: 'q' breaks the current run; any other line
             # is the --go ENTER-abort.
             watch_stdin = commit or loop
@@ -670,34 +818,45 @@ def run_live(checkpoint: Path, tasks: list[str], *, commit: bool,
                         pred = predict(policy, pre, post, state, ObsBuilder.image(rgb),
                                        instruction, ObsBuilder.depth_image(depth_m))
                         t_inf = time.time()
-                        clamped = clamp_action(pred)
-                        clip = "CLIP" if not np.allclose(clamped, pred) else "    "
                         cur_pos, cur_quat = state[:3], state[3:7]
                         contact = float(np.linalg.norm(wrench6[:3])) - baseline_f
                         has_sealed = has_sealed or sealed
                         # Privileged descend-until-contact gate (diagnostic): while a pick
                         # is descending and not yet in contact/sealed, ensure the EE keeps
                         # going DOWN rather than stopping at the policy's habitual depth.
-                        # Overrides ONLY the z-delta (lateral/rotation/suction stay from the
-                        # policy, so alignment failures aren't masked). Stops the instant
-                        # contact rises or seal forms; hard-guarded by descend_floor and the
-                        # force-limit abort below.
+                        # Overrides ONLY the z-target (lateral/rotation/suction stay from
+                        # the policy, so alignment failures aren't masked). Stops the
+                        # instant contact rises or seal forms; hard-guarded by
+                        # descend_floor and the force-limit abort below.
                         gating = (descend_until_contact and kind == "pick"
                                   and not has_sealed and contact < contact_n
                                   and descend_floor < cur_pos[2] < DESCEND_Z)
-                        if gating:
-                            clamped[2] = min(clamped[2], -descend_rate)
-                        # Integrate deltas onto a running REFERENCE target, NOT the
-                        # live pose: at 15 Hz the arm lags the target, so cur_pos+dpos
-                        # under-advances and the motion stalls. The policy emits an
-                        # open-loop chunk and only re-reads the observation at chunk
-                        # boundaries (every chunk_steps ticks), so re-ground the
-                        # reference to the live pose there (a small, safe backward
-                        # correction) and advance it purely by the deltas in between.
-                        if tick % chunk_steps == 0:
-                            ref_pos, ref_quat = cur_pos.copy(), cur_quat.copy()
-                        pos_tgt, rpy_tgt, R_tgt = integrate(ref_pos, ref_quat, clamped)
-                        ref_pos, ref_quat = pos_tgt, _rpy_to_quat_wxyz(rpy_tgt)
+                        if abs_action:
+                            # Each chunk step is already an ABSOLUTE target (no
+                            # running reference to integrate onto) -- just cap the
+                            # implied step from the live pose per tick.
+                            pos_tgt, rpy_tgt, dpos, drot, clipped = clamp_abs_action(
+                                pred, cur_pos, cur_quat)
+                            clip = "CLIP" if clipped else "    "
+                            if gating:
+                                pos_tgt[2] = min(pos_tgt[2], cur_pos[2] - descend_rate)
+                            clamped = np.concatenate([dpos, drot, [pred[suction_idx]]])
+                        else:
+                            clamped = clamp_action(pred)
+                            clip = "CLIP" if not np.allclose(clamped, pred) else "    "
+                            if gating:
+                                clamped[2] = min(clamped[2], -descend_rate)
+                            # Integrate deltas onto a running REFERENCE target, NOT the
+                            # live pose: at 15 Hz the arm lags the target, so cur_pos+dpos
+                            # under-advances and the motion stalls. The policy emits an
+                            # open-loop chunk and only re-reads the observation at chunk
+                            # boundaries (every chunk_steps ticks), so re-ground the
+                            # reference to the live pose there (a small, safe backward
+                            # correction) and advance it purely by the deltas in between.
+                            if tick % chunk_steps == 0:
+                                ref_pos, ref_quat = cur_pos.copy(), cur_quat.copy()
+                            pos_tgt, rpy_tgt, R_tgt = integrate(ref_pos, ref_quat, clamped)
+                            ref_pos, ref_quat = pos_tgt, _rpy_to_quat_wxyz(rpy_tgt)
                         max_tgt_z = max(max_tgt_z, float(pos_tgt[2]))
                         if log is not None:
                             log.frame(t0, state, wrench6, pred, clamped, tick % chunk_steps == 0,
@@ -718,7 +877,9 @@ def run_live(checkpoint: Path, tasks: list[str], *, commit: bool,
                             cc = getattr(policy.model, "_cur_contact", None)
                             if cc is not None:
                                 chat_str = " c^=[" + ",".join(f"{v:.2f}" for v in cc.flatten().tolist()) + "]"
-                        print(f"[{ti+1}.{tick:3d}] dpos(mm)={pred[:3]*1000} suc={pred[6]:.2f} {clip} "
+                        act_label = "abs" if abs_action else "dpos"
+                        act_mm = pred[:3] * (1.0 if abs_action else 1000.0)
+                        print(f"[{ti+1}.{tick:3d}] {act_label}={act_mm.round(4)} suc={pred[suction_idx]:.2f} {clip} "
                               f"{'GATE' if gating else '    '} | "
                               f"tgt={pos_tgt.round(3)} z={cur_pos[2]:.2f} "
                               f"box={('ok' if in_box else 'OUT') if (enforce_box and box is not None) else 'off'} "
@@ -761,7 +922,7 @@ def run_live(checkpoint: Path, tasks: list[str], *, commit: bool,
                             # Suction commands hit a weblogic endpoint that blocks ~0.5 s
                             # per call, so command it only on a state CHANGE — otherwise
                             # the loop is pinned at ~2 Hz by the suction call alone.
-                            want_suction = pred[6] > 0.5
+                            want_suction = pred[suction_idx] > 0.5
                             if want_suction != suction_io.is_suction_commanded_on():
                                 (suction_io.suction_on if want_suction else suction_io.suction_off)()
 
@@ -877,7 +1038,7 @@ def main():
     args = ap.parse_args()
 
     if args.self_test:
-        self_test(args.self_test, args.checkpoint or latest_checkpoint())
+        self_test(args.self_test, args.checkpoint or latest_checkpoint(), film=args.film)
         return
     if not (args.dry_run or args.go):
         ap.error("choose --self-test TAKE_DIR, --dry-run, or --go")

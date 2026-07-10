@@ -1,0 +1,46 @@
+natural per-step dpos = 3.73 mm | constant dims (std~0): []
+
+Loading  HuggingFaceTB/SmolVLM2-500M-Video-Instruct weights ...
+`torch_dtype` is deprecated! Use `dtype` instead!
+Loading weights:   0%|          | 0/489 [00:00<?, ?it/s]Loading weights:  83%|████████▎ | 408/489 [00:00<00:00, 4057.19it/s]Loading weights: 100%|██████████| 489/489 [00:00<00:00, 4313.24it/s]
+Warning: You are sending unauthenticated requests to the HF Hub. Please set a HF_TOKEN to enable higher rate limits and faster downloads.
+WARNING:huggingface_hub.utils._http:Warning: You are sending unauthenticated requests to the HF Hub. Please set a HF_TOKEN to enable higher rate limits and faster downloads.
+Reducing the number of VLM layers to 16 ...
+Loading weights from local directory
+  [1/6] 20260615-164705_ep0001_case_pick: phases approach=6f, descend=6f, lift=6f
+  [2/6] 20260615-164850_ep0007_case_pick: phases approach=6f, descend=6f, lift=6f
+  [3/6] 20260615-165115_ep0014_case_pick: phases approach=6f, descend=6f, lift=6f
+  [4/6] 20260615-165316_ep0021_case_pick: phases approach=6f, descend=6f, lift=6f
+  [5/6] 20260615-165503_ep0027_case_pick: phases approach=6f, descend=6f, lift=6f
+  [6/6] 20260615-170025_ep0001_case_pick: phases approach=6f, descend=6f, lift=6f
+
+===== P1 STATE SENSITIVITY (action dpos mm per natural feature swing) =====
+  ee_x            1.089 mm  ( 29.2% of step)
+  ee_y            1.665 mm  ( 44.7% of step)
+  ee_z            3.442 mm  ( 92.3% of step)
+  ee_qw           0.706 mm  ( 19.0% of step)
+  ee_qx           1.398 mm  ( 37.5% of step)
+  ee_qy           1.192 mm  ( 32.0% of step)
+  ee_qz           0.546 mm  ( 14.7% of step)
+  suction         1.439 mm  ( 38.6% of step)  <- contact
+  vacuum_sealed   4.531 mm  (121.6% of step)  <- contact
+  fx              0.729 mm  ( 19.5% of step)  <- contact
+  fy              0.747 mm  ( 20.0% of step)  <- contact
+  fz              0.741 mm  ( 19.9% of step)  <- contact
+  tx              0.898 mm  ( 24.1% of step)  <- contact
+  ty              0.699 mm  ( 18.7% of step)  <- contact
+  tz              1.208 mm  ( 32.4% of step)  <- contact
+
+  -- contact dims by phase (mm) --
+  dim              approach   descend      lift
+  suction             2.007     1.536     0.774
+  vacuum_sealed       4.379     6.162     3.052
+  fx                  1.494     0.311     0.381
+  fy                  1.066     0.932     0.243
+  fz                  1.294     0.849     0.079
+  tx                  1.038     1.447     0.210
+  ty                  1.373     0.547     0.176
+  tz                  1.896     1.521     0.206
+
+wrote /home/dexmate/CNS_code/Dexmate/Research/contact_aware_vla/results/state_sensitivity.json
+wrote /home/dexmate/CNS_code/Dexmate/Research/contact_aware_vla/results/state_sensitivity.png

@@ -1,0 +1,7 @@
+loaded /home/dexmate/CNS_code/Dexmate/MPC/runs/dyn/best.pt | 12 val episodes | device cuda
+
+phase            kind  |   pre-seal cos|suc  post-seal cos|suc | imagined: dz↓  seal max  lifted?
+case_pick        pick  |     0.37|0.46        -0.28|0.65     |        0.287      1.00     True
+case_place       place |    -0.79|0.55         0.40|0.26     |        0.311      1.00     True
+
+saved imagined-rollout plots -> /home/dexmate/CNS_code/Dexmate/MPC/runs/dyn/plan_*.png

@@ -1,0 +1,277 @@
+checkpoint: /home/dexmate/CNS_code/Dexmate/LGES/vla_training/outputs/smolvla_depthseal_fixed/checkpoints/last
+Loading  HuggingFaceTB/SmolVLM2-500M-Video-Instruct weights ...
+Warning: You are sending unauthenticated requests to the HF Hub. Please set a HF_TOKEN to enable higher rate limits and faster downloads.
+WARNING:huggingface_hub.utils._http:Warning: You are sending unauthenticated requests to the HF Hub. Please set a HF_TOKEN to enable higher rate limits and faster downloads.
+`torch_dtype` is deprecated! Use `dtype` instead!
+Loading weights:   0%|          | 0/489 [00:00<?, ?it/s]Loading weights:  37%|███▋      | 182/489 [00:00<00:00, 1730.45it/s]Loading weights:  73%|███████▎  | 356/489 [00:00<00:00, 1614.82it/s]Loading weights: 100%|██████████| 489/489 [00:00<00:00, 1792.97it/s]
+Reducing the number of VLM layers to 16 ...
+Loading weights from local directory
+chunk_size K = 50, n_action_steps = 50
+task=case_pick: 20 takes
+
+  [1/20] 20260615-164705_ep0001_case_pick: 226 frames
+      frame 25/226
+      frame 50/226
+      frame 75/226
+      frame 100/226
+      frame 125/226
+      frame 150/226
+      frame 175/226
+      frame 200/226
+      frame 225/226
+      seal events at [169], reaction lags [31]
+  [2/20] 20260615-164850_ep0007_case_pick: 237 frames
+      frame 25/237
+      frame 50/237
+      frame 75/237
+      frame 100/237
+      frame 125/237
+      frame 150/237
+      frame 175/237
+      frame 200/237
+      frame 225/237
+      seal events at [180], reaction lags [20]
+  [3/20] 20260615-165115_ep0014_case_pick: 248 frames
+      frame 25/248
+      frame 50/248
+      frame 75/248
+      frame 100/248
+      frame 125/248
+      frame 150/248
+      frame 175/248
+      frame 200/248
+      frame 225/248
+      seal events at [188], reaction lags [12]
+  [4/20] 20260615-165316_ep0021_case_pick: 248 frames
+      frame 25/248
+      frame 50/248
+      frame 75/248
+      frame 100/248
+      frame 125/248
+      frame 150/248
+      frame 175/248
+      frame 200/248
+      frame 225/248
+      seal events at [188], reaction lags [12]
+  [5/20] 20260615-165503_ep0027_case_pick: 257 frames
+      frame 25/257
+      frame 50/257
+      frame 75/257
+      frame 100/257
+      frame 125/257
+      frame 150/257
+      frame 175/257
+      frame 200/257
+      frame 225/257
+      frame 250/257
+      seal events at [194], reaction lags [6]
+  [6/20] 20260615-170025_ep0001_case_pick: 254 frames
+      frame 25/254
+      frame 50/254
+      frame 75/254
+      frame 100/254
+      frame 125/254
+      frame 150/254
+      frame 175/254
+      frame 200/254
+      frame 225/254
+      frame 250/254
+      seal events at [197], reaction lags [3]
+  [7/20] 20260615-170242_ep0008_case_pick: 243 frames
+      frame 25/243
+      frame 50/243
+      frame 75/243
+      frame 100/243
+      frame 125/243
+      frame 150/243
+      frame 175/243
+      frame 200/243
+      frame 225/243
+      seal events at [185], reaction lags [15]
+  [8/20] 20260615-170506_ep0014_case_pick: 249 frames
+      frame 25/249
+      frame 50/249
+      frame 75/249
+      frame 100/249
+      frame 125/249
+      frame 150/249
+      frame 175/249
+      frame 200/249
+      frame 225/249
+      seal events at [190], reaction lags [10]
+  [9/20] 20260615-170722_ep0021_case_pick: 272 frames
+      frame 25/272
+      frame 50/272
+      frame 75/272
+      frame 100/272
+      frame 125/272
+      frame 150/272
+      frame 175/272
+      frame 200/272
+      frame 225/272
+      frame 250/272
+      seal events at [209], reaction lags [41]
+  [10/20] 20260615-171001_ep0028_case_pick: 258 frames
+      frame 25/258
+      frame 50/258
+      frame 75/258
+      frame 100/258
+      frame 125/258
+      frame 150/258
+      frame 175/258
+      frame 200/258
+      frame 225/258
+      frame 250/258
+      seal events at [196], reaction lags [4]
+  [11/20] 20260615-171419_ep0001_case_pick: 226 frames
+      frame 25/226
+      frame 50/226
+      frame 75/226
+      frame 100/226
+      frame 125/226
+      frame 150/226
+      frame 175/226
+      frame 200/226
+      frame 225/226
+      seal events at [169], reaction lags [31]
+  [12/20] 20260615-171620_ep0007_case_pick: 238 frames
+      frame 25/238
+      frame 50/238
+      frame 75/238
+      frame 100/238
+      frame 125/238
+      frame 150/238
+      frame 175/238
+      frame 200/238
+      frame 225/238
+      seal events at [180], reaction lags [20]
+  [13/20] 20260615-171846_ep0014_case_pick: 244 frames
+      frame 25/244
+      frame 50/244
+      frame 75/244
+      frame 100/244
+      frame 125/244
+      frame 150/244
+      frame 175/244
+      frame 200/244
+      frame 225/244
+      seal events at [185], reaction lags [15]
+  [14/20] 20260615-172048_ep0021_case_pick: 245 frames
+      frame 25/245
+      frame 50/245
+      frame 75/245
+      frame 100/245
+      frame 125/245
+      frame 150/245
+      frame 175/245
+      frame 200/245
+      frame 225/245
+      seal events at [184], reaction lags [16]
+  [15/20] 20260615-172256_ep0027_case_pick: 255 frames
+      frame 25/255
+      frame 50/255
+      frame 75/255
+      frame 100/255
+      frame 125/255
+      frame 150/255
+      frame 175/255
+      frame 200/255
+      frame 225/255
+      frame 250/255
+      seal events at [193], reaction lags [7]
+  [16/20] 20260615-172734_ep0001_case_pick: 226 frames
+      frame 25/226
+      frame 50/226
+      frame 75/226
+      frame 100/226
+      frame 125/226
+      frame 150/226
+      frame 175/226
+      frame 200/226
+      frame 225/226
+      seal events at [169], reaction lags [31]
+  [17/20] 20260615-172941_ep0008_case_pick: 234 frames
+      frame 25/234
+      frame 50/234
+      frame 75/234
+      frame 100/234
+      frame 125/234
+      frame 150/234
+      frame 175/234
+      frame 200/234
+      frame 225/234
+      seal events at [175], reaction lags [25]
+  [18/20] 20260615-173147_ep0014_case_pick: 244 frames
+      frame 25/244
+      frame 50/244
+      frame 75/244
+      frame 100/244
+      frame 125/244
+      frame 150/244
+      frame 175/244
+      frame 200/244
+      frame 225/244
+      seal events at [184], reaction lags [16]
+  [19/20] 20260615-173347_ep0021_case_pick: 252 frames
+      frame 25/252
+      frame 50/252
+      frame 75/252
+      frame 100/252
+      frame 125/252
+      frame 150/252
+      frame 175/252
+      frame 200/252
+      frame 225/252
+      frame 250/252
+      seal events at [192], reaction lags [8]
+  [20/20] 20260615-173547_ep0027_case_pick: 257 frames
+      frame 25/257
+      frame 50/257
+      frame 75/257
+      frame 100/257
+      frame 125/257
+      frame 150/257
+      frame 175/257
+      frame 200/257
+      frame 225/257
+      frame 250/257
+      seal events at [195], reaction lags [5]
+
+===== P0 SUMMARY =====
+{
+  "frames": 4913,
+  "seal_events": 20,
+  "reaction_lag_ticks": {
+    "mean": 16.4,
+    "max": 41,
+    "p90": 31.0
+  },
+  "reaction_lag_seconds": {
+    "mean": 1.0933333333333333,
+    "max": 2.7333333333333334
+  },
+  "staleness_dpos_mm": {
+    "at_L0": 0.0,
+    "at_Lmax": 3.2427174971319763,
+    "mean_over_L": 2.4777343766849196
+  },
+  "staleness_drot_mrad": {
+    "at_L0": 0.0,
+    "at_Lmax": 3.0103599001704135
+  },
+  "deploy_vs_fresh_dpos_mm": {
+    "near_contact": 0.30863364601524756,
+    "far_from_contact": 2.7564289245844282
+  },
+  "suction_disagree_near_contact": {
+    "near": 0.0,
+    "far": 0.008012463832628533
+  },
+  "track_recorded_dpos_mm_near_contact": {
+    "deploy": 0.16331548830142611,
+    "fresh": 0.3435044163779821
+  }
+}
+
+wrote /home/dexmate/CNS_code/Dexmate/Research/reactive_chunking/p0_results/summary.json
+wrote plots -> /home/dexmate/CNS_code/Dexmate/Research/reactive_chunking/p0_results
