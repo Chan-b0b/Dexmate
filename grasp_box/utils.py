@@ -219,7 +219,7 @@ def align_head_to_forward(bot, wait_time: float = 6.0) -> None:
     """
     forward_sum_deg = 70.0
     torso_pitch_deg = float(np.rad2deg(bot.torso.pitch_angle))
-    current_head_pos = np.asarray(bot.head._get_state()["pos"], dtype=float)
+    current_head_pos = np.asarray(bot.head.get_state()["pos"], dtype=float)
     print(current_head_pos)
     target_head_pos = np.zeros_like(current_head_pos)
     target_head_pos[0] = np.deg2rad(torso_pitch_deg - forward_sum_deg)

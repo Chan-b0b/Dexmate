@@ -4,11 +4,11 @@ Used for the barcode divert: a matched battery held by the suction cup at
 transport is gripped by the right-arm gripper (side approach), suction releases,
 and the gripper carries it to a taught lower-right joint pose and opens.
 
-Primitives only (grip_at, place_joints); the two-arm handoff choreography lives
+Primitives only (grip_at, place_ee_seq); the two-arm handoff choreography lives
 in sequence.py, which coordinates the suction arm + this gripper.
 
-Gripper poses (HANDOFF_GRIP_OFFSET, PLACE_LOWER_RIGHT_JOINTS) are from the old
-demo / unset — RE-TEACH on the robot before trusting the divert.
+Gripper poses (HANDOFF_GRIP_OFFSET, PLACE_LOWER_RIGHT_EE_SEQ) are from the old
+demo — RE-TEACH on the robot before trusting the divert.
 """
 
 from __future__ import annotations
@@ -64,14 +64,36 @@ class GripperMover(ArmMover):
         logger.info("[gripper] grip_at -> {}", "GRIPPED" if gripped else "no object")
         return gripped
 
-    def place_joints(self, joints=None) -> None:
-        """Move the right arm to the taught lower-right joint pose and open."""
-        joints = cfg.PLACE_LOWER_RIGHT_JOINTS if joints is None else joints
-        if joints is None:
-            raise ValueError("PLACE_LOWER_RIGHT_JOINTS not set — teach it first")
-        logger.info("[gripper] place at taught lower-right joint pose")
-        self.move_joints(np.asarray(joints, dtype=float))
+    def place_ee_seq(self, seq=None) -> bool:
+        """Walk the taught EE place sequence and release the battery lower-right.
+
+        Each step is (label, is_relative, pos, rpy). REL steps add to the last
+        COMMANDED pose — positions add, but rotations compose in SO(3) (Euler
+        components don't add, and near gimbal lock the readout flips). The
+        gripper partial-opens to release at the step whose label contains
+        "lower", then fully opens at the end. Returns False if a step is
+        unreachable (arm left where it stalled)."""
+        seq = cfg.PLACE_LOWER_RIGHT_EE_SEQ if seq is None else seq
+        if not seq:
+            raise ValueError("PLACE_LOWER_RIGHT_EE_SEQ not set — teach it first")
+        cmd_pos, cmd_rpy = self.current_ee_pose()
+        for label, is_relative, pos, rpy in seq:
+            if is_relative:
+                cmd_pos = cmd_pos + np.asarray(pos, dtype=float)
+                cmd_rpy = (Rotation.from_euler("xyz", rpy)
+                           * Rotation.from_euler("xyz", cmd_rpy)).as_euler("xyz")
+            else:
+                cmd_pos = np.asarray(pos, dtype=float)
+                cmd_rpy = np.asarray(rpy, dtype=float)
+            logger.info("[gripper] place step {}", label)
+            if self.move_ee(cmd_pos, cmd_rpy) is None:
+                logger.error("[gripper] place step {} unreachable — stopping", label)
+                return False
+            if "lower" in label.lower():
+                logger.info("[gripper] at {} — partial open (release)", label)
+                self.gripper.partial_open()
         self.gripper.open()
+        return True
 
 
 # ---------------------------------------------------------------------------

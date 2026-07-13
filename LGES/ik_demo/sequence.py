@@ -8,6 +8,9 @@ approach. Retry-on-failure is config-gated.
 Barcode divert + gripper handoff (for the battery moves) are layered on in
 barcode.py / gripper.py (steps 6-7); the hook is `_run_move`.
 """
+#python -m ik_demo.sequence --gripper
+
+
 
 from __future__ import annotations
 
@@ -99,9 +102,10 @@ class TaskOrchestrator:
     def _run_move(self, mv: Move, layer: int) -> bool:
         """pick(src) -> place(dst), with config-gated retry on a failed pick.
 
-        Battery moves scan the barcode DURING the pick descent; a target match
-        is logged but still placed in its case slot like any other battery
-        (gripper divert removed — sequence may change to not need a handoff).
+        Battery moves scan the barcode DURING the pick descent; a target match is
+        diverted to the right-arm gripper (two-arm handoff) when a gripper is
+        available, else seated in its case slot like any other battery. A divert
+        that can't grip falls back to the case place.
         Descent z is predicted from each column's layer-1 anchor + constant pitch.
         """
         # Battery moves scan for the barcode during the pick (barcode-gated pick).
@@ -125,13 +129,39 @@ class TaskOrchestrator:
             self._record_z(mv.src, res.contact_ee_z, pred_src)
             if res.barcode is not None:
                 logger.info("[{}] barcode {!r} (target={})", mv.label, res.barcode, is_target(res.barcode))
-            if is_target(res.barcode):
-                logger.info("[{}] TARGET battery {!r} — placing in case (divert disabled)",
+            if self._gripper is not None and is_target(res.barcode):
+                logger.info("[{}] TARGET battery {!r} — diverting to right-arm gripper",
                             mv.label, res.barcode)
+                if self._divert(mv):
+                    return True
+                logger.warning("[{}] divert failed — seating in case instead", mv.label)
             pres = self._mover.place(cfg.TAUGHT_POSES[mv.dst], expected_z=pred_dst)
             self._record_z(mv.dst, pres.contact_ee_z, pred_dst)
             return True
         return False
+
+    def _divert(self, mv: Move) -> bool:
+        """Two-arm handoff of the suction-held battery to the right-arm gripper.
+
+        The gripper side-grips at the suction EE pose + HANDOFF_GRIP_OFFSET; once
+        it confirms a grasp, suction releases and the gripper runs the taught EE
+        place sequence (carry -> lower/release -> retract). Returns False (leaving
+        the part still on the cup, so the caller can fall back to a case place) if
+        the place sequence isn't taught or the gripper reports no object.
+        """
+        if not cfg.PLACE_LOWER_RIGHT_EE_SEQ:
+            logger.warning("[{}] PLACE_LOWER_RIGHT_EE_SEQ not taught — skipping divert", mv.label)
+            return False
+        pos, _ = self._mover.current_ee_pose()
+        off = cfg.HANDOFF_GRIP_OFFSET
+        grasp_pos = [float(pos[i]) + off[i] for i in range(3)]
+        logger.info("[{}] divert: right-arm side-grip at suction EE + offset", mv.label)
+        if not self._gripper.grip_at(grasp_pos):
+            logger.warning("[{}] gripper reported no object — aborting divert", mv.label)
+            return False
+        suction_io.release()            # suction lets go; the gripper now holds the battery
+        self._gripper.place_ee_seq()    # carry -> lower/release -> retract
+        return True
 
 
 # ---------------------------------------------------------------------------

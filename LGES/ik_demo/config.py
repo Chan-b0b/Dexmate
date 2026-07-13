@@ -68,7 +68,7 @@ GRASP_ORIENTATION_RPY: tuple[float, float, float] = (np.pi, 0.0, 0.0)
 #
 # Values are conservative starting points — TUNE on the robot.
 # ---------------------------------------------------------------------------
-SPEED_SCALE: float = 0.7            # global multiplier on every cap below
+SPEED_SCALE: float = 0.1            # global multiplier on every cap below (0.7 = normal; lowered for first slow handoff test)
 
 CONTROL_HZ: float = 100.0           # motion streaming rate (set_joint_pos_vel)
 
@@ -297,8 +297,22 @@ GRIPPER_EE_FRAME: str = "R_gripper_base"
 HANDOFF_GRIP_OFFSET: tuple[float, float, float] = (0.0624, -0.1073, -0.1508)
 GRIPPER_GRASP_RPY: tuple[float, float, float] = (-1.387, np.pi / 2, 0.0)
 GRIPPER_PREGRASP_STANDOFF_M: float = 0.06   # back off along the approach axis, then move in
-# Right-arm joint pose where the gripper releases the diverted battery (lower-right).
-PLACE_LOWER_RIGHT_JOINTS: list[float] | None = None   # TEACH before enabling divert
+# Right-arm EE place sequence, run AFTER the gripper grips the suction-held
+# battery and suction releases. Each step is (label, is_relative, (x,y,z) m,
+# (roll,pitch,yaw) rad in base_link). REL steps add to the last COMMANDED pose
+# (rotations compose in SO(3), not by Euler addition — the readout flips near
+# gimbal lock). The gripper partial-opens to release at the step whose label
+# contains "lower". Ported from the old demo's taught_ee_poses_right.txt:
+# steps 1-2 (REL) carry the battery from the grip point over to the right; the
+# 3 absolute poses fine-position, lower/release, and retract.
+# GEOMETRY IS FROM THE OLD DEMO — RE-TEACH on the robot before trusting.
+PLACE_LOWER_RIGHT_EE_SEQ: list | None = [
+    ("To Right 1", True,  (0.0, 0.0, -0.06),               (0.0, 0.0, 0.0)),
+    ("To Right 2", True,  (0.1, -0.3, 0.08),               (0.0, 0.0, -1.5708)),
+    ("To Right 3", False, (0.876799, -0.507694, 0.925),    (0.210239, 1.570121, 0.200709)),
+    ("Lower",      False, (0.751889, -0.548590, 0.7195),   (-3.060807, 1.160005, 3.060476)),
+    ("Back",       False, (0.635044, -0.548479, 0.75),     (3.131945, 1.219084, 2.971093)),
+]
 
 # ---------------------------------------------------------------------------
 # Chassis-based detection pick&place (chassis_sequence.py).
