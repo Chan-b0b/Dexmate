@@ -53,3 +53,19 @@ done
 
 echo "[icm] done. checkpoints:"
 ls -la "$OUTDIR"/icm_0708_*.pt
+
+# PUSH=1 uploads all variants to the (private) HF repo Chanho-Lee/icm_case_pick_0708
+if [[ "${PUSH:-0}" == "1" ]]; then
+  "$VENV/bin/python" - <<'PYEOF'
+from pathlib import Path
+from huggingface_hub import HfApi
+api = HfApi()
+repo_id = f"{api.whoami()['name']}/icm_case_pick_0708"
+api.create_repo(repo_id, repo_type="model", private=True, exist_ok=True)
+for f in sorted(Path.home().glob("checkpoints/icm_0708_*.pt")):
+    print(f"[icm] uploading {f.name} -> {repo_id}")
+    api.upload_file(path_or_fileobj=str(f), path_in_repo=f.name, repo_id=repo_id,
+                    commit_message=f"upload {f.name}")
+print(f"[icm] https://huggingface.co/{repo_id}")
+PYEOF
+fi
