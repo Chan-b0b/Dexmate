@@ -184,7 +184,7 @@ class ArmMover:
 
     def _setup_ruckig(self) -> None:
         self._otg = Ruckig(_ARM_DOF)
-        s = float(cfg.SPEED_SCALE)
+        s = float(cfg.SPEED_SCALE_RIGHT if self._side == "right" else cfg.SPEED_SCALE_LEFT)
         # Clamp the configured velocity cap to the arm's real per-joint limit.
         self._ruckig_vmax = np.minimum(self._v_max, cfg.MAX_JOINT_VEL) * s
         self._ruckig_amax = np.full(_ARM_DOF, cfg.MAX_JOINT_ACCEL * s)
@@ -242,32 +242,60 @@ class ArmMover:
         min_motion: pin the posture target to the seed (stay on one branch,
             minimal joint travel) — use for live moves. Cold offline solves
             leave it at the mid-ranges (curate away from limits).
+
+        A QP iteration can diverge to a non-finite (NaN/Inf) configuration
+        near a singularity or an infeasible limit box — fk()'s
+        Rotation.from_matrix does an SVD that raises LinAlgError on non-finite
+        input, which would crash the caller's streamed loop outright instead
+        of just failing to converge. On that, retry from the SAME seed with
+        escalating LM damping rather than giving up immediately: retrying from
+        a *different* seed (e.g. home) is NOT safe here, since a live per-tick
+        caller (move_ee_vertical, the suction descent loops) computes its
+        velocity feedforward as (new_q - prev_q)/dt — landing on an unrelated
+        branch from a different seed would command a large, sudden jump. Only
+        after every damping level still diverges is it reported unreachable
+        (pos_err_m=inf trips every caller's existing REACH_TOL_M check) so it
+        halts gracefully like any other unreachable target.
         """
         seed = self._home_seed if seed is None else np.asarray(seed, dtype=float)
-        configuration = self._configuration(seed)
-        if min_motion:
-            self._posture_task.set_target(configuration.q.copy())
-        else:
-            self._posture_task.set_target(self._posture_mid)
         target = pin.SE3(_rpy_to_matrix(*rpy), np.asarray(pos, dtype=float))
         self._ee_task.set_target(target)
-        tasks = [self._ee_task, self._posture_task]
-        converged = False
-        for _ in range(cfg.IK_MAX_ITERS):
-            v = solve_ik(configuration, tasks, cfg.IK_DT, solver=self._solver, limits=self._limits)
-            configuration.update(pin.integrate(self._model, configuration.q, v * cfg.IK_DT))
-            if np.linalg.norm(self._ee_task.compute_error(configuration)) < cfg.IK_CONVERGENCE_THRESHOLD:
-                converged = True
-                break
-        arm_q = self._arm_q_from_full(configuration.q)
-        fk_pos, _ = self.fk(arm_q)
-        return PoseSolution(
-            q=arm_q,
-            converged=converged,
-            pos_err_m=float(np.linalg.norm(fk_pos - np.asarray(pos, dtype=float))),
-            in_collision=self.in_collision(arm_q),
-            in_limits=self.in_limits(arm_q),
-        )
+        orig_damping = self._ee_task.lm_damping
+        try:
+            for damping in (orig_damping, orig_damping * 1e3, orig_damping * 1e6):
+                self._ee_task.lm_damping = damping
+                configuration = self._configuration(seed)
+                if min_motion:
+                    self._posture_task.set_target(configuration.q.copy())
+                else:
+                    self._posture_task.set_target(self._posture_mid)
+                tasks = [self._ee_task, self._posture_task]
+                converged = False
+                for _ in range(cfg.IK_MAX_ITERS):
+                    v = solve_ik(configuration, tasks, cfg.IK_DT, solver=self._solver, limits=self._limits)
+                    configuration.update(pin.integrate(self._model, configuration.q, v * cfg.IK_DT))
+                    if np.linalg.norm(self._ee_task.compute_error(configuration)) < cfg.IK_CONVERGENCE_THRESHOLD:
+                        converged = True
+                        break
+                arm_q = self._arm_q_from_full(configuration.q)
+                if np.all(np.isfinite(arm_q)):
+                    if damping != orig_damping:
+                        logger.warning("[arm] IK diverged at damping={:.1e} — recovered at damping={:.1e}",
+                                        orig_damping, damping)
+                    fk_pos, _ = self.fk(arm_q)
+                    return PoseSolution(
+                        q=arm_q,
+                        converged=converged,
+                        pos_err_m=float(np.linalg.norm(fk_pos - np.asarray(pos, dtype=float))),
+                        in_collision=self.in_collision(arm_q),
+                        in_limits=self.in_limits(arm_q),
+                    )
+            logger.warning("[arm] IK diverged to a non-finite configuration even after damping "
+                            "retries — treating as unreachable")
+            return PoseSolution(q=seed, converged=False, pos_err_m=float("inf"),
+                                 in_collision=True, in_limits=False)
+        finally:
+            self._ee_task.lm_damping = orig_damping
 
     def _posture_mid_arm(self) -> np.ndarray:
         return np.array([self._posture_mid[self._model.idx_qs[j]] for j in self._arm_joint_ids])

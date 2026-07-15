@@ -6,15 +6,20 @@ Sends ``T`` to fire a read and returns the decoded string.
 "while descending" during a pick without stalling the descent loop, then
 reports a value only if enough reads agree.
 
-Reused as-is from case_battery_demo, minus the dashboard scan-lock (the lock
-only told the dashboard image feed to yield the Cognex reader; with no
-dashboard there is no competing client, so it is gone).
+The scan-lock (touched while actively triggering, cleared on stop) is back:
+ik_demo.dashboard_publish now runs alongside case_battery_demo.dashboard.barcode
+(same spool dir), and that image feed only ever pulls ONE frame at startup and
+then waits for this lock to go fresh -> stale before pulling again. Without
+it, the dashboard's barcode panel silently freezes after its first frame.
 """
 
 from __future__ import annotations
 
+import os
+import random
 import socket
 import threading
+from collections import Counter
 
 from loguru import logger
 
@@ -25,6 +30,28 @@ except ImportError:  # allow running a module directly from ik_demo/
 
 # Reader replies that mean "no code read" rather than a real barcode.
 _NO_CODE = {"", "NOREAD", "NO READ", "NG"}
+
+# Matches dashboard_publish.DEFAULT_SPOOL_DIR / case_battery_demo.dashboard.barcode's
+# DEFAULT_SPOOL_DIR — the same lock path both sides agree on.
+DEFAULT_SPOOL_DIR = "/tmp/cns_dashboard"
+SCAN_LOCK_PATH = os.path.join(DEFAULT_SPOOL_DIR, "bcr_scanning.lock")
+
+
+def _touch_scan_lock() -> None:
+    """Refresh the scan lock (best-effort) so the dashboard image feed backs off."""
+    try:
+        os.makedirs(DEFAULT_SPOOL_DIR, exist_ok=True)
+        with open(SCAN_LOCK_PATH, "w") as f:
+            f.write("1")
+    except OSError:
+        pass
+
+
+def _clear_scan_lock() -> None:
+    try:
+        os.remove(SCAN_LOCK_PATH)
+    except OSError:
+        pass
 
 
 def scan_once(
@@ -64,9 +91,9 @@ def scan_once(
 class BackgroundScanner:
     """Fires reads in a daemon thread and reports the agreed value.
 
-    Start before a pick, stop after. ``result()`` returns the barcode iff at
-    least ``cfg.BCR_MIN_READS`` successful reads were collected and they all
-    agree; any disagreement (two different codes seen) yields None.
+    Start before a pick, stop after. ``result()`` returns the majority code
+    among the collected reads, provided its count reaches ``cfg.BCR_MIN_READS``.
+    A true tie is broken randomly rather than treated as no-read.
     """
 
     def __init__(
@@ -84,12 +111,14 @@ class BackgroundScanner:
     def start(self) -> "BackgroundScanner":
         self._reads = []
         self._stop.clear()
+        _touch_scan_lock()  # claim the reader before the first trigger
         self._thread = threading.Thread(target=self._run, name="bcr-scan", daemon=True)
         self._thread.start()
         return self
 
     def _run(self) -> None:
         while not self._stop.is_set():
+            _touch_scan_lock()  # keep the lock fresh so the image feed stays backed off
             code = scan_once(self._host, self._port)
             if code is not None:
                 with self._lock:
@@ -111,6 +140,7 @@ class BackgroundScanner:
         if self._thread is not None:
             self._thread.join(timeout=cfg.BCR_SCAN_TIMEOUT_S + 1.0)
             self._thread = None
+        _clear_scan_lock()  # release the reader so the image feed resumes
 
     def __enter__(self) -> "BackgroundScanner":
         return self.start()
@@ -119,15 +149,31 @@ class BackgroundScanner:
         self.stop()
 
     def result(self) -> str | None:
-        """Agreed barcode, or None if too few reads / disagreement."""
+        """Majority-agreed barcode, or None if too few reads even for the winner.
+
+        The winning code's OWN count (not the total read count) must reach
+        cfg.BCR_MIN_READS — e.g. 2 agreeing reads out of 5 noisy ones still wins.
+        A true tie for first place is broken randomly (never yields None just
+        because of a tie).
+        """
         with self._lock:
             reads = list(self._reads)
-        unique = set(reads)
-        if len(reads) >= cfg.BCR_MIN_READS and len(unique) == 1:
-            logger.info("[BCR] agreed: {!r}  ({} reads)", reads[0], len(reads))
-            return reads[0]
-        if len(unique) > 1:
-            logger.warning("[BCR] inconsistent reads, ignoring: {}", sorted(unique))
-        elif reads:
-            logger.info("[BCR] only {} read(s) (< {}), ignoring", len(reads), cfg.BCR_MIN_READS)
-        return None
+        if not reads:
+            return None
+        counts = Counter(reads)
+        top_n = max(counts.values())
+        tied = [code for code, n in counts.items() if n == top_n]
+        if len(tied) > 1:
+            code = random.choice(tied)
+            logger.warning("[BCR] tie among {} ({} reads each) — randomly picked {!r}",
+                           sorted(tied), top_n, code)
+        else:
+            code = tied[0]
+            if len(counts) > 1:
+                logger.warning("[BCR] inconsistent reads {} — going with majority {!r} ({}/{})",
+                               dict(counts), code, top_n, len(reads))
+        if top_n < cfg.BCR_MIN_READS:
+            logger.info("[BCR] only {} read(s) for {!r} (< {}), ignoring", top_n, code, cfg.BCR_MIN_READS)
+            return None
+        logger.info("[BCR] agreed: {!r}  ({}/{} reads)", code, top_n, len(reads))
+        return code

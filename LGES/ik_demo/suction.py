@@ -34,18 +34,34 @@ except ImportError:  # allow `python suction.py` from inside ik_demo/
     from drivers.bcr import BackgroundScanner
 
 
-def _sweep_offsets(ring_step: float, max_rx: float, max_ry: float, angles: int) -> list[tuple[float, float]]:
-    """Ellipse-ring (dx, dy) offsets in the case-local frame, expanding outward
-    from (0, 0). Used by the barcode sweep when no read happens by creep_z."""
-    import math
+def _axis_steps(step: float, max_v: float) -> list[float]:
+    """0, +step, -step, +2*step, -2*step, ... out to max_v."""
+    if step <= 0.0 or max_v <= 0.0:
+        return [0.0]
+    out = [0.0]
+    v = step
+    while v <= max_v + 1e-9:
+        out.append(v)
+        out.append(-v)
+        v += step
+    return out
+
+
+def _raster_offsets(x_step: float, max_x: float, y_step: float, max_y: float) -> list[tuple[float, float]]:
+    """Raster (dx, dy) offsets in the case-local frame: for each y row (0,
+    +y_step, -y_step, ... out to max_y — a small perturbation), sweep x
+    monotonically from -max_x to +max_x (a deliberate wide excursion, not
+    jittering) before moving to the next y row. Used by the barcode sweep
+    when no read happens by creep_z."""
+    x_vals = []
+    v = -max_x
+    while v <= max_x + 1e-9:
+        x_vals.append(v)
+        v += x_step
     out: list[tuple[float, float]] = []
-    r = ring_step
-    while r <= max(max_rx, max_ry) + 1e-9:
-        rx, ry = min(r, max_rx), min(r, max_ry)
-        for k in range(angles):
-            a = 2.0 * math.pi * k / angles
-            out.append((rx * math.cos(a), ry * math.sin(a)))
-        r += ring_step
+    for dy in _axis_steps(y_step, max_y):
+        for dx in x_vals:
+            out.append((dx, dy))
     return out
 
 
@@ -224,6 +240,12 @@ class SuctionMover(ArmMover):
         suction_io.suction_on()
         res = self._creep_seal(rpy, self._live_arm_q())
         if res.success:
+            # Relieve the creep-contact press before lifting (mirrors place()'s
+            # RELEASE_PRELIFT_M) — otherwise the lift's first motion has to break
+            # the residual seat press while already carrying the part.
+            if cfg.SEAL_PRELIFT_M > 0.0:
+                pos, _ = self.current_ee_pose()
+                self.move_ee_vertical(pos[2] + cfg.SEAL_PRELIFT_M, rpy)
             # Lift straight up to clear, then to transport — ready to travel.
             self._lift_to_transport(rpy)
         else:
@@ -289,6 +311,10 @@ class SuctionMover(ArmMover):
         res = self._creep_seal(rpy, self._live_arm_q())
         res.barcode = code
         if res.success:
+            # Relieve the creep-contact press before lifting — see pick().
+            if cfg.SEAL_PRELIFT_M > 0.0:
+                pos, _ = self.current_ee_pose()
+                self.move_ee_vertical(pos[2] + cfg.SEAL_PRELIFT_M, rpy)
             self._lift_to_transport(rpy)
         else:
             suction_io.suction_off()
@@ -373,8 +399,9 @@ class SuctionMover(ArmMover):
             vac.stop()
 
     def _sweep_scan(self, ee_pos, rpy, scanner, case_center):
-        """Raised a bit above the creep z — no tilt — move x/y around the pick
-        point looking for a read, staying on the battery's side of the case center.
+        """Raised a bit above the creep z — no tilt — raster x/y around the
+        pick point looking for a read: x sweeps its full far-to-close range at
+        each fixed y, staying on the battery's side of the case center.
         Returns the agreed code or None if exhausted (arm left over the pick point
         at the raised z; the following creep-seal descends from there)."""
         cx, cy, _cz, cyaw = case_center
@@ -382,8 +409,8 @@ class SuctionMover(ArmMover):
         z = float(self.current_ee_pose()[0][2]) + cfg.BCR_SWEEP_LIFT_M   # lift to sweep
         bx, by = float(ee_pos[0]) - cx, float(ee_pos[1]) - cy
         loc_by = -s * bx + c * by                          # battery's case-local y (side)
-        for dx, dy in _sweep_offsets(cfg.BCR_SEARCH_RING_STEP_M, cfg.BCR_SEARCH_MAX_RADIUS_X_M,
-                                     cfg.BCR_SEARCH_MAX_RADIUS_Y_M, cfg.BCR_SEARCH_ANGLES):
+        for dx, dy in _raster_offsets(cfg.BCR_SEARCH_X_STEP_M, cfg.BCR_SEARCH_MAX_X_M,
+                                      cfg.BCR_SEARCH_Y_STEP_M, cfg.BCR_SEARCH_MAX_Y_M):
             if loc_by != 0.0 and (loc_by + dy) * loc_by < 0.0:
                 continue                                    # would cross toward the other slot
             wx = float(ee_pos[0]) + c * dx - s * dy
@@ -394,9 +421,9 @@ class SuctionMover(ArmMover):
             code = scanner.result()
             if code is not None:
                 # back over the real pick point before the seal descent
-                self.move_ee([float(ee_pos[0]), float(ee_pos[1]), z], rpy)
+                self.move_ee([float(ee_pos[0]), float(ee_pos[1]), z-cfg.BCR_SWEEP_LIFT_M], rpy)
                 return code
-        self.move_ee([float(ee_pos[0]), float(ee_pos[1]), z], rpy)  # return over the pick point
+        self.move_ee([float(ee_pos[0]), float(ee_pos[1]), z-cfg.BCR_SWEEP_LIFT_M], rpy)  # return over the pick point
         return scanner.result()
 
 

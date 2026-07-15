@@ -21,8 +21,7 @@ import numpy as np
 # Robot model / IK
 # ---------------------------------------------------------------------------
 URDF_PATH: str = (
-    "/opt/venv/lib/python3.12/site-packages/dexmate_urdf/"
-    "robots/humanoid/vega_1p/vega_1p_gripper.urdf"
+    "/home/dexmate/miniconda3/lib/python3.13/site-packages/dexmate_urdf/robots/humanoid/vega_1p/vega_1p_gripper.urdf"
 )
 
 # Differential-IK (pink) solve. Warm-started from the live/previous config, so a
@@ -45,7 +44,7 @@ IK_LM_DAMPING: float = 1e-6
 # solved EE is within this of the target, even if the tight IK_CONVERGENCE_
 # THRESHOLD (used for cache validation) isn't met. Poses near the reach ceiling
 # leave a few mm residual that's harmless for approach/descent.
-REACH_TOL_M: float = 0.008
+REACH_TOL_M: float = 0.01
 
 # ---------------------------------------------------------------------------
 # Arm with the suction end-effector
@@ -61,16 +60,18 @@ GRASP_ORIENTATION_RPY: tuple[float, float, float] = (np.pi, 0.0, 0.0)
 # Kinematic budget — the ONE place that sets speed.
 #
 # All motion is time-parameterised by Ruckig under these limits; a move's
-# duration derives from its path length. "Make it faster" = raise SPEED_SCALE
-# (or the individual caps). Ruckig keeps everything jerk-limited and feasible;
+# duration derives from its path length. "Make it faster" = raise SPEED_SCALE_
+# LEFT/RIGHT (or the individual caps). Ruckig keeps everything jerk-limited and feasible;
 # arm.py additionally clamps joint commands to the arm's own reported limits.
 # Streamed as (pos, vel) via arm.set_joint_pos_vel at ~100 Hz.
 #
 # Values are conservative starting points — TUNE on the robot.
 # ---------------------------------------------------------------------------
-SPEED_SCALE: float = 0.1            # global multiplier on every cap below (0.7 = normal; lowered for first slow handoff test)
+SPEED_SCALE_LEFT: float = 0.8       # multiplier on every cap below, left (suction) arm
+SPEED_SCALE_RIGHT: float = 0.3      # multiplier on every cap below, right (gripper) arm
+# (0.7 = normal; lowered for first slow handoff test)
 
-CONTROL_HZ: float = 100.0           # motion streaming rate (set_joint_pos_vel)
+CONTROL_HZ: float = 200.0          # motion streaming rate (set_joint_pos_vel)
 
 # Joint-space (move_joints: cached-pose -> cached-pose travel), per joint.
 MAX_JOINT_VEL: float = 1.5          # rad/s
@@ -91,7 +92,7 @@ MAX_EE_ANGULAR_JERK: float = 20.0   # rad/s^3
 # ---------------------------------------------------------------------------
 # Base-frame Z the cup tip is raised to for collision-free sideways transport;
 # must clear the source stack and both box walls. (measured 2026-06-09)
-SAFE_TRANSPORT_Z: float = 1.12
+SAFE_TRANSPORT_Z: float = 1.10
 # Absolute EE z the straight-up (xy-held, move_ee_vertical) lift leg ends at:
 # 0.15 m above the layer-2 contact = FLOOR_Z_BASE 0.566 + 2*LAYER_PITCH 0.0138
 # + SUCTION_LENGTH 0.176 + 0.15 ~= 0.92 — clear of the case walls from any
@@ -137,8 +138,8 @@ CASE_GRAB_OFFSET: tuple[float, float, float] = (0.0, 0.0564, 0.0)   # cup grabs 
 # bat2 overshoots by the same amount = center biased +y). Spacing stays symmetric.
 SLOT_CENTER_OFFSET: tuple[float, float, float] = (0.0, -0.04, 0.0)
 SLOT_OFFSETS: dict[int, tuple[float, float, float]] = {
-    1: (SLOT_CENTER_OFFSET[0], SLOT_CENTER_OFFSET[1] - HALF_SLOT_SPACING_M, SLOT_CENTER_OFFSET[2]),  # right slot (robot -y)
-    2: (SLOT_CENTER_OFFSET[0], SLOT_CENTER_OFFSET[1] + HALF_SLOT_SPACING_M, SLOT_CENTER_OFFSET[2]),  # left slot  (robot +y)
+    1: (SLOT_CENTER_OFFSET[0], 0 - HALF_SLOT_SPACING_M, SLOT_CENTER_OFFSET[2]),  # right slot (robot -y)
+    2: (SLOT_CENTER_OFFSET[0], 0 + HALF_SLOT_SPACING_M, SLOT_CENTER_OFFSET[2]),  # left slot  (robot +y)
 }
 # Displacement source -> target, same for the case and both batteries (base_link).
 # z is approximate (descent measures the real seat height).
@@ -203,7 +204,7 @@ BLOW_OFF_ID: int = 5089
 # Two-signal pick: wrench vertical force = contact, DI0 vacuum = seal.
 # ---------------------------------------------------------------------------
 TARE_SAMPLES: int = 20                      # wrench baseline samples (no contact)
-DESCENT_APPROACH_SPEED_M_S: float = 0.15    # fast free-air descent (cup-tip)
+DESCENT_APPROACH_SPEED_M_S: float = 0.20    # fast free-air descent (cup-tip)
 DESCENT_CREEP_SPEED_M_S: float = 0.03       # slow creep in the contact zone
 DESCENT_RAMP_S: float = 0.3                 # ease descent speed in from 0 (no jerk
                                             # from the rest->descend handoff)
@@ -218,8 +219,8 @@ FORCE_HARD_LIMIT_PLACE_N: float = 15.0      # place abort (battery in cup). Must
                                             # well above FORCE_CONTACT_THRESHOLD so a
                                             # normal seating contact registers as
                                             # contact (seat+release), not a hard abort.
-VACUUM_SEAL_TIMEOUT_S: float = 5.0          # DI0 takes ~3-4s to latch
-SEAL_PRELIFT_M: float = 0.001               # relieve contact press before suction on
+VACUUM_SEAL_TIMEOUT_S: float = 8.0          # DI0 takes ~3-4s to latch
+SEAL_PRELIFT_M: float = 0.00               # relieve contact press before suction on
 RELEASE_PRELIFT_M: float = 0.014            # lift before the blow-off release
 PLACE_Z_BUFFER_M: float = 0.10              # accept a seat within this of the taught z
 
@@ -250,13 +251,17 @@ BCR_HOST: str = "192.168.50.101"
 BCR_PORT: int = 23
 # A scan is accepted only if >= BCR_MIN_READS successful reads agree; stop
 # triggering once BCR_MAX_READS have landed.
-BCR_MIN_READS: int = 2
+BCR_MIN_READS: int = 1
 BCR_MAX_READS: int = 4
 BCR_SCAN_TIMEOUT_S: float = 1.0     # per-trigger telnet timeout (s)
 
 # ---------------------------------------------------------------------------
-# Right-hand Robotiq gripper (Modbus RTU over the right arm's EE pass-through)
+# Right-hand Robotiq gripper (Modbus RTU over a USB-RS485 serial adapter,
+# drivers/robotiq_usb.py; the old EE pass-through driver is drivers/robotiq.py)
 # ---------------------------------------------------------------------------
+# Serial port of the USB-RS485 adapter (e.g. "/dev/ttyUSB0"). None = auto-detect
+# (exactly one /dev/ttyUSB* or /dev/ttyACM* must be present).
+ROBOTIQ_USB_PORT: str | None = None
 ROBOTIQ_SLAVE_ID: int = 0x09
 ROBOTIQ_OPEN_POS: int = 0                  # 0 = open, 255 = closed
 ROBOTIQ_PARTIAL_OPEN_POS: int = 40         # partial open to avoid ground contact
@@ -278,14 +283,17 @@ TARGET_BARCODES: list[str] = ["UDCG7B0289", "UDCG7B0291"]
 # creep_z. If read there -> suction ON, creep to contact, seal. If NOT read ->
 # sweep x/y AT creep_z (no lift, no tilt), bounded to the battery's side of the
 # case center, re-scanning each waypoint; read -> grab; exhausted -> grab anyway
-# (no divert). Sweep offsets are ellipse rings in the case-local frame.
+# (no divert). Sweep is a raster in the case-local frame: y held fixed while x
+# sweeps its full far-to-close range (a deliberate wide excursion, not
+# jittering); only once a full x sweep comes up empty does y nudge by one
+# step and the x sweep runs again — repeat out to BCR_SEARCH_MAX_Y_M.
 BCR_SCAN_DWELL_S: float = 0.4            # dwell at a scan waypoint to gather reads
-BCR_SWEEP_LIFT_M: float = 0.05           # raise the sweep plane this far above creep_z
+BCR_SWEEP_LIFT_M: float = 0.1           # raise the sweep plane this far above creep_z
                                          # (clear the battery tops / better read focus)
-BCR_SEARCH_RING_STEP_M: float = 0.005    # ring spacing outward from the pick point
-BCR_SEARCH_MAX_RADIUS_X_M: float = 0.08  # outermost ring, case-local x extent
-BCR_SEARCH_MAX_RADIUS_Y_M: float = 0.02  # outermost ring, case-local y extent
-BCR_SEARCH_ANGLES: int = 6               # waypoints per ring
+BCR_SEARCH_X_STEP_M: float = 0.02        # step within a row's x sweep
+BCR_SEARCH_MAX_X_M: float = 0.1          # +/- extent of each row's x sweep (far and close)
+BCR_SEARCH_Y_STEP_M: float = 0.01        # how far y nudges once an x sweep finds nothing
+BCR_SEARCH_MAX_Y_M: float = 0.02         # y stays a small perturbation, not a second sweep axis
 
 # ---------------------------------------------------------------------------
 # Right-arm gripper handoff (gripper.py). The suction arm holds the battery at
@@ -293,25 +301,58 @@ BCR_SEARCH_ANGLES: int = 6               # waypoints per ring
 # GEOMETRY BELOW IS FROM THE OLD DEMO — RE-TEACH on the robot before trusting.
 # ---------------------------------------------------------------------------
 GRIPPER_EE_FRAME: str = "R_gripper_base"
+# Suction arm hovers here (moving right, at whatever transport height it's
+# already at) before every divert grip — ONE fixed xy regardless of which
+# battery (1 or 2) triggered the divert, instead of each slot's own (different)
+# xy, so the grip point (and everything downstream of it) is consistent run
+# to run. Reuses BAT_SLOT_1's xy.
+HANDOFF_HOVER_XY: tuple[float, float] = (TAUGHT_POSES["BAT_SLOT_2"][0], TAUGHT_POSES["BAT_SLOT_2"][1])
 # Gripper grasp = suction EE pose + this offset, approached from the side (rpy).
-HANDOFF_GRIP_OFFSET: tuple[float, float, float] = (0.0624, -0.1073, -0.1508)
-GRIPPER_GRASP_RPY: tuple[float, float, float] = (-1.387, np.pi / 2, 0.0)
-GRIPPER_PREGRASP_STANDOFF_M: float = 0.06   # back off along the approach axis, then move in
+HANDOFF_GRIP_OFFSET: tuple[float, float, float] = (0.07, -0.10, -0.185)
+GRIPPER_GRASP_RPY: tuple[float, float, float] = (-1.5, np.pi / 2, 0.0)
+GRIPPER_PREGRASP_STANDOFF_M: float = 0.08   # back off along the approach axis, then move in
+# After the handoff release (suction off, gripper holds the battery), the left
+# suction arm retreats to this EE position (base_link, m) — out to the LEFT at
+# hover height — so it clears the right arm's place motion. Orientation is kept
+# as-is. Shifted from y=0.50 toward BAT_SLOT_1's hover xy (moved right) per
+# reach_sweep: reachable at (x=0.90, y=-0.078725, z=1.10), err=0.0mm. (TUNE)
+HANDOFF_LEFT_CLEAR_EE_POS: tuple[float, float, float] = (0.90, -0.078725, 1.10)
 # Right-arm EE place sequence, run AFTER the gripper grips the suction-held
 # battery and suction releases. Each step is (label, is_relative, (x,y,z) m,
 # (roll,pitch,yaw) rad in base_link). REL steps add to the last COMMANDED pose
 # (rotations compose in SO(3), not by Euler addition — the readout flips near
 # gimbal lock). The gripper partial-opens to release at the step whose label
-# contains "lower". Ported from the old demo's taught_ee_poses_right.txt:
-# steps 1-2 (REL) carry the battery from the grip point over to the right; the
-# 3 absolute poses fine-position, lower/release, and retract.
-# GEOMETRY IS FROM THE OLD DEMO — RE-TEACH on the robot before trusting.
+# contains "lower". Ported from the old demo's taught_ee_poses_right.txt, then
+# reworked: step 1 (REL) carries the battery clear of the grip point; step 2
+# ("To Right 2") is now a fixed ABSOLUTE waypoint instead of REL — composing
+# it relative to the grip point meant its landing spot (and reachability)
+# depended on exactly where the suction arm's hover-and-grip happened to land,
+# which is why it kept failing. Fixed at a point verified reachable from both
+# battery slots' grip points; the 3 remaining absolute poses fine-position,
+# lower/release, and retract.
+# POSITIONS ARE FROM THE OLD DEMO — RE-TEACH on the robot before trusting.
+#
+# Orientation: "To Right 2" faces forward (tool +z ~= base_link +x) — composing
+# through GRIPPER_GRASP_RPY's exact pitch=pi/2 couples a yaw turn into roll,
+# hence the "+ pi/2" below rather than 0. The 3 remaining absolute poses share
+# that same forward orientation tilted down a little (only position differs
+# between them) instead of 3 independently-taught (and gimbal-lock-garbled)
+# triples.
+HANDOFF_DOWN_TILT_RAD: float = np.radians(30.0)   # "a little" downward pitch
+HANDOFF_RIGHT_FORWARD_RPY: tuple[float, float, float] = (
+    GRIPPER_GRASP_RPY[0] + np.pi / 2, np.pi / 2, 0.0,
+)
+HANDOFF_RIGHT_FORWARD_DOWN_RPY: tuple[float, float, float] = (
+    HANDOFF_RIGHT_FORWARD_RPY[0], HANDOFF_RIGHT_FORWARD_RPY[1] + HANDOFF_DOWN_TILT_RAD, HANDOFF_RIGHT_FORWARD_RPY[2],
+)
+# Verified reachable (err<0.2mm, no collision, in-limits) from BOTH BAT_SLOT_1
+# and BAT_SLOT_2 grip points — see check_place_seq.py.
 PLACE_LOWER_RIGHT_EE_SEQ: list | None = [
     ("To Right 1", True,  (0.0, 0.0, -0.06),               (0.0, 0.0, 0.0)),
-    ("To Right 2", True,  (0.1, -0.3, 0.08),               (0.0, 0.0, -1.5708)),
-    ("To Right 3", False, (0.876799, -0.507694, 0.925),    (0.210239, 1.570121, 0.200709)),
-    ("Lower",      False, (0.751889, -0.548590, 0.7195),   (-3.060807, 1.160005, 3.060476)),
-    ("Back",       False, (0.635044, -0.548479, 0.75),     (3.131945, 1.219084, 2.971093)),
+    ("To Right 2", False, (1.04, -0.4587, 0.9692),         HANDOFF_RIGHT_FORWARD_RPY),
+    ("To Right 3", False, (0.876799, -0.507694, 0.925),    HANDOFF_RIGHT_FORWARD_DOWN_RPY),
+    ("Lower",      False, (0.751889, -0.548590, 0.70),   HANDOFF_RIGHT_FORWARD_DOWN_RPY),
+    ("Back",       False, (0.635044, -0.548479, 0.72),     HANDOFF_RIGHT_FORWARD_DOWN_RPY),
 ]
 
 # ---------------------------------------------------------------------------

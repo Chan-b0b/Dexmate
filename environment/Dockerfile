@@ -15,4 +15,8 @@ ENV PIP_INDEX_URL=https://pypi.jetson-ai-lab.io/sbsa/cu130 \
     ROS_DISTRO=humble
 
 COPY environment/requirements.txt /tmp/requirements.txt
-RUN /opt/venv/bin/pip install --no-cache-dir -r /tmp/requirements.txt && rm /tmp/requirements.txt
+# ruckig's pyproject.toml doesn't cap scikit-build-core, and >=0.10 renamed the
+# cmake.targets config key ruckig 0.17.3 relies on, breaking its from-source build.
+RUN echo "scikit-build-core<0.10" > /tmp/constraints.txt && \
+    PIP_CONSTRAINT=/tmp/constraints.txt /opt/venv/bin/pip install --no-cache-dir -r /tmp/requirements.txt && \
+    rm /tmp/requirements.txt /tmp/constraints.txt

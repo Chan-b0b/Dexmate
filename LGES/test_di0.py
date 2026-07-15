@@ -31,7 +31,7 @@ from case_battery_demo import suction_io
 
 
 # Cycle parameters
-ON_DURATION_S = 4.0
+ON_DURATION_S = 10.0
 OFF_DURATION_S = 2.0
 PRINT_INTERVAL_S = 0.1   # heartbeat row every 100 ms even if nothing changed
 NUM_DI = 16              # how many digital inputs to track

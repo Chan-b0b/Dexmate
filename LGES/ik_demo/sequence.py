@@ -11,9 +11,12 @@ barcode.py / gripper.py (steps 6-7); the hook is `_run_move`.
 #python -m ik_demo.sequence --gripper
 
 
+#export ROBOT_IP=192.168.50.20
+
 
 from __future__ import annotations
 
+import threading
 import time
 from dataclasses import dataclass
 
@@ -25,12 +28,14 @@ try:
     from .gripper import GripperMover
     from .barcode import is_target
     from .drivers import suction_io
+    from .go_home import safe_home
 except ImportError:  # allow `python sequence.py` from inside ik_demo/
     import config as cfg
     from suction import SuctionMover
     from gripper import GripperMover
     from barcode import is_target
     from drivers import suction_io
+    from go_home import safe_home
 
 
 @dataclass(frozen=True)
@@ -59,20 +64,33 @@ class TaskOrchestrator:
         # grow). The anchor never updates from later layers, so one misaligned seat
         # is flagged (not absorbed) and can't corrupt subsequent predictions.
         self._z_anchor: dict[str, float] = {}
+        # Right-arm place+home running in the background after a divert (see
+        # _divert) — joined before the next grip, and at the end of run_forward.
+        self._gripper_thread: "threading.Thread | None" = None
 
     def run_forward(self) -> bool:
         """Build NUM_LAYERS layers; each runs the full choreography. Returns True
         iff every move of every layer succeeded."""
-        for layer in range(1, int(cfg.NUM_LAYERS) + 1):
-            logger.info("===== LAYER {}/{} =====", layer, cfg.NUM_LAYERS)
-            for mv in FORWARD_MOVES:
-                logger.info("=== phase: {} ({} -> {}) [layer {}] ===", mv.label, mv.src, mv.dst, layer)
-                if not self._run_move(mv, layer):
-                    logger.error("phase {} failed on layer {} — stopping (robot left where it is).",
-                                 mv.label, layer)
-                    return False
-        logger.info("=== all {} layers complete ===", cfg.NUM_LAYERS)
-        return True
+        try:
+            for layer in range(1, int(cfg.NUM_LAYERS) + 1):
+                logger.info("===== LAYER {}/{} =====", layer, cfg.NUM_LAYERS)
+                for mv in FORWARD_MOVES:
+                    logger.info("=== phase: {} ({} -> {}) [layer {}] ===", mv.label, mv.src, mv.dst, layer)
+                    if not self._run_move(mv, layer):
+                        logger.error("phase {} failed on layer {} — stopping (robot left where it is).",
+                                     mv.label, layer)
+                        return False
+            logger.info("=== all {} layers complete ===", cfg.NUM_LAYERS)
+            return True
+        finally:
+            # Never leave the caller (which homes both arms next) racing a
+            # still-running right-arm background place/home.
+            self._join_gripper()
+
+    def _join_gripper(self) -> None:
+        if self._gripper_thread is not None:
+            self._gripper_thread.join()
+            self._gripper_thread = None
 
     def _predicted_z(self, name: str, layer: int, is_source: bool) -> "float | None":
         """Predicted contact z: anchor +/- (layer-1)*pitch. None until anchored
@@ -143,15 +161,32 @@ class TaskOrchestrator:
     def _divert(self, mv: Move) -> bool:
         """Two-arm handoff of the suction-held battery to the right-arm gripper.
 
-        The gripper side-grips at the suction EE pose + HANDOFF_GRIP_OFFSET; once
-        it confirms a grasp, suction releases and the gripper runs the taught EE
-        place sequence (carry -> lower/release -> retract). Returns False (leaving
-        the part still on the cup, so the caller can fall back to a case place) if
-        the place sequence isn't taught or the gripper reports no object.
+        The suction arm first carries the battery sideways (at transport height,
+        no descent) to a fixed hover xy (cfg.HANDOFF_HOVER_XY — moving right),
+        the SAME spot regardless of which battery (1 or 2) triggered the divert;
+        the gripper then side-grips at that (new) suction EE pose +
+        HANDOFF_GRIP_OFFSET. Once it confirms a grasp, suction releases.
+
+        The gripper's place sequence (carry -> lower/release -> retract) and its
+        return home then run on a background thread; this call blocks only until
+        that sequence reaches "To Right 2" (carry-away done, clear of the
+        handoff spot) and returns True from there — the left arm is then free
+        to get on with the REST of the choreography (the next pick) while the
+        right arm finishes placing and homing in parallel. The next divert (or
+        run_forward, at the end) joins that thread before the gripper is used
+        again. Returns False (leaving the part still on the cup, so the caller
+        can fall back to a case place) if the place sequence isn't taught or
+        the gripper reports no object.
         """
         if not cfg.PLACE_LOWER_RIGHT_EE_SEQ:
             logger.warning("[{}] PLACE_LOWER_RIGHT_EE_SEQ not taught — skipping divert", mv.label)
             return False
+        self._join_gripper()  # can't grip again until the previous place+home finished
+        pos, rpy = self._mover.current_ee_pose()
+        tx, ty = cfg.HANDOFF_HOVER_XY
+        logger.info("[{}] divert: suction arm -> fixed hover (moving right)", mv.label)
+        if self._mover.move_ee([tx, ty, float(pos[2])], rpy) is None:
+            logger.warning("[{}] target hover unreachable — gripping at current pose instead", mv.label)
         pos, _ = self._mover.current_ee_pose()
         off = cfg.HANDOFF_GRIP_OFFSET
         grasp_pos = [float(pos[i]) + off[i] for i in range(3)]
@@ -160,7 +195,31 @@ class TaskOrchestrator:
             logger.warning("[{}] gripper reported no object — aborting divert", mv.label)
             return False
         suction_io.release()            # suction lets go; the gripper now holds the battery
-        self._gripper.place_ee_seq()    # carry -> lower/release -> retract
+
+        cleared = threading.Event()
+
+        def _run_place_and_home() -> None:
+            ok = self._gripper.place_ee_seq(on_step={"To Right 2": cleared.set})
+            cleared.set()  # don't strand the left arm if "To Right 2" was never reached
+            if not ok:
+                # place_ee_seq only releases at "Lower" (or fully at the end) — a
+                # failure before that leaves the battery still clamped. Homing
+                # anyway would drag it through a trajectory never meant to carry
+                # a payload, so check first and stop in place if it's still held.
+                if self._gripper.gripper.is_object_grasped():
+                    logger.error("[{}] right-arm place sequence failed (background) — "
+                                 "still holding the battery, NOT homing (left where it stalled)",
+                                 mv.label)
+                    return
+                logger.error("[{}] right-arm place sequence failed (background) — "
+                             "gripper empty, homing", mv.label)
+            logger.info("[{}] right arm -> home (background)", mv.label)
+            self._gripper.move_joints(self._gripper._home_seed)
+
+        self._gripper_thread = threading.Thread(target=_run_place_and_home, daemon=True)
+        self._gripper_thread.start()
+        cleared.wait()
+        logger.info("[{}] right arm clear of handoff — left arm continuing", mv.label)
         return True
 
 
@@ -170,9 +229,17 @@ class TaskOrchestrator:
 # ---------------------------------------------------------------------------
 def _run_on_robot() -> None:
     import sys
+    from pathlib import Path
+
     from dexcontrol.robot import Robot
 
-    use_gripper = "--gripper" in sys.argv   # enable the barcode divert
+    # perception/utils.py (sibling package) for align_head_to_forward — same
+    # sys.path setup chassis_sequence.py uses to reach it.
+    sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "perception"))
+    from utils import align_head_to_forward  # noqa: E402
+
+    use_gripper = "--gripper" in sys.argv     # enable the barcode divert
+    use_dashboard = "--dashboard" in sys.argv  # spool camera/joints/EE/wrench for the web viewer
 
     logger.warning("=" * 60)
     logger.warning("MOVES THE REAL ARM + SUCTION through the full forward sequence:")
@@ -180,35 +247,66 @@ def _run_on_robot() -> None:
         logger.warning("   {}: {} -> {}", mv.label, mv.src, mv.dst)
     if use_gripper:
         logger.warning("Barcode divert ENABLED (target codes -> right gripper).")
+    if use_dashboard:
+        logger.warning("Dashboard spool ENABLED — view with run_dashboard_demo.sh.")
     logger.warning("Place the case + batteries at the taught spots. E-stop in reach.")
     logger.warning("=" * 60)
     if input("Continue? [y/N]: ").strip().lower() != "y":
         return
 
+    # The head camera is disabled in the default robot config, so the
+    # dashboard gets no frames unless we explicitly enable it here.
+    robot_configs = None
+    if use_dashboard:
+        from dexcontrol.core.config import get_robot_config
+        robot_configs = get_robot_config()
+        robot_configs.enable_sensor("head_camera")
+        robot_configs.sensors["head_camera"].transport = "zenoh"
+
     suction_io.suction_off()
-    with Robot() as bot:
-        with SuctionMover(bot) as m:
-            release = m.software_estop_active()
-            if release and input("Release software E-Stop? [y/N]: ").strip().lower() != "y":
-                return
-            if not m.ensure_ready(release_estop=release):
-                logger.error("arm not ready — aborting")
-                return
+    with Robot(configs=robot_configs) as bot:
+        align_head_to_forward(bot, angle=30.0)
+        publisher = None
+        if use_dashboard:
+            from .dashboard_publish import DashboardPublisher
+            publisher = DashboardPublisher(bot).start()
+        try:
+            with SuctionMover(bot) as m:
+                release = m.software_estop_active()
+                if release and input("Release software E-Stop? [y/N]: ").strip().lower() != "y":
+                    return
+                if not m.ensure_ready(release_estop=release):
+                    logger.error("arm not ready — aborting")
+                    return
 
-            gripper = None
-            if use_gripper:
-                gripper = GripperMover(bot)
-                gripper.ensure_ready(release_estop=release)
-                if not gripper.initialize():
-                    logger.warning("gripper unavailable — divert disabled")
-                    gripper = None
+                gripper = None
+                if use_gripper:
+                    gripper = GripperMover(bot)
+                    gripper.ensure_ready(release_estop=release)
+                    if not gripper.initialize():
+                        logger.warning("gripper unavailable — divert disabled")
+                        gripper = None
 
-            logger.info("-> home")
-            m.move_joints(m._home_seed)
-            ok = TaskOrchestrator(m, gripper).run_forward()
-            logger.info("-> home")
-            m.move_joints(m._home_seed)
-            logger.info("sequence {}", "OK" if ok else "FAILED")
+                logger.info("-> home")
+                m.move_joints(m._home_seed)
+                if gripper is not None:
+                    logger.info("-> right arm home")
+                    gripper.move_joints(gripper._home_seed)
+                ok = TaskOrchestrator(m, gripper).run_forward()
+                if ok:
+                    logger.info("-> home")
+                    m.move_joints(m._home_seed)
+                else:
+                    # Failed mid-move — the arm may be low over a box; lift clear
+                    # before the joint-space home move instead of homing right away.
+                    safe_home(m)
+                if gripper is not None:
+                    logger.info("-> right arm home")
+                    gripper.move_joints(gripper._home_seed)
+                logger.info("sequence {}", "OK" if ok else "FAILED")
+        finally:
+            if publisher is not None:
+                publisher.stop()
 
 
 if __name__ == "__main__":

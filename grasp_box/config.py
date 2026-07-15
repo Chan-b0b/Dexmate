@@ -6,7 +6,7 @@ This file contains paths and configuration parameters for the robot and trajecto
 import os
 
 # URDF file path
-URDF_PATH = "/opt/venv/lib/python3.12/site-packages/dexmate_urdf/robots/humanoid/vega_1p/vega_1p_gripper.urdf"
+URDF_PATH = "/home/dexmate/miniconda3/lib/python3.13/site-packages/dexmate_urdf/robots/humanoid/vega_1p/vega_1p_gripper.urdf"
 
 # Trajectory file paths (relative to custom_examples directory)
 DEFAULT_TRAJECTORY_FILE = "trajectories/VegaTask1-021-Grab.txt"
