@@ -1,0 +1,16 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(/home/dexmate/vla_venv/bin/python -c ' *)",
+      "Bash(/opt/venv/bin/python -c \"import pinocchio, pink, qpsolvers, dexcontrol; print\\('all present in /opt/venv'\\)\")",
+      "Read(//opt/venv/lib/python3.12/site-packages/**)",
+      "Bash(grep -iE \"pinocchio|pin$|pink\")",
+      "Bash(/opt/venv/bin/python -c \"import pinocchio; print\\(pinocchio.__file__\\)\")",
+      "Bash(/opt/venv/bin/python -c \"import dexcontrol; print\\(dexcontrol.__file__\\)\")",
+      "Bash(grep -nE \"class \\(Suction\\)?Mover|def __init__\" grasp.py | head -4; echo \"=== how run_demo builds robot ===\"; grep -nE \"Robot\\\\\\(|get_robot|= Robot|import.*Robot|Mover\\\\\\(|SuctionMover\\\\\\(\" run_demo.py grasp.py sequence.py | head; echo \"=== select_action input keys expected ===\"; grep -nE \"OBS_STATE|OBS_IMAGES|observation.state|observation.images\" /home/dexmate/vla_venv/lib/python3.12/site-packages/lerobot/policies/smolvla/modeling_smolvla.py | head)",
+      "Read(//home/dexmate/vla_venv/lib/python3.12/site-packages/lerobot/policies/smolvla/**)",
+      "Bash(head -40 gravity_comp_manual_control.py)",
+      "Bash(head -25 grasp_box/torso_keyboard_control.py)"
+    ]
+  }
+}
