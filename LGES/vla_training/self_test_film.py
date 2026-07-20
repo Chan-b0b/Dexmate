@@ -68,7 +68,10 @@ assert cond.shape == (1, 3), cond.shape
 print(f"[2c] condition vector [contact, fz, seal] = {[round(x,3) for x in cond[0].tolist()]} OK")
 
 # 3. apply() patches VLAFlowMatching (imports lerobot, no weights), with cond=(contact,fz,seal).
-ds = "/home/dexmate/CNS_code/Dexmate/LGES/vla_training/datasets/lges_suction"
+import os
+from pathlib import Path
+ds = os.environ.get("FILM_DATASET_ROOT",
+                    str(Path(__file__).resolve().parent / "datasets/lges_case_pick_0708"))
 wm, ws = fc.load_wrench_stats(ds)
 sm, ss = fc.load_seal_stats(ds)
 fc.apply("v2", wm, ws, seal_mean=sm, seal_std=ss, cond=("contact", "fz", "seal"))

@@ -122,6 +122,44 @@ $VENV/bin/python upload_weights.py <run> [...]
 - **GPU**: 공유 서버. 시작 전 `nvidia-smi`로 확인. 학습은 GPU-bound가 아니라 dataloader-bound —
   같은 GPU에 여러 런 병렬 가능(런당 ~10-13GB).
 
+## 6.5 dfmag 라운드 (2026-07-16~17 추가)
+
+fz의 baseline이 payload에 따라 변하는 문제(빈 툴 ~13N vs loaded ~16N+) 때문에
+**힘 변화율 d|F|/dt (dfmag)** 채널을 추가했다. 접촉은 1–2프레임의 급격한 힘 하락
+транз이언트(|F| ~10→0.6N → dfmag ≈ −5 N/frame)라 baseline 이동에 강건하다.
+
+- **파생 데이터셋**: `derive_df_dataset.py`가 기존 데이터셋에서 dfmag(에피소드 내 diff,
+  첫 프레임 0)를 state 16번째 차원으로 추가 → HF `Chanho-Lee/lges_case_pick_0708_dF{,_abs_dF}`.
+  meta/stats.json + per-episode stats 자동 갱신.
+- **코드**: `film_contact.py`에 dfmag 채널(idx 15, `FILM_DFMAG_TAU` 기본 5, mask_force에 포함),
+  `train_film.py`/`probe_film_authority.py`는 *_dF 데이터셋이면 stats 자동 로드,
+  `run_policy.py` ObsBuilder는 16-dim 체크포인트 자동 감지 후 이전 프레임 버퍼로 dfmag를
+  라이브 계산(>0.5s 공백이면 새 롤아웃으로 보고 0 — 학습의 에피소드 첫 프레임 규약과 동일).
+- **학습**: `run_dfmag.sh` — prefix+mask1+`FILM_COND=contact,fz,seal,dfmag`, 30k →
+  `smolvla_film_0708_dF_prefix_mask1` (rel, loss 0.106) / `_abs_dF_prefix_mask1` (abs, 0.014).
+- **probe (전건 강제 all-0↔all-1)**: rel 기준 82% 상쇄 — dfmag 없는 prefix+mask1(67%)보다 높음.
+  probe에 `--c0/--c1` per-channel 패턴 옵션 추가.
+- **⚠ 채널 분해 probe가 위 수치의 해석을 뒤집음 (probes/decomp_*.txt)**. committed-descent
+  상쇄율을 채널별로 분리하면 (c0 = 하강 상태):
+  | 강제 패턴 | dF ckpt | 3ch prefix_mask1 |
+  |---|---|---|
+  | all-1 (기존 수치) | 82% | 67% |
+  | **현실적 접촉 순간** (contact=1, fz=0, seal=0, dfmag=−1) | **0%** | **0%** |
+  | contact만 1 | 11% | — |
+  | dfmag만 −1 | 0% | — |
+  | fz 하락만 (0.47→0) | 0% (부호 반대) | — |
+  | seal만 1 | 21% | 28% |
+
+  즉 67%/82%는 접촉-순간 시그니처가 아니라 **all-1 조합(≈ sealed+가압+힘상승 상태)**이 만든
+  권한이고, 실제 descend→stop 전이 시점의 신호 조합으로는 **어느 체크포인트도 게이팅하지
+  못한다**. 단일 채널로는 seal이 가장 강하지만(21–28%) 약하고, 접촉 транз이언트(contact,
+  dfmag)는 거의 무권한. 원인 추정: BC 데이터에서 접촉 딥은 에피소드당 1–2프레임뿐이라
+  gradient 노출이 극소 + z-바닥과 접촉이 항상 co-occur라 반사실이 없음 → 모델은 더 안정적인
+  사후 신호(seal/가압)에 정지를 바인딩. PROGRESS.md의 "깊이 cue 억제 또는 gate-oracle
+  rollout 증류" 레버가 여전히 필요하다는 결론.
+- **배포 관점**: dF ckpt는 all-1류 상태(씰링 후)에는 강하게 반응하므로 "seal 후 정지/리프트"는
+  기대 가능하나, "접촉 즉시 정지"는 probe상 근거 없음. 로봇 평가로 확인 필요.
+
 ## 7. 앞으로 진행할 실험 (PROGRESS.md S1–S5 매핑)
 
 | 우선순위 | 실험 | 내용 | 필요 자원 |

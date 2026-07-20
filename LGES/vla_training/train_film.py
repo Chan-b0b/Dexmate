@@ -22,15 +22,19 @@ _inject = os.environ.get("FILM_INJECT", "suffix")
 _f0 = float(os.environ.get("FILM_F0", "12"))
 _tau = float(os.environ.get("FILM_TAU", "10"))       # contact-DROP scale (graded)
 _fz_tau = float(os.environ.get("FILM_FZ_TAU", "30"))  # continuous fz scale (fz_raw/30)
+_dfmag_tau = float(os.environ.get("FILM_DFMAG_TAU", "5"))  # d|F|/dt scale (N/frame / 5)
 _root = os.environ.get(
     "FILM_DATASET_ROOT", str(Path(__file__).resolve().parent / "datasets/lges_suction"))
 _wm, _ws = film_contact.load_wrench_stats(_root)
 _sm, _ss = film_contact.load_seal_stats(_root)
+_dm, _dsd = film_contact.load_dfmag_stats(_root)   # (None, None) unless a *_dF dataset
 film_contact.apply(_variant, _wm, _ws, seal_mean=_sm, seal_std=_ss, cond=_cond,
                    contact_F0=_f0, contact_tau=_tau, fz_tau=_fz_tau,
-                   mask_force=_mask_force, inject=_inject)
+                   mask_force=_mask_force, inject=_inject,
+                   dfmag_mean=_dm, dfmag_std=_dsd, dfmag_tau=_dfmag_tau)
 print(f"[film] patched VLAFlowMatching: variant={_variant} cond={_cond} inject={_inject} "
       f"mask_force={_mask_force} contact=clip(({_f0:.0f}-|F|)/{_tau:.0f}) fz=fz/{_fz_tau:.0f} "
+      f"dfmag={'d|F|/%g' % _dfmag_tau if _dm is not None else 'n/a'} "
       f"wrench_mean={[round(x,2) for x in _wm.tolist()]}", file=sys.stderr)
 
 from lerobot.scripts.lerobot_train import train  # noqa: E402
