@@ -24,7 +24,7 @@ import numpy as np
 # is self-contained and does not depend on a fragile ``import config``)
 # ---------------------------------------------------------------------------
 URDF_PATH: str = (
-    "/opt/venv/lib/python3.12/site-packages/dexmate_urdf/"
+    "/home/dexmate/miniconda3/lib/python3.13/site-packages/dexmate_urdf/"
     "robots/humanoid/vega_1p/vega_1p_gripper.urdf"
 )
 
