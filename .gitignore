@@ -10,6 +10,7 @@ Research/condition_driven/rollouts/**
 Research/condition_driven/rollouts_gated/**
 Research/residual_rl/rl_buffer/**
 Research/residual_rl/rl_ckpt/**
+Research/residual_rl/chassis_probe_logs/**
 
 # Training outputs, logs, datasets (any folder)
 **/logs/**

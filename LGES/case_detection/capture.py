@@ -25,7 +25,7 @@ import config as cfg
 from bin_roi import crop, find_bin, inset_bbox
 from dexcontrol.core.config import get_robot_config
 from dexcontrol.robot import Robot
-from utils import align_head_to_forward
+from utils import set_head_pitch
 
 
 def _get_frame(robot):
@@ -165,7 +165,7 @@ def main() -> None:
         if not robot.sensors.head_camera.wait_for_active(timeout=5.0):
             print("Warning: camera streams may not be active")
         if not args.no_align:
-            align_head_to_forward(robot, angle=30.0)
+            set_head_pitch(robot, angle=30.0)
 
         loop = _keyboard_loop if args.keyboard else _timed_loop
         saved = loop(robot, out, crops, args)

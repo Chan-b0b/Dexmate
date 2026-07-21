@@ -385,7 +385,7 @@ def _main() -> None:
     from LGES.ik_demo.go_home import both_arms_home
 
     # perception/utils was put on sys.path by the chassis_sequence import above.
-    from utils import align_head_to_forward
+    from utils import set_head_pitch
 
     logger.warning("=" * 60)
     logger.warning("MOVES THE REAL ARM + SUCTION. Each ENTER runs one recorded")
@@ -402,7 +402,7 @@ def _main() -> None:
     with Robot(configs=configs) as bot:
         if not bot.sensors.head_camera.wait_for_active(timeout=5.0):
             logger.warning("head camera may not be active")
-        align_head_to_forward(bot, angle=30.0)  # BEV homography expects ~30 deg
+        set_head_pitch(bot, angle=30.0)  # BEV homography expects ~30 deg
         with SuctionMover(bot) as m:
             release = m.software_estop_active()
             if release and input("Release software E-Stop? [y/N]: ").strip().lower() != "y":

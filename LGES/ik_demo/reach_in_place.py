@@ -26,7 +26,7 @@ from .config import resolve_poses
 from .suction import SuctionMover
 from .drivers import suction_io
 from .chassis_sequence import (ITEMS, detect, _center_from_det,
-                               align_head_to_forward, descent_reachable)
+                               set_head_pitch, descent_reachable)
 
 _KEYS = dict(ITEMS)  # label -> resolve_poses key
 
@@ -55,7 +55,7 @@ def _main() -> None:
     with Robot(configs=configs) as bot:
         if not bot.sensors.head_camera.wait_for_active(timeout=5.0):
             logger.warning("head camera may not be active")
-        align_head_to_forward(bot, angle=30.0)
+        set_head_pitch(bot, angle=30.0)
 
         with SuctionMover(bot) as m:
             release = m.software_estop_active()

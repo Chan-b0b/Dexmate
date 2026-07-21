@@ -92,62 +92,100 @@ class Episode:
 
 
 class ReplayBuffer:
-    """Learner-side: incrementally tails closed episode files under `root`. A file is
-    parsed exactly once, the moment its episode_end line first appears; already-closed
-    files are never re-read. Open (still-being-written) files are skipped until closed."""
+    """Learner-side: incrementally tails episode files under `root`. A CLOSED file
+    (episode_end line present) is parsed exactly once and then never re-read. A file
+    still being written by an in-progress rollout is instead re-parsed on every
+    refresh() as a LIVE episode: its last logged row's `state` is held out as the
+    bootstrap anchor (`last_next_state`) -- exactly the role a closed-but-truncated
+    episode's footer plays -- so the learner sees a rollout's transitions as they're
+    written instead of waiting for the whole episode to close."""
 
     def __init__(self, root: Path):
         self.root = Path(root)
         self.episodes: dict[str, Episode] = {}
-        self._seen_files: set[str] = set()
-        self._flat_cache = None  # invalidated on any new episode
+        self._closed_files: set[str] = set()  # only files with an episode_end footer land here
+        self._flat_cache = None  # invalidated on any new or updated episode
 
     def refresh(self) -> int:
-        """Scan for newly-closed episode files. Returns how many were added."""
+        """Scan for new or updated episode files. Returns how many NEW episode ids
+        were added (closed or freshly-live); updates to an already-live episode's
+        transition count don't count as "added" again."""
         added = 0
         for path in sorted(self.root.glob("*.jsonl")):
-            if path.name in self._seen_files:
+            if path.name in self._closed_files:
                 continue
-            ep = self._try_parse(path)
+            ep, closed = self._try_parse(path)
             if ep is None:
-                continue  # still open; retry next refresh()
+                continue  # not enough data yet; retry next refresh()
+            is_new = path.stem not in self.episodes
             self.episodes[path.stem] = ep
-            self._seen_files.add(path.name)
             self._flat_cache = None
-            added += 1
+            if closed:
+                self._closed_files.add(path.name)
+            if is_new:
+                added += 1
         return added
 
     @staticmethod
-    def _try_parse(path: Path) -> Episode | None:
+    def _try_parse(path: Path) -> tuple[Episode | None, bool]:
+        """Returns (episode, is_closed). episode is None if there isn't enough data
+        yet (closed-with-zero-steps, or a live file with fewer than 2 logged rows --
+        one row alone has no next-state to bootstrap from)."""
         try:
             lines = path.read_text().splitlines()
         except OSError:
-            return None
-        if not lines or "episode_end" not in lines[-1]:
-            return None  # not closed yet
-        footer = json.loads(lines[-1])
-        meta = json.loads(lines[0]).get("meta", {}) if lines[0].strip() else {}
-        steps = [json.loads(l) for l in lines[1:-1]]
-        if not steps:
-            return None  # closed with zero steps -- nothing to learn from
+            return None, False
+        if not lines or not lines[0].strip():
+            return None, False
+        meta = json.loads(lines[0]).get("meta", {})
+        body = lines[1:]
+
+        if body and "episode_end" in body[-1]:
+            footer = json.loads(body[-1])
+            steps = [json.loads(l) for l in body[:-1]]
+            if not steps:
+                return None, True  # closed with zero steps -- nothing to learn from
+            return Episode(
+                states=np.asarray([s["state"] for s in steps], dtype=np.float32),
+                action_residual=np.asarray([s["action_residual"] for s in steps], dtype=np.float32),
+                action_exec=np.asarray([s["action_exec"] for s in steps], dtype=np.float32),
+                rewards=np.asarray([s["reward"] for s in steps], dtype=np.float32),
+                terminal=bool(footer["terminal"]),
+                last_next_state=(np.asarray(footer["last_next_state"], dtype=np.float32)
+                                  if footer.get("last_next_state") is not None else None),
+                meta=meta,
+            ), True
+
+        # Still open: a `write()` of one JSON line is atomic on a local filesystem, but
+        # guard anyway -- drop a trailing line that fails to parse (mid-flush) instead
+        # of raising, it'll be complete on the next refresh().
+        steps = []
+        for l in body:
+            try:
+                steps.append(json.loads(l))
+            except json.JSONDecodeError:
+                break
+        if len(steps) < 2:
+            return None, False
+        *logged, boundary = steps
         return Episode(
-            states=np.asarray([s["state"] for s in steps], dtype=np.float32),
-            action_residual=np.asarray([s["action_residual"] for s in steps], dtype=np.float32),
-            action_exec=np.asarray([s["action_exec"] for s in steps], dtype=np.float32),
-            rewards=np.asarray([s["reward"] for s in steps], dtype=np.float32),
-            terminal=bool(footer["terminal"]),
-            last_next_state=(np.asarray(footer["last_next_state"], dtype=np.float32)
-                              if footer.get("last_next_state") is not None else None),
+            states=np.asarray([s["state"] for s in logged], dtype=np.float32),
+            action_residual=np.asarray([s["action_residual"] for s in logged], dtype=np.float32),
+            action_exec=np.asarray([s["action_exec"] for s in logged], dtype=np.float32),
+            rewards=np.asarray([s["reward"] for s in logged], dtype=np.float32),
+            terminal=False,
+            last_next_state=np.asarray(boundary["state"], dtype=np.float32),
             meta=meta,
-        )
+        ), False
 
     def __len__(self) -> int:
         return sum(len(ep.rewards) for ep in self.episodes.values())
 
     def sample_transitions(self, batch_size: int, rng: np.random.Generator):
-        """Uniform sample of (state, action_residual, ep_id, t) across all closed
-        episodes -- the caller (learner.py) looks up the per-episode return at (ep_id, t)
-        itself, since that depends on the current critic snapshot."""
+        """Uniform sample of (state, action_residual, ep_id, t) across all known
+        episodes, closed or still live -- the caller (learner.py) looks up the
+        per-episode return at (ep_id, t) itself, since that depends on the current
+        critic snapshot."""
         if not self._flat_cache:
             self._flat_cache = [(ep_id, t) for ep_id, ep in self.episodes.items()
                                  for t in range(len(ep.rewards))]

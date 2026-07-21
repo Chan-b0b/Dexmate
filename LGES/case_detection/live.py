@@ -26,7 +26,7 @@ import config as cfg
 from detect_case_obb import bin_roi_for, detect_case
 from dexcontrol.core.config import get_robot_config
 from dexcontrol.robot import Robot
-from utils import align_head_to_forward
+from utils import set_head_pitch
 
 
 def _get_frame(robot):
@@ -71,7 +71,7 @@ def main() -> None:
     with Robot(configs=configs) as robot:
         if not robot.sensors.head_camera.wait_for_active(timeout=5.0):
             print("Warning: camera streams may not be active")
-        align_head_to_forward(robot, angle=30.0)
+        set_head_pitch(robot, angle=30.0)
 
         win = "case detector"
         cv2.namedWindow(win, cv2.WINDOW_NORMAL)

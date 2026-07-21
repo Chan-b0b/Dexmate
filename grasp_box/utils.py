@@ -206,7 +206,7 @@ def rpy_to_rotation_matrix(roll: float, pitch: float, yaw: float) -> np.ndarray:
     return rot.as_matrix()
 
 
-def align_head_to_forward(bot, wait_time: float = 6.0) -> None:
+def set_head_pitch(bot, wait_time: float = 6.0) -> None:
     """Adjust head pitch so the robot looks forward in the world frame.
 
     Keeps torso_pitch_deg + (-head_pitch_deg) ≈ 90 deg, meaning the

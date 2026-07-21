@@ -41,7 +41,7 @@ from dexcontrol.robot import Robot
 
 # Import shared utilities
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "dexcontrol", "examples", "custom_examples"))
-from utils import align_head_to_forward, wait_for_space, parse_trajectory_file, rpy_to_rotation_matrix
+from utils import set_head_pitch, wait_for_space, parse_trajectory_file, rpy_to_rotation_matrix
 import config
 
 
@@ -270,7 +270,7 @@ def build_ik_context(skip_confirmation: bool = False) -> IKContext:
 
     # Robot.__init__ resets the head to the predefined home pose (≈90°).
     # Immediately re-align so the head looks forward at the correct angle.
-    align_head_to_forward(bot)
+    set_head_pitch(bot)
     logger.info("IK context ready — URDF loaded, tasks built, robot connected.")
     return IKContext(
         robot_pin=robot_pin,
@@ -381,7 +381,7 @@ def run_trajectory(
                 # Send zero-velocity hold so the firmware engages its lock.
                 ctx.bot.torso.stop()
                 current_torso_q = ctx.bot.torso.get_joint_pos().astype(float)
-                align_head_to_forward(ctx.bot)
+                set_head_pitch(ctx.bot)
 
                 logger.info(f"  Torso joints (deg): {waypoint['joint_angles_deg']}")
                 logger.info(f"  Torso velocity (rad/s): {joint_vel}")
@@ -421,7 +421,7 @@ def run_trajectory(
                     q_sync[ctx.model.idx_qs[idx]] = current_right_arm_q[j]
                 q_sync = np.clip(q_sync, ctx.model.lowerPositionLimit, ctx.model.upperPositionLimit)
                 ctx.configuration.update(q_sync)
-                align_head_to_forward(ctx.bot)
+                set_head_pitch(ctx.bot)
                 continue
 
             # ── GRAB step ─────────────────────────────────────────────────────
@@ -527,7 +527,7 @@ def run_trajectory(
                     q_sync[ctx.model.idx_qs[idx]] = current_right_arm_q[j]
                 q_sync = np.clip(q_sync, ctx.model.lowerPositionLimit, ctx.model.upperPositionLimit)
                 ctx.configuration.update(q_sync)
-                align_head_to_forward(ctx.bot)
+                set_head_pitch(ctx.bot)
                 continue
 
             # ── IK step ───────────────────────────────────────────────────────
@@ -696,7 +696,7 @@ def run_trajectory(
                 time.sleep(ctx.control_dt)
             current_left_arm_q  = target_left_arm_q
             current_right_arm_q = target_right_arm_q
-            align_head_to_forward(ctx.bot)
+            set_head_pitch(ctx.bot)
 
         logger.info("Trajectory execution completed!")
         return True

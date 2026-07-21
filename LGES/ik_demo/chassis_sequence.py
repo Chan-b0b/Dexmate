@@ -51,7 +51,7 @@ _HERE = Path(__file__).resolve().parent
 sys.path.insert(0, str(_HERE.parents[0] / "case_detection"))
 sys.path.insert(0, str(_HERE.parents[1] / "perception"))
 import detect_case_bev as dcb  # noqa: E402
-from utils import align_head_to_forward  # perception/utils (path added above)  # noqa: E402
+from utils import set_head_pitch  # perception/utils (path added above)  # noqa: E402
 
 
 # item label -> pose key in resolve_poses (case-frame offset, same for pick@source
@@ -318,7 +318,7 @@ def _main() -> None:
             logger.warning("head camera may not be active")
         # Tilt the head down so the box is in view (same as live_bev/capture); the
         # BEV homography uses the live joints, so ~30 deg matches the training data.
-        align_head_to_forward(bot, angle=30.0)
+        set_head_pitch(bot, angle=30.0)
         with SuctionMover(bot) as m:
             release = m.software_estop_active()
             if release and input("Release software E-Stop? [y/N]: ").strip().lower() != "y":

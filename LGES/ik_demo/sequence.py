@@ -233,10 +233,10 @@ def _run_on_robot() -> None:
 
     from dexcontrol.robot import Robot
 
-    # perception/utils.py (sibling package) for align_head_to_forward — same
+    # perception/utils.py (sibling package) for set_head_pitch — same
     # sys.path setup chassis_sequence.py uses to reach it.
     sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "perception"))
-    from utils import align_head_to_forward  # noqa: E402
+    from utils import set_head_pitch  # noqa: E402
 
     use_gripper = "--gripper" in sys.argv     # enable the barcode divert
     use_dashboard = "--dashboard" in sys.argv  # spool camera/joints/EE/wrench for the web viewer
@@ -265,7 +265,7 @@ def _run_on_robot() -> None:
 
     suction_io.suction_off()
     with Robot(configs=robot_configs) as bot:
-        align_head_to_forward(bot, angle=30.0)
+        set_head_pitch(bot, angle=30.0)
         publisher = None
         if use_dashboard:
             from .dashboard_publish import DashboardPublisher

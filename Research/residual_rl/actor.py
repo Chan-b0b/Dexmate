@@ -28,6 +28,8 @@ Runs episodes back-to-back with no per-episode prompt (this is an unattended onl
 collector, not an interactive demo) -- Ctrl-C is the only way to stop between episodes.
 """
 
+#python Research/residual_rl/actor.py --checkpoint Chanho-Lee/smolvla_naive_0708 --go --force-limit 20 
+
 import argparse
 import select
 import sys
@@ -50,7 +52,7 @@ from run_policy import (  # noqa: E402
     _rpy_to_quat_wxyz, _box_from_detection, _baseline_force, _retreat_to_hover,
     _grab_rgb, _grab_depth, latest_checkpoint,
 )
-from icm_reward import ICMRewarder  # noqa: E402
+from icm_reward import ICMRewarder, WRENCH_OFFSET_0716  # noqa: E402
 from replay_buffer import EpisodeWriter  # noqa: E402
 from residual_policy import ResidualPolicy  # noqa: E402
 
@@ -63,7 +65,9 @@ def _latest_residual_ckpt(ckpt_dir: Path) -> Path | None:
 def run_actor(checkpoint, icm_checkpoint, buffer_dir: Path, residual_ckpt_dir: Path, *,
               icm_filename: str = "icm_0708_proprio.pt", commit: bool, home: bool = True,
               force_limit_n: float | None = None, max_ticks: int = 1000,
-              enforce_box: bool = False, explore: bool = True, layers: int | None = None):
+              enforce_box: bool = False, explore: bool = True, layers: int | None = None,
+              time_penalty: float = 0.01, force_soft_limit_n: float = 5.0,
+              force_penalty_per_n: float = 0.02):
     mode = "GO — COMMANDS THE LEFT ARM" if commit else "DRY-RUN — commands nothing"
     print(f"{mode}. residual AWR actor | checkpoint: {checkpoint}\nicm: {icm_checkpoint}")
     from dexcontrol.robot import Robot
@@ -72,7 +76,7 @@ def run_actor(checkpoint, icm_checkpoint, buffer_dir: Path, residual_ckpt_dir: P
     from LGES.ik_demo.suction import SuctionMover
     from LGES.ik_demo.drivers import suction_io
     from LGES.ik_demo.go_home import both_arms_home
-    from LGES.ik_demo.chassis_sequence import detect, _center_from_det, _view_park, align_head_to_forward
+    from LGES.ik_demo.chassis_sequence import detect, _center_from_det, _view_park, set_head_pitch
 
     task = "case_pick"
     spec = TASKS[task]
@@ -91,6 +95,8 @@ def run_actor(checkpoint, icm_checkpoint, buffer_dir: Path, residual_ckpt_dir: P
     layers = int(ikcfg.SRC_LAYERS_REMAINING if layers is None else layers)
 
     rewarder = ICMRewarder(icm_checkpoint, filename=icm_filename)
+    print(f"reward shaping: -{time_penalty:g}/tick | "
+          f"-{force_penalty_per_n:g}/N of contact over +{force_soft_limit_n:g}N")
     residual = ResidualPolicy(obs_dim=15)
     residual.eval()
     residual_ckpt_dir.mkdir(parents=True, exist_ok=True)
@@ -104,7 +110,7 @@ def run_actor(checkpoint, icm_checkpoint, buffer_dir: Path, residual_ckpt_dir: P
     with Robot(configs=robot_configs) as bot, SuctionMover(bot) as mover:
         if not bot.sensors.head_camera.wait_for_active(timeout=5.0):
             print("  (head camera may not be active)")
-        align_head_to_forward(bot, angle=30.0)
+        set_head_pitch(bot, angle=30.0)
 
         release = mover.software_estop_active()
         if release and input("Release software E-Stop? [y/N]: ").strip().lower() != "y":
@@ -183,16 +189,33 @@ def run_actor(checkpoint, icm_checkpoint, buffer_dir: Path, residual_ckpt_dir: P
                     suction = suction_io.is_suction_commanded_on()
                     sealed = bool(seal.is_sealed()) if seal else False
                     state = ob.state(torso_q, left_q, right_q, wrench6, suction, sealed)
+                    # Correct the F/T baseline drift ONCE, at the source: every consumer
+                    # of `state` -- the base policy's predict(), the residual policy, the
+                    # ICM reward, and the buffer rows the learner trains on -- was
+                    # trained/calibrated on the 0708 demos' wrench baseline, so all of
+                    # them must see training-frame wrench values. The raw wrench6 stays
+                    # untouched below for the live `contact` safety check, which tares
+                    # itself against _baseline_force at episode start.
+                    state[9:15] -= WRENCH_OFFSET_0716
                     cur_pos, cur_quat = state[:3], state[3:7]
+                    contact = float(np.linalg.norm(wrench6[:3])) - baseline_f
 
                     # Close out the PREVIOUS tick's transition now that we have its
                     # next_state (this tick's `state`) -- see replay_buffer.py's
                     # docstring for why the bootstrap state must be exact, not off-by-one.
                     if prev_state is not None:
-                        reward = rewarder.reward(prev_state, prev_action_exec, state)
+                        # No wrench_offset here: both states were already corrected above.
+                        # Shaping on top of the ICM term: a flat per-tick time cost (the
+                        # ICM reward is always positive, so without it dawdling
+                        # on-manifold out-earns finishing), and a soft force penalty that
+                        # grades overshoot BEFORE the hard +flim abort kills the episode.
+                        # THIS tick's contact is the measured consequence of prev_action,
+                        # so it belongs to the transition being closed here.
+                        reward = (rewarder.reward(prev_state, prev_action_exec, state)
+                                  - time_penalty
+                                  - force_penalty_per_n * max(0.0, contact - force_soft_limit_n))
                         writer.step(prev_state, prev_action_residual, prev_action_exec, reward)
 
-                    contact = float(np.linalg.norm(wrench6[:3])) - baseline_f
                     has_sealed = has_sealed or sealed
                     went_low = went_low or cur_pos[2] < DESCEND_Z
                     at_hover = cur_pos[2] >= HOVER_Z
@@ -293,7 +316,7 @@ def run_actor(checkpoint, icm_checkpoint, buffer_dir: Path, residual_ckpt_dir: P
 
 def main():
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    ap.add_argument("--checkpoint", default="Chanho-Lee/smolvla_meanflow_0708",
+    ap.add_argument("--checkpoint", default="Chanho-Lee/smolvla_meanflow_naive_0708",
                     help="HF repo id or local path -- default is the meanflow checkpoint "
                          "(its 1-step generation is what makes online rollouts/relabeling "
                          "cheap; see its README's 'Notes for RL fine-tuning afterwards')")
@@ -309,7 +332,16 @@ def main():
     ap.add_argument("--go", action="store_true", help="COMMANDS the left arm + suction")
     ap.add_argument("--no-home", action="store_true")
     ap.add_argument("--box", action="store_true")
-    ap.add_argument("--force-limit", type=float, default=None)
+    ap.add_argument("--force-limit", type=float, default=20.0)
+    ap.add_argument("--time-penalty", type=float, default=0.01,
+                    help="flat per-tick reward penalty -- the ICM term is always positive, "
+                         "so without this, dawdling on-manifold out-earns finishing (0 disables)")
+    ap.add_argument("--force-soft-limit", type=float, default=5.0,
+                    help="contact force (N over baseline) where the soft penalty starts; "
+                         "keep well under --force-limit so the residual learns to back off "
+                         "before the hard abort")
+    ap.add_argument("--force-penalty", type=float, default=0.02,
+                    help="reward penalty per N of contact above --force-soft-limit (0 disables)")
     ap.add_argument("--max-ticks", type=int, default=1000)
     ap.add_argument("--no-explore", action="store_true", help="use the residual's deterministic mean (eval, not data collection)")
     ap.add_argument("--layers", type=int, default=None)
@@ -321,7 +353,9 @@ def main():
     run_actor(args.checkpoint or latest_checkpoint(), args.icm_checkpoint, args.buffer_dir,
               args.residual_ckpt_dir, icm_filename=args.icm_filename, commit=args.go,
               home=not args.no_home, force_limit_n=args.force_limit, max_ticks=args.max_ticks,
-              enforce_box=args.box, explore=not args.no_explore, layers=args.layers)
+              enforce_box=args.box, explore=not args.no_explore, layers=args.layers,
+              time_penalty=args.time_penalty, force_soft_limit_n=args.force_soft_limit,
+              force_penalty_per_n=args.force_penalty)
 
 
 if __name__ == "__main__":

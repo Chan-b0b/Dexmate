@@ -57,7 +57,7 @@ sys.path.insert(0, str(VLA_DIR))   # convert_to_lerobot, collect_case_pick, film
 from convert_to_lerobot import colorize_depth  # noqa: E402
 
 IMG_W, IMG_H = 512, 320  # must match convert_to_lerobot.py
-FPS = 15
+FPS = 10
 
 # Per-step safety clamps. These bound a single step but must NOT throttle
 # normal motion: at half these values the arm just hovered (real predicted
@@ -658,7 +658,7 @@ def run_live(checkpoint: Path, tasks: list[str], *, commit: bool,
              log_dir: Path | None = None, log_images: bool = False,
              n_action_steps: int | None = None, loop: bool = False,
              descend_until_contact: bool = False, contact_n: float = 3.0,
-             descend_floor: float = 0.74, descend_rate: float = 0.006,
+             descend_floor: float = 0.74, descend_rate: float = 0.0005,
              film: bool = False, layers: int | None = None):
     """Run suction sub-task(s) at ~15 Hz on the ik_demo stack.
 
@@ -680,7 +680,7 @@ def run_live(checkpoint: Path, tasks: list[str], *, commit: bool,
     from LGES.ik_demo.drivers import suction_io
     from LGES.ik_demo.go_home import both_arms_home
     from LGES.ik_demo.chassis_sequence import (detect, _center_from_det, _view_park,
-                                               align_head_to_forward)
+                                               set_head_pitch)
 
     ob = ObsBuilder()
     policy, pre, post = load_policy(checkpoint, film=film)
@@ -702,7 +702,7 @@ def run_live(checkpoint: Path, tasks: list[str], *, commit: bool,
     with Robot(configs=robot_configs) as bot, SuctionMover(bot) as mover:
         if not bot.sensors.head_camera.wait_for_active(timeout=5.0):
             print("  (head camera may not be active)")
-        align_head_to_forward(bot, angle=30.0)  # BEV homography + training view
+        set_head_pitch(bot, angle=30.0)  # BEV homography + training view
 
         release = mover.software_estop_active()
         if release and input("Release software E-Stop? [y/N]: ").strip().lower() != "y":

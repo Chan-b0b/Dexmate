@@ -19,7 +19,7 @@ from rclpy.node import Node
 from std_msgs.msg import String
 #from geometry_msgs.msg import Point
 
-from utils import align_head_to_forward
+from utils import set_head_pitch
 
 
 ### transformatation functions
@@ -521,7 +521,7 @@ def main(use_rtc: bool = False) -> None:
         else:
             print("Warning: Some camera streams may not be active")
 
-        align_head_to_forward(robot)
+        set_head_pitch(robot)
 
         # Print camera information nicely
         #camera_info = robot.sensors.head_camera.get_camera_info()

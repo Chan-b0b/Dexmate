@@ -24,10 +24,10 @@ from loguru import logger
 
 from dexcontrol.robot import Robot
 
-# LGES/ is the parent of this package; expose its utils.py for import.
-_LGES_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-if _LGES_DIR not in sys.path:
-    sys.path.insert(0, _LGES_DIR)
+# perception/ holds the shared set_head_pitch helper; expose it for import.
+_PERCEPTION_DIR = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))), "perception")
+if _PERCEPTION_DIR not in sys.path:
+    sys.path.insert(0, _PERCEPTION_DIR)
 from utils import set_head_pitch  # noqa: E402
 
 from .grasp import GripperMover, SuctionMover
@@ -116,7 +116,7 @@ def main(undo: bool = False, undo_only: bool = False, loop: bool = False, skip_c
                 return False
 
             # Tilt the head down to 30° so cameras see the workspace.
-            set_head_pitch(bot, pitch_deg=30.0)
+            set_head_pitch(bot, angle=30.0)
 
             # Right-arm Robotiq gripper for the barcode-matched battery handoff.
             # If its EE pass-through isn't available, the demo falls back to the

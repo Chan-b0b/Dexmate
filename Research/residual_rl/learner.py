@@ -6,7 +6,9 @@ Runs as its OWN process (separate from actor.py's 15 Hz control loop) so gradien
 never compete with the robot tick budget -- see the residual_rl design discussion. The
 actor only ever reads the latest checkpoint, and only between episodes.
 
-  python learner.py --buffer-dir ~/rl_buffer/case_pick --ckpt-dir ~/rl_ckpt/case_pick
+  python learner.py --buffer-dir Research/residual_rl/rl_buffer/case_pick --ckpt-dir Research/residual_rl/rl_ckpt/case_pick
+  (these match actor.py's --buffer-dir/--residual-ckpt-dir defaults -- point both scripts
+  at the SAME directories, or the learner will never see the actor's episodes)
 """
 
 from __future__ import annotations
@@ -53,6 +55,14 @@ def episode_returns(ep: Episode, gamma: float, value_fn: ValueFunction, device: 
         with torch.no_grad():
             s = torch.as_tensor(ep.last_next_state, device=device).unsqueeze(0)
             bootstrap = float(value_fn(s).squeeze(0))
+        # Clip the bootstrap to the physically-achievable return range: the ICM
+        # reward is <= 1/tick, so |return-to-go| <= 1/(1-gamma). Without this, and
+        # with EVERY episode truncated (no terminal bootstrap=0 anywhere to ground
+        # the scale), the critic trains against targets containing its own output
+        # and can run away unboundedly (deadly triad) -- observed as critic_loss
+        # ~1e8 with value targets ~1e4, 200x beyond what the data can produce.
+        v_bound = 1.0 / (1.0 - gamma)
+        bootstrap = float(np.clip(bootstrap, -v_bound, v_bound))
     running = bootstrap
     for t in range(T - 1, -1, -1):
         running = ep.rewards[t] + gamma * running
@@ -72,11 +82,14 @@ def main():
     ap.add_argument("--batch-size", type=int, default=256)
     ap.add_argument("--min-transitions", type=int, default=500,
                     help="don't start training until the buffer has at least this many steps")
-    ap.add_argument("--steps-per-refresh", type=int, default=50,
+    ap.add_argument("--steps-per-refresh", type=int, default=200,
                     help="gradient steps between buffer rescans")
     ap.add_argument("--refresh-interval-s", type=float, default=5.0,
                     help="min seconds between buffer rescans (caps rescan overhead)")
-    ap.add_argument("--save-every", type=int, default=200, help="gradient steps between checkpoints")
+    ap.add_argument("--save-every", type=int, default=100, help="gradient steps between checkpoints")
+    ap.add_argument("--min-new-transitions", type=int, default=100,
+                    help="don't run a new round of gradient updates until at least this "
+                         "many new transitions have entered the buffer since the last round")
     ap.add_argument("--device", default="cuda" if torch.cuda.is_available() else "cpu")
     ap.add_argument("--resume", type=Path, default=None, help="residual policy checkpoint to resume from")
     args = ap.parse_args()
@@ -95,6 +108,7 @@ def main():
     print(f"[learner] initial scan: {len(buf.episodes)} closed episodes, {len(buf)} transitions")
 
     step = 0
+    transitions_at_last_round = 0
     last_refresh = time.time()
     while True:
         if len(buf) < args.min_transitions:
@@ -102,6 +116,15 @@ def main():
             time.sleep(args.refresh_interval_s)
             buf.refresh()
             continue
+
+        new_transitions = len(buf) - transitions_at_last_round
+        if new_transitions < args.min_new_transitions:
+            print(f"[learner] waiting for new data: +{new_transitions}/{args.min_new_transitions} "
+                  f"transitions since last round")
+            time.sleep(args.refresh_interval_s)
+            buf.refresh()
+            continue
+        transitions_at_last_round = len(buf)
 
         for _ in range(args.steps_per_refresh):
             batch = buf.sample_transitions(args.batch_size, rng)

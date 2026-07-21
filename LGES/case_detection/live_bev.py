@@ -34,7 +34,7 @@ import bev
 from detect_case_bev import detect_case_bev
 from dexcontrol.core.config import get_robot_config
 from dexcontrol.robot import Robot
-from utils import align_head_to_forward
+from utils import set_head_pitch
 
 
 def _get_frame(robot):
@@ -104,7 +104,7 @@ def main() -> None:
     with Robot(configs=configs) as robot:
         if not robot.sensors.head_camera.wait_for_active(timeout=5.0):
             print("Warning: camera streams may not be active")
-        align_head_to_forward(robot, angle=args.angle)
+        set_head_pitch(robot, angle=args.angle)
 
         win = "BEV case detector"
         cv2.namedWindow(win, cv2.WINDOW_NORMAL)

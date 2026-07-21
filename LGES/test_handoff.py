@@ -27,6 +27,11 @@ from dexcontrol.robot import Robot
 _LGES_DIR = os.path.dirname(os.path.abspath(__file__))
 if _LGES_DIR not in sys.path:
     sys.path.insert(0, _LGES_DIR)
+
+# perception/ holds the shared set_head_pitch helper; expose it for import.
+_PERCEPTION_DIR = os.path.join(os.path.dirname(_LGES_DIR), "perception")
+if _PERCEPTION_DIR not in sys.path:
+    sys.path.insert(0, _PERCEPTION_DIR)
 from utils import set_head_pitch  # noqa: E402
 
 from case_battery_demo import config as cfg
@@ -101,7 +106,7 @@ def main(
             logger.error("Robotiq activation failed. Aborting.")
             return
 
-        set_head_pitch(bot, pitch_deg=30.0)
+        set_head_pitch(bot, angle=30.0)
         go_to_default_pose(bot)
 
         # --- 1. Pick ---

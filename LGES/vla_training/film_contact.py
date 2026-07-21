@@ -105,7 +105,7 @@ def _contact_from_state(self, state: torch.Tensor) -> torch.Tensor:
     Contact = a force DROP below the fixed baseline F0: c^ = clip((F0 - |F|)/tau, 0, 1)."""
     w = state[..., WRENCH_LO:WRENCH_HI] * self._wrench_std + self._wrench_mean  # un-normalize
     fmag = torch.linalg.norm(w[..., :3], dim=-1, keepdim=True)                  # raw |F| (B,1)
-    return torch.clamp((self._contact_F0 - fmag) / self._contact_tau, 0.0, 1.0)
+    return torch.clamp((fmag - self._contact_F0) / self._contact_tau, 0.0, 1.0)
 
 
 def _fz_from_state(self, state: torch.Tensor) -> torch.Tensor:
@@ -115,7 +115,7 @@ def _fz_from_state(self, state: torch.Tensor) -> torch.Tensor:
     loses, and separates descent (~14N) / contact (~0N) / loaded (~17N) that the rectified
     contact drop cannot (contact reads 0 for both descent AND loaded)."""
     fz_raw = state[..., FZ_IDX:FZ_IDX + 1] * self._wrench_std[2] + self._wrench_mean[2]
-    return fz_raw / self._fz_tau
+    return (fz_raw-20) / self._fz_tau
 
 
 def _seal_from_state(self, state: torch.Tensor) -> torch.Tensor:
@@ -191,10 +191,13 @@ def apply(variant: str, wrench_mean: torch.Tensor, wrench_std: torch.Tensor,
             self.register_buffer("_wrench_mean", wrench_mean.clone())
             self.register_buffer("_wrench_std", wrench_std.clone())
         if "contact" in cond:
-            self.register_buffer("_contact_F0", torch.tensor(float(contact_F0)))
-            self.register_buffer("_contact_tau", torch.tensor(float(contact_tau)))
+            # non-persistent: these are a runtime eval hyperparameter, not a learned/trained
+            # value -- persistent=True would let from_pretrained's state_dict load silently
+            # restore the checkpoint's TRAINING-time F0/tau over any FILM_F0/FILM_TAU override.
+            self.register_buffer("_contact_F0", torch.tensor(float(contact_F0)), persistent=False)
+            self.register_buffer("_contact_tau", torch.tensor(float(contact_tau)), persistent=False)
         if "fz" in cond:
-            self.register_buffer("_fz_tau", torch.tensor(float(fz_tau)))
+            self.register_buffer("_fz_tau", torch.tensor(float(fz_tau)), persistent=False)
         if "seal" in cond:
             self.register_buffer("_seal_mean", seal_mean.clone())
             self.register_buffer("_seal_std", seal_std.clone())

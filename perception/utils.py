@@ -1,7 +1,7 @@
 import numpy as np
 
 
-def align_head_to_forward(bot, wait_time: float = 5.0, angle: float = 30.0) -> None:
+def set_head_pitch(bot, wait_time: float = 5.0, angle: float = 30.0) -> None:
     """Adjust head pitch so the robot looks forward in the world frame.
 
     Keeps torso_pitch_deg + (-head_pitch_deg) ≈ 90 deg, meaning the
