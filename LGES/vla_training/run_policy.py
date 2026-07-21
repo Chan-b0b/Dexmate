@@ -109,9 +109,14 @@ class ObsBuilder:
     pos(3) quat_wxyz(4) suction(1) vacuum_sealed(1) raw-wrench fx..tz(6).
     """
 
-    def __init__(self):
+    def __init__(self, df_channel: bool = False):
         from collect_case_pick import _EEKin
         self._fk = _EEKin()
+        # dfmag (d|F|/dt, N/frame) 16th state dim for *_dF checkpoints. Set
+        # df_channel after load_policy: robot_state_feature.shape[0] == 16.
+        self.df_channel = df_channel
+        self._prev_fmag = None
+        self._prev_t = 0.0
 
     def state(self, torso_q, left_q, right_q, wrench6, suction_on: bool,
               sealed: bool) -> np.ndarray:
@@ -132,6 +137,16 @@ class ObsBuilder:
             [1.0 if sealed else 0.0],
             np.asarray(wrench6, dtype=np.float64)[:6],
         ])
+        if self.df_channel:
+            import time
+            fmag = float(np.linalg.norm(np.asarray(wrench6, dtype=np.float64)[:3]))
+            now = time.monotonic()
+            # >0.5s since the last frame = a new rollout (loop runs at ~15Hz);
+            # matches training where dfmag=0 on each episode's first frame.
+            stale = self._prev_fmag is None or (now - self._prev_t) > 0.5
+            dfmag = 0.0 if stale else fmag - self._prev_fmag
+            self._prev_fmag, self._prev_t = fmag, now
+            s = np.concatenate([s, [dfmag]])
         return s.astype(np.float32)
 
     @staticmethod
@@ -248,7 +263,8 @@ def _peek_film_structure(model_dir: str):
     with safe_open(st_path, framework="pt") as f:
         keys = set(f.keys())
         cond = tuple(ch for ch, buf in (("contact", "_contact_F0"), ("fz", "_fz_tau"),
-                                         ("seal", "_seal_mean")) if any(k.endswith(buf) for k in keys))
+                                         ("seal", "_seal_mean"), ("dfmag", "_dfmag_tau"))
+                     if any(k.endswith(buf) for k in keys))
         hidden = f.get_slice("model.contact_film.scale.2.weight").get_shape()[0]
     inject = "prefix" if hidden == 960 else "suffix"
     mask_force_default = "mask1" in Path(model_dir).name.lower()
@@ -331,17 +347,22 @@ def load_policy(checkpoint: Path, film: bool = False):
         f0 = float(os.environ.get("FILM_F0", "12"))
         tau = float(os.environ.get("FILM_TAU", "10"))        # contact-DROP scale; MUST match training
         fz_tau = float(os.environ.get("FILM_FZ_TAU", "30"))  # fz scale; MUST match training
+        dfmag_tau = float(os.environ.get("FILM_DFMAG_TAU", "5"))  # d|F|/dt scale; MUST match training
         # wrench/seal stats only depend on observation.state (shared by delta and
         # abs conversions of the same recordings), so either dataset variant works;
-        # lges_suction (pre-0708) no longer exists on this machine.
+        # lges_suction (pre-0708) no longer exists on this machine. dfmag checkpoints
+        # (cond incl. 'dfmag', state 16) need a *_dF dataset, e.g.
+        # FILM_DATASET=lges_case_pick_0708_dF.
         ds = VLA_DIR / "datasets" / os.environ.get("FILM_DATASET", "lges_case_pick_0708")
         wm, ws = film_contact.load_wrench_stats(ds)
         sm, ss = film_contact.load_seal_stats(ds)
+        dm, dsd = film_contact.load_dfmag_stats(ds)
         film_contact.apply("v2", wm, ws, seal_mean=sm, seal_std=ss, cond=cond,
                            contact_F0=f0, contact_tau=tau, fz_tau=fz_tau,
-                           mask_force=mask_force, inject=inject)
+                           mask_force=mask_force, inject=inject,
+                           dfmag_mean=dm, dfmag_std=dsd, dfmag_tau=dfmag_tau)
         print(f"[run_policy] FiLM ENABLED (cond={cond} inject={inject} mask_force={mask_force} "
-              f"F0={f0:.0f} tau={tau:.0f} fz_tau={fz_tau:.0f})")
+              f"F0={f0:.0f} tau={tau:.0f} fz_tau={fz_tau:.0f} dfmag_tau={dfmag_tau:.0f})")
 
     policy = get_policy_class(cfg.type).from_pretrained(model_dir, config=cfg)
     policy.eval()
@@ -458,6 +479,7 @@ def self_test(take_dir: Path, checkpoint: Path, film: bool = False):
     print("== policy predicted vs recorded action (first 5 + summary) ==")
     policy, pre, post = load_policy(checkpoint, film=film)
     policy.reset()
+    ob.df_channel = int(policy.config.robot_state_feature.shape[0]) == 16
     abs_action = int(policy.config.action_feature.shape[0]) == 8
     suction_idx = 7 if abs_action else 6
     print(f"  action space: {'absolute pose+suction (8d)' if abs_action else 'delta pose+suction (7d)'}")
@@ -684,6 +706,7 @@ def run_live(checkpoint: Path, tasks: list[str], *, commit: bool,
 
     ob = ObsBuilder()
     policy, pre, post = load_policy(checkpoint, film=film)
+    ob.df_channel = int(policy.config.robot_state_feature.shape[0]) == 16
     if n_action_steps is not None:
         policy.config.n_action_steps = n_action_steps
     chunk_steps = int(getattr(policy.config, "n_action_steps", 1))

@@ -48,7 +48,8 @@ import torch.nn as nn
 WRENCH_LO, WRENCH_HI = 9, 15   # wrench (fx,fy,fz,tx,ty,tz) dims in observation.state
 FZ_IDX = 11                    # fz (vertical force) — fed to FiLM as a continuous channel
 SEAL_IDX = 8                   # vacuum_sealed bit in observation.state
-CHANNELS = ("contact", "fz", "seal")  # available condition channels (canonical order)
+DFMAG_IDX = 15                 # d|F|/dt (N/frame) — only in *_dF datasets (state dim 16)
+CHANNELS = ("contact", "fz", "seal", "dfmag")  # available condition channels (canonical order)
 _CFG = {"variant": "v0", "mask_force": True, "cond": ("contact", "seal"),
         "inject": "suffix"}  # mutated by apply()
 INJECTS = ("suffix", "output", "prefix")  # where FiLM modulates
@@ -60,6 +61,16 @@ def load_wrench_stats(dataset_root):
     m = torch.tensor(st["mean"][WRENCH_LO:WRENCH_HI], dtype=torch.float32)
     sd = torch.tensor(st["std"][WRENCH_LO:WRENCH_HI], dtype=torch.float32)
     return m, sd
+
+
+def load_dfmag_stats(dataset_root):
+    """(dfmag_mean, dfmag_std) float32 scalar tensors from a *_dF dataset stats.json.
+    Returns (None, None) if the dataset has no dfmag dim (state dim 15)."""
+    st = json.loads((Path(dataset_root) / "meta" / "stats.json").read_text())["observation.state"]
+    if len(st["mean"]) <= DFMAG_IDX:
+        return None, None
+    return (torch.tensor(st["mean"][DFMAG_IDX], dtype=torch.float32),
+            torch.tensor(st["std"][DFMAG_IDX], dtype=torch.float32))
 
 
 def load_seal_stats(dataset_root):
@@ -118,6 +129,17 @@ def _fz_from_state(self, state: torch.Tensor) -> torch.Tensor:
     return (fz_raw-20) / self._fz_tau
 
 
+def _dfmag_from_state(self, state: torch.Tensor) -> torch.Tensor:
+    """d|F|/dt (force change rate) as a continuous signed channel, shape (B,1):
+    raw dfmag (N/frame, 15fps) / dfmag_tau. The contact dip is a sharp NEGATIVE
+    transient (|F| ~10N -> ~1N within 1-2 frames => dfmag ~ -5), unlike the
+    fixed-F0 'contact' channel this is robust to the payload-dependent baseline
+    (empty tool ~13N vs loaded ~16N+) that makes F0=12 under-read on places.
+    Requires a *_dF dataset (state dim 16, dfmag appended at idx 15)."""
+    d_raw = state[..., DFMAG_IDX:DFMAG_IDX + 1] * self._dfmag_std + self._dfmag_mean
+    return d_raw / self._dfmag_tau
+
+
 def _seal_from_state(self, state: torch.Tensor) -> torch.Tensor:
     """seal bit in [0,1], shape (B,1), un-normalized from the NORMALIZED state."""
     seal = state[..., SEAL_IDX:SEAL_IDX + 1] * self._seal_std + self._seal_mean
@@ -126,7 +148,8 @@ def _seal_from_state(self, state: torch.Tensor) -> torch.Tensor:
 
 def _condition_from_state(self, state: torch.Tensor) -> torch.Tensor:
     """Concatenate the enabled channels (canonical order) -> c-hat (B, cond_dim)."""
-    fns = {"contact": _contact_from_state, "fz": _fz_from_state, "seal": _seal_from_state}
+    fns = {"contact": _contact_from_state, "fz": _fz_from_state, "seal": _seal_from_state,
+           "dfmag": _dfmag_from_state}
     cols = [fns[ch](self, state) for ch in self._film_cond]
     return torch.cat(cols, dim=-1)
 
@@ -134,7 +157,9 @@ def _condition_from_state(self, state: torch.Tensor) -> torch.Tensor:
 def apply(variant: str, wrench_mean: torch.Tensor, wrench_std: torch.Tensor,
           seal_mean: torch.Tensor = None, seal_std: torch.Tensor = None,
           cond=("contact", "fz", "seal"), contact_F0: float = 12.0, contact_tau: float = 10.0,
-          fz_tau: float = 30.0, mask_force: bool = True, inject: str = "suffix") -> None:
+          fz_tau: float = 30.0, mask_force: bool = True, inject: str = "suffix",
+          dfmag_mean: torch.Tensor = None, dfmag_std: torch.Tensor = None,
+          dfmag_tau: float = 5.0) -> None:
     """Patch VLAFlowMatching for the given variant + condition channels.
 
     cond: which channels feed FiLM — any subset of CHANNELS ('contact', 'fz', 'seal').
@@ -167,6 +192,9 @@ def apply(variant: str, wrench_mean: torch.Tensor, wrench_std: torch.Tensor,
         raise ValueError(f"unknown inject {inject!r}; allowed: {INJECTS}")
     if "seal" in cond and (seal_mean is None or seal_std is None):
         raise ValueError("cond includes 'seal' but seal_mean/seal_std were not provided")
+    if "dfmag" in cond and (dfmag_mean is None or dfmag_std is None):
+        raise ValueError("cond includes 'dfmag' but dfmag_mean/dfmag_std were not provided "
+                         "(needs a *_dF dataset with state dim 16)")
 
     _CFG["variant"] = variant
     _CFG["mask_force"] = mask_force
@@ -201,6 +229,10 @@ def apply(variant: str, wrench_mean: torch.Tensor, wrench_std: torch.Tensor,
         if "seal" in cond:
             self.register_buffer("_seal_mean", seal_mean.clone())
             self.register_buffer("_seal_std", seal_std.clone())
+        if "dfmag" in cond:
+            self.register_buffer("_dfmag_mean", dfmag_mean.clone())
+            self.register_buffer("_dfmag_std", dfmag_std.clone())
+            self.register_buffer("_dfmag_tau", torch.tensor(float(dfmag_tau)))
         self._cur_contact = None
         owner = self  # closure ref (NOT a submodule -> not in state_dict, no recursion)
 
@@ -243,6 +275,8 @@ def apply(variant: str, wrench_mean: torch.Tensor, wrench_std: torch.Tensor,
                     state[..., FZ_IDX] = 0.0
                 if "seal" in self._film_cond:
                     state[..., SEAL_IDX] = 0.0
+                if "dfmag" in self._film_cond:
+                    state[..., DFMAG_IDX] = 0.0
         return orig_embed_prefix(self, images, img_masks, lang_tokens, lang_masks, state=state)
 
     VLAFlowMatching.__init__ = new_init

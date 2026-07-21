@@ -45,7 +45,11 @@ def _forced_cond(self, state):
     if _FORCE["c"] is None:
         return _orig_cond(self, state)
     B = state.shape[0]
-    return torch.full((B, len(self._film_cond)), float(_FORCE["c"]),
+    c = _FORCE["c"]
+    if isinstance(c, (list, tuple)):        # per-channel pattern (see --c0/--c1)
+        v = torch.tensor(c, dtype=torch.float32, device=state.device)
+        return v.expand(B, -1).clone()
+    return torch.full((B, len(self._film_cond)), float(c),
                       dtype=torch.float32, device=state.device)
 
 
@@ -63,6 +67,12 @@ def main():
                     help="episode index (default: first case_pick episode)")
     ap.add_argument("--contact-n", type=float, default=14.5,
                     help="raw |F| (N) below which a frame counts as pre-contact/descent")
+    ap.add_argument("--c0", default=None,
+                    help="comma list: per-channel 'no-contact' pattern (default: all 0). "
+                         "Signed channels like dfmag make all-0/all-1 unrealistic; e.g. for "
+                         "cond=contact,fz,seal,dfmag use --c0 0,0.47,0,0 --c1 1,0,0,-1")
+    ap.add_argument("--c1", default=None,
+                    help="comma list: per-channel 'contact' pattern (default: all 1)")
     args = ap.parse_args()
 
     cond = tuple(c.strip() for c in os.environ.get("FILM_COND", "contact").split(",") if c.strip())
@@ -72,8 +82,11 @@ def main():
 
     wm, ws = film_contact.load_wrench_stats(args.dataset_root)
     sm, ss = film_contact.load_seal_stats(args.dataset_root)
+    dm, dsd = film_contact.load_dfmag_stats(args.dataset_root)
+    dfmag_tau = float(os.environ.get("FILM_DFMAG_TAU", "5"))
     film_contact.apply("v2", wm, ws, seal_mean=sm, seal_std=ss, cond=cond,
-                       mask_force=mask_force, inject=inject)
+                       mask_force=mask_force, inject=inject,
+                       dfmag_mean=dm, dfmag_std=dsd, dfmag_tau=dfmag_tau)
 
     from lerobot.datasets.lerobot_dataset import LeRobotDataset
     from lerobot.policies.smolvla.modeling_smolvla import SmolVLAPolicy
@@ -135,6 +148,17 @@ def main():
             a = policy.select_action(pre(obs))
         return post(a).squeeze(0).cpu().numpy()
 
+    def parse_c(s, default):
+        if s is None:
+            return default
+        v = [float(x) for x in s.split(",")]
+        assert len(v) == len(cond), f"--c0/--c1 length {len(v)} != cond dim {len(cond)}"
+        return v
+    C0 = parse_c(args.c0, 0.0)
+    C1 = parse_c(args.c1, 1.0)
+    if args.c0 or args.c1:
+        print(f"  forced patterns: c0={C0}  c1={C1}  (channels {cond})")
+
     rows = []
     for i in range(lo, hi):
         f = ds[i]
@@ -142,8 +166,8 @@ def main():
         fmag = float(np.linalg.norm(st[F_LO:F_HI]))
         if fmag >= args.contact_n:          # only pre-contact / descent frames
             continue
-        a0 = predict_with_c(f, 0.0)
-        a1 = predict_with_c(f, 1.0)
+        a0 = predict_with_c(f, C0)
+        a1 = predict_with_c(f, C1)
         ar = predict_with_c(f, None)        # real c-hat (what deploy would see here)
         exp = f["action"].numpy()
         rows.append((i, st[EE_Z], fmag, exp[DZ], a0[DZ], a1[DZ], ar[DZ]))
