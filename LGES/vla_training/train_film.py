@@ -37,6 +37,58 @@ print(f"[film] patched VLAFlowMatching: variant={_variant} cond={_cond} inject={
       f"dfmag={'d|F|/%g' % _dfmag_tau if _dm is not None else 'n/a'} "
       f"wrench_mean={[round(x,2) for x in _wm.tolist()]}", file=sys.stderr)
 
+# ── contact-transition oversampling (FILM_OVERSAMPLE_BOOST > 1 enables) ─────
+# The contact dip is 1-2 frames per episode (~1% of data), so BC barely sees it
+# and binds the stop to later post-seal signals instead (probe decomposition,
+# 2026-07-17). Boost the sampling weight of frames within WINDOW of a sharp
+# |F| drop (dfmag <= -THRESH N/frame) so the transition gets gradient exposure.
+_os_boost = float(os.environ.get("FILM_OVERSAMPLE_BOOST", "0"))
+if _os_boost > 1:
+    import numpy as np
+    import pandas as pd
+    import torch
+
+    _os_thresh = float(os.environ.get("FILM_OVERSAMPLE_THRESH", "2"))   # N/frame drop
+    _os_window = int(os.environ.get("FILM_OVERSAMPLE_WINDOW", "5"))    # +- frames
+
+    def _transition_weights(root):
+        """Per-frame sampling weight over the dataset (global `index` order):
+        `_os_boost` within +-`_os_window` frames of a |F| drop <= -`_os_thresh`, else 1."""
+        dfs = [pd.read_parquet(p, columns=["observation.state", "episode_index", "index"])
+               for p in sorted((Path(root) / "data").rglob("*.parquet"))]
+        df = pd.concat(dfs).sort_values("index").reset_index(drop=True)
+        assert (df["index"].to_numpy() == np.arange(len(df))).all(), "non-contiguous index"
+        st = np.stack(df["observation.state"].to_numpy())
+        w = np.ones(len(df))
+        for ep in df["episode_index"].unique():
+            m = np.flatnonzero((df["episode_index"] == ep).to_numpy())
+            fmag = np.linalg.norm(st[m, 9:12], axis=1)
+            dips = np.flatnonzero(np.diff(fmag, prepend=fmag[0]) <= -_os_thresh)
+            for d in dips:
+                w[m[max(0, d - _os_window):d + _os_window + 1]] = _os_boost
+        return w
+
+    _orig_DataLoader = torch.utils.data.DataLoader
+
+    class _WeightedDataLoader(_orig_DataLoader):
+        # a subclass (not a wrapper fn) so accelerate's isinstance(..., DataLoader) passes
+        def __init__(self, dataset, *a, **kw):
+            if kw.get("shuffle") and kw.get("sampler") is None and hasattr(dataset, "meta"):
+                w = _transition_weights(_root)
+                assert len(w) == len(dataset), f"weights {len(w)} != dataset {len(dataset)}"
+                kw["sampler"] = torch.utils.data.WeightedRandomSampler(
+                    torch.as_tensor(w, dtype=torch.double), num_samples=len(dataset),
+                    replacement=True)
+                kw["shuffle"] = False
+                n = int((w > 1).sum())
+                print(f"[film-os] oversampling {n}/{len(w)} transition frames x{_os_boost:g} "
+                      f"(thresh={_os_thresh:g}N/frame window=+-{_os_window}) -> "
+                      f"{n * _os_boost / (n * _os_boost + len(w) - n):.1%} of samples",
+                      file=sys.stderr)
+            super().__init__(dataset, *a, **kw)
+
+    torch.utils.data.DataLoader = _WeightedDataLoader
+
 from lerobot.scripts.lerobot_train import train  # noqa: E402
 
 if __name__ == "__main__":
