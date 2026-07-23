@@ -187,6 +187,42 @@ BC는 1–2프레임짜리 노이즈 낀 힘 транз이언트를 쓸 이유�
 로봇 평가는 probe(단일 프레임 open-loop)와 다른 폐루프 거동을 보여줄 수 있으므로
 dF_prefix_mask1 / os10 체크포인트로 S1 겸 실기 확인 권장.
 
+## 6.7 0721 라운드 — 새 로봇 (2026-07-22~24)
+
+로봇 교체로 힘 분포가 완전히 바뀜: **접촉 = |F| 상승** (`film_contact.py` 부호 반전됨),
+hover |F| p50=4.8N / sealed p50=8.4N (구 로봇 ~14N 스케일의 절반 이하), unsealed p90=8.9N으로
+**분포가 크게 겹침** → 고정 임계 contact는 약하고 접촉 점프(+2.6N/frame)가 주 신호.
+데이터: `Chanho-Lee/lges_case_pick_0721` (58 eps, rel 7d, **layer 1·5 양극단만** — 접촉 z
+바이모달 ~0.77/0.82). 캘리브레이션: **FILM_F0=6 FILM_TAU=4 FILM_FZ_TAU=5** (체크포인트 버퍼에
+저장됨). 참고: F0=12 기본값이면 contact 채널이 죽음 — 검증 스크립트가 잡아냄
+(run_case_pick_0721.sh의 힘 프로파일 검증 단계).
+
+학습 4종 (GPU 7, 30k, save_freq 4000) + probe (pre-contact 임계 --contact-n 6, 현실 패턴
+c0=[0,-3.5,0(,0)] c1=[0.6,-3.1,0(,+0.5)]):
+
+| run | loss | std all-1 | 현실적 접촉 순간 |
+|---|---|---|---|
+| `smolvla_naive_0721` | 0.057 | — | — |
+| `…film_0721_prefix_mask1` | 0.059 | 38% WEAK | 7% WEAK |
+| `…film_0721_dF_prefix_mask1` | 0.055 | 42% WEAK | 8% WEAK |
+| `…film_0721_dF_prefix_mask1_os3` | 0.051 | **59% PASS** | **10% WEAK** |
+
+**해석**: 0708 대비 두 가지 진전 — ① 현실적 접촉-순간 패턴이 처음으로 **올바른 부호의
+0이 아닌** 상쇄(7–10%)를 보임 (0708은 전부 0%/역부호) → 바이모달 접촉 높이가 depth
+shortcut을 일부 깨는 데 실제로 기여. ② oversampling(os3)이 처음으로 일관된 우위
+(std 59% PASS, 현실 10%). 순서: os3 > dF > 3ch. 다만 여전히 depth 지배가 크므로
+**결정적 판정은 로봇에서 학습에 없는 중간 layer(2–4) 보간 테스트**.
+전이 oversampling은 새 로봇에서 |Δ|F||≥2 프레임이 16%나 돼(노이즈) boost 3(≈36% 샘플)으로
+조정함 — boost 10이면 65%로 과함.
+
+로봇 평가 커맨드 (권장 1순위 os3):
+```bash
+FILM_COND=contact,fz,seal,dfmag FILM_INJECT=prefix FILM_MASK_FORCE=1 \
+FILM_DATASET=lges_case_pick_0721_dF \
+python run_policy.py --film --checkpoint outputs/smolvla_film_0721_dF_prefix_mask1_os3/checkpoints/last ...
+# F0/tau/fz_tau는 체크포인트 버퍼에서 자동 로드. 베이스라인: smolvla_naive_0721 (--film 없이)
+```
+
 ## 7. 앞으로 진행할 실험 (PROGRESS.md S1–S5 매핑)
 
 | 우선순위 | 실험 | 내용 | 필요 자원 |

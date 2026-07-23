@@ -33,7 +33,7 @@ film_contact.apply(_variant, _wm, _ws, seal_mean=_sm, seal_std=_ss, cond=_cond,
                    mask_force=_mask_force, inject=_inject,
                    dfmag_mean=_dm, dfmag_std=_dsd, dfmag_tau=_dfmag_tau)
 print(f"[film] patched VLAFlowMatching: variant={_variant} cond={_cond} inject={_inject} "
-      f"mask_force={_mask_force} contact=clip(({_f0:.0f}-|F|)/{_tau:.0f}) fz=fz/{_fz_tau:.0f} "
+      f"mask_force={_mask_force} contact=clip((|F|-{_f0:.0f})/{_tau:.0f}) fz=(fz-20)/{_fz_tau:.0f} "
       f"dfmag={'d|F|/%g' % _dfmag_tau if _dm is not None else 'n/a'} "
       f"wrench_mean={[round(x,2) for x in _wm.tolist()]}", file=sys.stderr)
 
@@ -53,7 +53,8 @@ if _os_boost > 1:
 
     def _transition_weights(root):
         """Per-frame sampling weight over the dataset (global `index` order):
-        `_os_boost` within +-`_os_window` frames of a |F| drop <= -`_os_thresh`, else 1."""
+        `_os_boost` within +-`_os_window` frames of a |F| JUMP >= `_os_thresh` in either
+        direction (old robot: contact = drop; new robot: contact = rise), else 1."""
         dfs = [pd.read_parquet(p, columns=["observation.state", "episode_index", "index"])
                for p in sorted((Path(root) / "data").rglob("*.parquet"))]
         df = pd.concat(dfs).sort_values("index").reset_index(drop=True)
@@ -63,7 +64,7 @@ if _os_boost > 1:
         for ep in df["episode_index"].unique():
             m = np.flatnonzero((df["episode_index"] == ep).to_numpy())
             fmag = np.linalg.norm(st[m, 9:12], axis=1)
-            dips = np.flatnonzero(np.diff(fmag, prepend=fmag[0]) <= -_os_thresh)
+            dips = np.flatnonzero(np.abs(np.diff(fmag, prepend=fmag[0])) >= _os_thresh)
             for d in dips:
                 w[m[max(0, d - _os_window):d + _os_window + 1]] = _os_boost
         return w
