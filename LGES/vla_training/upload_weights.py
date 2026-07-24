@@ -31,6 +31,7 @@ META = {
     "smolvla_film_0721_prefix_mask1":        ("Chanho-Lee/lges_case_pick_0721",    "FiLM v2 from base, cond=contact,fz,seal inject=prefix mask_force=1 F0=6 tau=4 fz_tau=5 (new-robot calib), 30k"),
     "smolvla_film_0721_dF_prefix_mask1":     ("Chanho-Lee/lges_case_pick_0721_dF", "FiLM v2 from base, cond=contact,fz,seal,dfmag inject=prefix mask_force=1 F0=6 tau=4 fz_tau=5, 30k, state 16"),
     "smolvla_film_0721_dF_prefix_mask1_os3": ("Chanho-Lee/lges_case_pick_0721_dF", "FiLM v2 from base, cond=contact,fz,seal,dfmag inject=prefix mask_force=1 F0=6 tau=4 fz_tau=5, transition oversampling x3, 30k, state 16"),
+    "smolvla_film_0721_prefix_mask1_os3": ("Chanho-Lee/lges_case_pick_0721", "FiLM v2 from base, cond=contact,fz,seal inject=prefix mask_force=1 F0=6 tau=4 fz_tau=5, transition oversampling x3, 30k"),
 }
 
 api = HfApi()
