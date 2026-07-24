@@ -221,12 +221,18 @@ shortcut을 일부 깨는 데 실제로 기여. ② oversampling(os3)이 처음�
 전이 oversampling은 새 로봇에서 |Δ|F||≥2 프레임이 16%나 돼(노이즈) boost 3(≈36% 샘플)으로
 조정함 — boost 10이면 65%로 과함.
 
-로봇 평가 커맨드 (권장 1순위 os3):
+로봇 평가 커맨드 (권장 1순위 os3). **⚠ 0721 세대는 _contact_F0/_contact_tau/_fz_tau가
+`persistent=False`라 체크포인트에 저장되지 않는다 — 아래 FILM_F0/FILM_TAU/FILM_FZ_TAU를
+배포 시 반드시 명시할 것 (빼먹으면 기본 12/10/30이 적용돼 contact 채널이 죽는다).**
+dfmag_tau(5)와 wrench/seal/dfmag 통계는 persistent 버퍼라 자동 로드된다. fz의 −20 오프셋은
+코드 리터럴이므로 0721 체크포인트는 현재 코드(−20 포함)와만 호환 (0708 FiLM ckpt는
+−20 없던 코드로 학습됨 — 현 코드로 배포 금지):
 ```bash
 FILM_COND=contact,fz,seal,dfmag FILM_INJECT=prefix FILM_MASK_FORCE=1 \
+FILM_F0=6 FILM_TAU=4 FILM_FZ_TAU=5 \
 FILM_DATASET=lges_case_pick_0721_dF \
 python run_policy.py --film --checkpoint outputs/smolvla_film_0721_dF_prefix_mask1_os3/checkpoints/last ...
-# F0/tau/fz_tau는 체크포인트 버퍼에서 자동 로드. 베이스라인: smolvla_naive_0721 (--film 없이)
+# 베이스라인: smolvla_naive_0721 (--film 없이)
 ```
 
 ## 7. 앞으로 진행할 실험 (PROGRESS.md S1–S5 매핑)
