@@ -23,9 +23,20 @@ import numpy as np
 # Robot model / IK  (constants copied from grasp_box/config.py so this module
 # is self-contained and does not depend on a fragile ``import config``)
 # ---------------------------------------------------------------------------
-URDF_PATH: str = (
-    "/home/dexmate/miniconda3/lib/python3.13/site-packages/dexmate_urdf/"
-    "robots/humanoid/vega_1p/vega_1p_gripper.urdf"
+# Resolved from the RUNNING python's installed dexmate_urdf package, so the same
+# checkout works on every machine (the hardcoded site-packages path used to flip
+# back and forth between environments on each pull). Override with
+# DEXMATE_URDF_PATH; the literal below is a last resort for interpreters where
+# dexmate_urdf isn't importable.
+import os as _os
+from importlib.util import find_spec as _find_spec
+
+_URDF_REL = "robots/humanoid/vega_1p/vega_1p_gripper.urdf"
+_spec = _find_spec("dexmate_urdf")
+URDF_PATH: str = _os.environ.get("DEXMATE_URDF_PATH") or (
+    _os.path.join(_os.path.dirname(_spec.origin), _URDF_REL)
+    if _spec and _spec.origin else
+    "/home/dexmate/miniconda3/lib/python3.13/site-packages/dexmate_urdf/" + _URDF_REL
 )
 
 # Per-tick motion trace. When enabled, every set_joint_pos call appends a row
