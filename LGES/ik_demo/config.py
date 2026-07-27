@@ -399,6 +399,15 @@ ARM_VIEW_PARK_JOINTS: tuple[float, ...] = HOME_JOINTS_LEFT
 # x[0.82,1.0]; y=0.50 -> x[0.86,1.0]. Keep x inside the window for the chosen y.
 ARM_VIEW_PARK_EE_POS: tuple[float, float, float] | None = (0.90, 0.50, 1.10)
 
+# Online FiLM authority probe: safe, non-contact height sweep above the detected
+# case top. Values are cup-tip clearances; the probe converts them to EE z with
+# SUCTION_LENGTH_M. Policy predictions are logged only and never commanded.
+VLA_FILM_PROBE_CLEARANCES_M: tuple[float, ...] = (0.25, 0.10, 0.03)
+VLA_FILM_PROBE_SETTLE_S: float = 0.5
+# Counterfactual fz sweep in raw-force units. Converted to FiLM input units with
+# the checkpoint runtime _fz_tau, so this stays interpretable across calibrations.
+VLA_FILM_PROBE_FZ_DELTAS_N: tuple[float, ...] = (-3.0, 3.0)
+
 # Pre-flight descent reachability check (chassis_sequence): before a pick/place
 # moves at all, the FULL descent column at the target xy — from the current EE
 # height all the way down to the BOTTOM (box floor + suction length), regardless

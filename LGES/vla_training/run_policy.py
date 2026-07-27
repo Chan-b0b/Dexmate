@@ -40,7 +40,9 @@ import argparse
 import json
 import select
 import sys
+import termios
 import time
+import tty
 from pathlib import Path
 
 import numpy as np
@@ -394,6 +396,36 @@ def predict(policy, pre, post, state: np.ndarray, image: np.ndarray,
     return post(action).squeeze(0).cpu().numpy()
 
 
+def _film_diagnostics(policy) -> dict | None:
+    """Summarize the live FiLM condition and gain vectors for rollout plots."""
+    model = policy.model
+    c = getattr(model, "_cur_contact", None)
+    film = getattr(model, "contact_film", None)
+    if c is None or film is None:
+        return None
+    p = next(film.parameters())
+    c_eval = c.detach().to(device=p.device, dtype=p.dtype)
+    with torch.inference_mode():
+        gamma = film.scale(c_eval)[0].float().cpu().numpy()
+        beta = film.shift(c_eval)[0].float().cpu().numpy()
+
+    def stats(v):
+        return {
+            "mean": float(v.mean()),
+            "abs_mean": float(np.abs(v).mean()),
+            "rms": float(np.sqrt(np.mean(v * v))),
+            "abs_max": float(np.abs(v).max()),
+            "abs_p95": float(np.percentile(np.abs(v), 95)),
+        }
+
+    return {
+        "cond_names": list(getattr(model, "_film_cond", ())),
+        "c_hat": [float(v) for v in c[0].detach().float().cpu().tolist()],
+        "gamma": stats(gamma),
+        "beta": stats(beta),
+    }
+
+
 def latest_checkpoint() -> Path:
     runs = sorted((VLA_DIR / "outputs").glob("*/checkpoints/last"))
     if not runs:
@@ -597,13 +629,14 @@ class RolloutLog:
         self.take_dir.mkdir(parents=True, exist_ok=True)
         self.f = (self.take_dir / "states.jsonl").open("w")
         self.task, self.instruction, self.n = task, instruction, 0
+        self.peak_f, self.peak_i = 0.0, -1
         self.extra = dict(extra or {})
         if self.save_images:
             (self.take_dir / "head_rgb").mkdir(exist_ok=True)
             (self.take_dir / "head_depth").mkdir(exist_ok=True)
 
     def frame(self, t, state, wrench6, pred, clamped, chunk_boundary,
-              rgb=None, depth_m=None):
+              rgb=None, depth_m=None, film_diag=None):
         if self.f is None:
             return
         if self.save_images and rgb is not None:
@@ -621,6 +654,9 @@ class RolloutLog:
                 mm = np.clip(np.nan_to_num(d * 1000.0, nan=0.0, posinf=0.0, neginf=0.0),
                              0, 65535).astype(np.uint16)
                 cv2.imwrite(str(self.take_dir / "head_depth" / f"{stem}.png"), mm)
+        fmag = float(np.linalg.norm(np.asarray(wrench6[:3], dtype=float)))
+        if fmag > self.peak_f:
+            self.peak_f, self.peak_i = fmag, self.n
         self.f.write(json.dumps({
             "i": self.n, "t": float(t),
             "ee": {"pos": [float(x) for x in state[:3]],
@@ -632,6 +668,7 @@ class RolloutLog:
             "chunk_boundary": bool(chunk_boundary),
             "action_pred": [float(x) for x in pred],
             "action_cmd": [float(x) for x in clamped],
+            "film": film_diag,
         }) + "\n")
         self.n += 1
 
@@ -645,11 +682,103 @@ class RolloutLog:
             "action_space": self.action_space_label, "ee_rotation": "quat_wxyz, base_link",
             "source": "run_policy.py rollout", "checkpoint": self.checkpoint,
             "frames": self.n, "success": success,
+            "peak_force_n": round(self.peak_f, 2), "peak_force_frame": self.peak_i,
         }
+        baseline = self.extra.get("baseline_force_n")
+        if baseline is not None:
+            meta["peak_contact_n"] = round(self.peak_f - baseline, 2)
         meta.update(self.extra)
         if self.save_images:
             meta["depth_units"] = "uint16 millimetres (0 = invalid)"
         (self.take_dir / "meta.json").write_text(json.dumps(meta, indent=2))
+        try:
+            plot_path = _save_film_plot(self.take_dir)
+            if plot_path is not None:
+                print(f"    [log] FiLM plot: {plot_path}")
+        except Exception as e:  # noqa: BLE001
+            print(f"    [log] FiLM plot failed: {e}")
+        peak_msg = f"    [log] peak |F| {self.peak_f:.1f}N @frame {self.peak_i}/{self.n}"
+        if baseline is not None:
+            peak_msg += f" (contact +{self.peak_f - baseline:.1f}N over baseline {baseline:.1f}N)"
+        print(peak_msg)
+
+
+
+def _save_film_plot(take_dir: Path):
+    """Create a compact live-rollout FiLM diagnostic plot."""
+    frames = [json.loads(line) for line in (take_dir / "states.jsonl").open()]
+    frames = [frame for frame in frames if frame.get("film") is not None]
+    if not frames:
+        return None
+
+    import matplotlib
+    matplotlib.use("Agg")
+    import matplotlib.pyplot as plt
+
+    meta = json.loads((take_dir / "meta.json").read_text())
+    x = np.arange(len(frames))
+    z = np.array([frame["ee"]["pos"][2] for frame in frames])
+    top_z = meta.get("top_face_z")
+    height = (z - top_z) * 100 if top_z is not None else z * 100
+    height_label = "clearance above detected top (cm)" if top_z is not None else "EE z (cm)"
+    pred_z = np.array([frame["action_pred"][2] for frame in frames])
+    if meta.get("action_space", "").startswith("ee_abs"):
+        pred_dz = (pred_z - z) * 1000
+    else:
+        pred_dz = pred_z * 1000
+    cmd_dz = np.array([frame["action_cmd"][2] for frame in frames]) * 1000
+    force = np.array([np.linalg.norm([frame["wrench"][k] for k in ("fx", "fy", "fz")])
+                      for frame in frames])
+    baseline = meta.get("baseline_force_n", 0.0)
+    seal = np.array([frame["vacuum_sealed"] for frame in frames], dtype=float)
+
+    fig, axes = plt.subplots(4, 1, figsize=(13, 12), sharex=True, constrained_layout=True)
+    ax = axes[0]
+    ax.plot(x, height, label=height_label, color="tab:blue")
+    ax.set_ylabel("height (cm)")
+    ax2 = ax.twinx()
+    ax2.plot(x, pred_dz, label="predicted dz", color="tab:orange", alpha=0.75)
+    ax2.plot(x, cmd_dz, label="command dz", color="tab:red", alpha=0.75)
+    ax2.axhline(0, color="black", linewidth=0.6)
+    ax2.set_ylabel("dz (mm/tick)")
+    ax.legend(loc="upper left")
+    ax2.legend(loc="upper right")
+
+    axes[1].plot(x, force, label="|F|", color="tab:purple")
+    axes[1].plot(x, force - baseline, label="contact above baseline", color="tab:brown")
+    axes[1].axhline(0, color="black", linewidth=0.6)
+    axes[1].set_ylabel("force (N)")
+    axes[1].legend(loc="upper left")
+    seal_ax = axes[1].twinx()
+    seal_ax.step(x, seal, where="post", label="seal", color="tab:green", alpha=0.7)
+    seal_ax.set_ylim(-0.05, 1.15)
+    seal_ax.set_ylabel("seal")
+
+    first_film = frames[0]["film"]
+    cond_names = first_film.get("cond_names", [])
+    c_hat = np.array([frame["film"]["c_hat"] for frame in frames])
+    for i, name in enumerate(cond_names):
+        axes[2].plot(x, c_hat[:, i], label=f"c_hat:{name}")
+    axes[2].set_ylabel("FiLM input")
+    axes[2].legend(loc="upper left", ncols=max(1, min(4, len(cond_names))))
+
+    for kind, color in (("gamma", "tab:blue"), ("beta", "tab:orange")):
+        rms = [frame["film"][kind]["rms"] for frame in frames]
+        p95 = [frame["film"][kind]["abs_p95"] for frame in frames]
+        axes[3].plot(x, rms, label=f"{kind} RMS", color=color)
+        axes[3].plot(x, p95, label=f"{kind} |.| p95", color=color, linestyle="--", alpha=0.7)
+    axes[3].set_ylabel("modulation")
+    axes[3].set_xlabel("policy tick")
+    axes[3].legend(loc="upper left", ncols=2)
+
+    for boundary in [i for i, frame in enumerate(frames) if frame["chunk_boundary"]]:
+        for ax in axes:
+            ax.axvline(boundary, color="0.85", linewidth=0.5, zorder=0)
+    fig.suptitle(f"FiLM rollout diagnostics: {take_dir.name}")
+    out = take_dir / "film_diagnostics.png"
+    fig.savefig(out, dpi=150)
+    plt.close(fig)
+    return out
 
 
 def _grab_rgb(bot):
@@ -791,6 +920,11 @@ def run_live(checkpoint: Path, tasks: list[str], *, commit: bool,
                     print("  --box requires a detection; stopping this run.")
                     if not loop:
                         break
+                    try:
+                        input("\n>>> Press Enter to run again (Ctrl-C to stop) <<< ")
+                    except (KeyboardInterrupt, EOFError):
+                        print("\nloop stopped.")
+                        break
                     continue
 
             log = RolloutLog(log_dir, checkpoint, save_images=log_images, run_num=run_num,
@@ -799,6 +933,10 @@ def run_live(checkpoint: Path, tasks: list[str], *, commit: bool,
             # Poll stdin each tick: 'q' breaks the current run; any other line
             # is the --go ENTER-abort.
             watch_stdin = commit or loop
+            stdin_attrs = None
+            if watch_stdin and sys.stdin.isatty():
+                stdin_attrs = termios.tcgetattr(sys.stdin)
+                tty.setcbreak(sys.stdin)
 
             # Highest commanded reference-target z this run — the hover the arm
             # descended from. An abort retreat backs UP toward it but never above it.
@@ -816,7 +954,9 @@ def run_live(checkpoint: Path, tasks: list[str], *, commit: bool,
                           f"{' | entry sealed' if entry_sealed else ''} ===")
 
                     if log is not None:
-                        log.open_task(ti, task, instruction, extra=det_extra)
+                        log.open_task(ti, task, instruction,
+                                      extra={**det_extra,
+                                             "baseline_force_n": round(baseline_f, 2)})
                     task_done = None
                     has_sealed = entry_sealed   # pick: latch the grasp
                     has_released = False        # place: latch the release
@@ -881,9 +1021,10 @@ def run_live(checkpoint: Path, tasks: list[str], *, commit: bool,
                             pos_tgt, rpy_tgt, R_tgt = integrate(ref_pos, ref_quat, clamped)
                             ref_pos, ref_quat = pos_tgt, _rpy_to_quat_wxyz(rpy_tgt)
                         max_tgt_z = max(max_tgt_z, float(pos_tgt[2]))
+                        film_diag = _film_diagnostics(policy) if film else None
                         if log is not None:
                             log.frame(t0, state, wrench6, pred, clamped, tick % chunk_steps == 0,
-                                      rgb=rgb, depth_m=depth_m)
+                                      rgb=rgb, depth_m=depth_m, film_diag=film_diag)
                         in_box = workspace_ok(pos_tgt, box) if box is not None else True
                         sol = mover.solve_pose(pos_tgt, rpy_tgt, seed=left_q, min_motion=True)
                         ik_ok = sol.pos_err_m <= ikcfg.REACH_TOL_M
@@ -920,14 +1061,13 @@ def run_live(checkpoint: Path, tasks: list[str], *, commit: bool,
                             task_done = f"placed+retracted@{tick}"; break
 
                         # Operator stdin (non-blocking, after task-done so a finishing
-                        # task isn't pre-empted): 'q' breaks this run — under --loop
-                        # that drops back to the rerun prompt. Any other line is the
-                        # --go ENTER-abort. EOF (empty read) is ignored.
+                        # task is not pre-empted): cbreak mode makes q stop immediately
+                        # without Enter. Enter still aborts --go. EOF is ignored.
                         if watch_stdin and select.select([sys.stdin], [], [], 0)[0]:
-                            line = sys.stdin.readline()
-                            if line.strip().lower() == "q":
+                            key = sys.stdin.read(1)
+                            if key.lower() == "q":
                                 run_stop = "operator (q)"; break
-                            if line and commit:
+                            if key in ("\r", "\n") and commit:
                                 run_stop = "ABORT: operator (ENTER)"; break
 
                         if commit:
@@ -967,6 +1107,8 @@ def run_live(checkpoint: Path, tasks: list[str], *, commit: bool,
             except KeyboardInterrupt:
                 run_stop = "ABORT: KeyboardInterrupt"
             finally:
+                if stdin_attrs is not None:
+                    termios.tcsetattr(sys.stdin, termios.TCSADRAIN, stdin_attrs)
                 if log is not None:
                     log.close(success=False)
 
@@ -1034,9 +1176,10 @@ def main():
     ap.add_argument("--log-images", action="store_true",
                     help="with --log-dir, also save per-frame head_rgb/ + head_depth/ "
                          "(recorder format) so the rollout is replayable by the policy")
-    ap.add_argument("--loop", action="store_true",
-                    help="after each run completes (or aborts), prompt Enter to run again; "
-                         "type 'q'+Enter mid-run to break it and return to that prompt; "
+    ap.add_argument("--loop", action="store_true", default=True,
+                    help="after each run completes (or aborts), prompt Enter to run again "
+                         "(enabled by default); "
+                         "press q mid-run to stop immediately and return to that prompt; "
                          "Ctrl-C exits.")
     ap.add_argument("--n-action-steps", type=int, default=None,
                     help="override policy n_action_steps (chunk open-loop length). "

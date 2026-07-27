@@ -228,10 +228,22 @@ dfmag_tau(5)와 wrench/seal/dfmag 통계는 persistent 버퍼라 자동 로드�
 코드 리터럴이므로 0721 체크포인트는 현재 코드(−20 포함)와만 호환 (0708 FiLM ckpt는
 −20 없던 코드로 학습됨 — 현 코드로 배포 금지):
 ```bash
+
+python run_policy.py --checkpoint Chanho-Lee/smolvla_naive_0721 \
+--go --force-limit 15 --n-action-steps 5 --log-dir rollouts/naive_0721
+
+FILM_COND=contact,fz,seal FILM_INJECT=prefix FILM_MASK_FORCE=1 \
+FILM_F0=6 FILM_TAU=4 FILM_FZ_TAU=5 \
+FILM_DATASET=lges_case_pick_0721 \
+python run_policy.py --film --checkpoint Chanho-Lee/smolvla_film_0721_prefix_mask1_os3 \
+--go --force-limit 15 --n-action-steps 5 --log-dir rollouts/film_0721_os3
+
 FILM_COND=contact,fz,seal,dfmag FILM_INJECT=prefix FILM_MASK_FORCE=1 \
 FILM_F0=6 FILM_TAU=4 FILM_FZ_TAU=5 \
 FILM_DATASET=lges_case_pick_0721_dF \
-python run_policy.py --film --checkpoint outputs/smolvla_film_0721_dF_prefix_mask1_os3/checkpoints/last ...
+python run_policy.py --film --checkpoint Chanho-Lee/smolvla_film_0721_dF_prefix_mask1 \
+--go --force-limit 15 --n-action-steps 5 --log-dir rollouts/film_0721_dF
+
 # 베이스라인: smolvla_naive_0721 (--film 없이)
 ```
 
