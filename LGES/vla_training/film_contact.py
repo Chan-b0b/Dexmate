@@ -116,7 +116,9 @@ def _contact_from_state(self, state: torch.Tensor) -> torch.Tensor:
     Contact = a force DROP below the fixed baseline F0: c^ = clip((F0 - |F|)/tau, 0, 1)."""
     w = state[..., WRENCH_LO:WRENCH_HI] * self._wrench_std + self._wrench_mean  # un-normalize
     fmag = torch.linalg.norm(w[..., :3], dim=-1, keepdim=True)                  # raw |F| (B,1)
-    return torch.clamp((self._contact_F0 - fmag) / self._contact_tau, 0.0, 1.0)
+    # NEW ROBOT (0721+ checkpoints): contact = force RISE above F0 (hover ~5N -> press ~8.4N;
+    # F0=6, tau=4). The OLD robot was a DROP — (F0 - fmag) — which 0708 checkpoints expect.
+    return torch.clamp((fmag - self._contact_F0) / self._contact_tau, 0.0, 1.0)
 
 
 def _fz_from_state(self, state: torch.Tensor) -> torch.Tensor:
@@ -126,7 +128,10 @@ def _fz_from_state(self, state: torch.Tensor) -> torch.Tensor:
     loses, and separates descent (~14N) / contact (~0N) / loaded (~17N) that the rectified
     contact drop cannot (contact reads 0 for both descent AND loaded)."""
     fz_raw = state[..., FZ_IDX:FZ_IDX + 1] * self._wrench_std[2] + self._wrench_mean[2]
-    return fz_raw / self._fz_tau
+    # -20 offset + fz_tau=5 is the NEW-ROBOT (0721+) calibration the 0721 checkpoints were
+    # TRAINED with (constant absorbed by the FiLM MLP bias during training — but that means
+    # deploy must reproduce it exactly). 0708 checkpoints predate the offset (plain fz/30).
+    return (fz_raw - 20) / self._fz_tau
 
 
 def _dfmag_from_state(self, state: torch.Tensor) -> torch.Tensor:
