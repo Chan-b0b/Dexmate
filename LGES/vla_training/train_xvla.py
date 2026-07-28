@@ -99,5 +99,23 @@ def _mppp_no_repo(policy_cfg, pretrained_path=None, **kw):
 
 _lt.make_pre_post_processors = _mppp_no_repo
 
+# RNG restore is reproducibility-only; a checkpoint whose rng_state was written
+# during an interrupted save keeps KeyError-ing on resume — skip it rather than die.
+import lerobot.utils.train_utils as _tu  # noqa: E402
+import lerobot.utils.random_utils as _ru  # noqa: E402
+
+_orig_load_rng = _ru.load_rng_state
+
+
+def _safe_load_rng(save_dir):
+    try:
+        _orig_load_rng(save_dir)
+    except Exception as e:
+        print(f"[xvla] skipping rng restore ({type(e).__name__}: {e}) — fresh rng", file=sys.stderr)
+
+
+_ru.load_rng_state = _safe_load_rng
+_tu.load_rng_state = _safe_load_rng   # train_utils imported it by name
+
 if __name__ == "__main__":
     _lt.train()
