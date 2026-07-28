@@ -24,6 +24,8 @@ _tau = float(os.environ.get("FILM_TAU", "4"))       # contact-DROP scale (graded
 _fz_tau = float(os.environ.get("FILM_FZ_TAU", "5"))  # continuous fz scale (fz_raw/30)
 _fz_off = float(os.environ.get("FILM_FZ_OFF", "2.6"))  # fz centering offset (dataset fz median)
 _dfmag_tau = float(os.environ.get("FILM_DFMAG_TAU", "5"))  # d|F|/dt scale (N/frame / 5)
+_fmag_off = float(os.environ.get("FILM_FMAG_OFF", "5.1"))  # |F| centering (dataset median)
+_fmag_tau = float(os.environ.get("FILM_FMAG_TAU", "5"))    # |F| scale
 _root = os.environ.get(
     "FILM_DATASET_ROOT", str(Path(__file__).resolve().parent / "datasets/lges_suction"))
 _wm, _ws = film_contact.load_wrench_stats(_root)
@@ -32,9 +34,11 @@ _dm, _dsd = film_contact.load_dfmag_stats(_root)   # (None, None) unless a *_dF 
 film_contact.apply(_variant, _wm, _ws, seal_mean=_sm, seal_std=_ss, cond=_cond,
                    contact_F0=_f0, contact_tau=_tau, fz_tau=_fz_tau,
                    mask_force=_mask_force, inject=_inject,
-                   dfmag_mean=_dm, dfmag_std=_dsd, dfmag_tau=_dfmag_tau, fz_off=_fz_off)
+                   dfmag_mean=_dm, dfmag_std=_dsd, dfmag_tau=_dfmag_tau, fz_off=_fz_off,
+                   fmag_off=_fmag_off, fmag_tau=_fmag_tau)
 print(f"[film] patched VLAFlowMatching: variant={_variant} cond={_cond} inject={_inject} "
       f"mask_force={_mask_force} contact=clip((|F|-{_f0:.0f})/{_tau:.0f}) fz=(fz-{_fz_off:g})/{_fz_tau:.0f} "
+      f"fmag=(|F|-{_fmag_off:g})/{_fmag_tau:g} "
       f"dfmag={'d|F|/%g' % _dfmag_tau if _dm is not None else 'n/a'} "
       f"wrench_mean={[round(x,2) for x in _wm.tolist()]}", file=sys.stderr)
 

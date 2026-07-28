@@ -88,10 +88,13 @@ def main():
     f0 = float(os.environ.get("FILM_F0", "6"))
     tau = float(os.environ.get("FILM_TAU", "4"))
     fz_tau = float(os.environ.get("FILM_FZ_TAU", "5"))
+    fmag_off = float(os.environ.get("FILM_FMAG_OFF", "5.1"))
+    fmag_tau = float(os.environ.get("FILM_FMAG_TAU", "5"))
     film_contact.apply("v2", wm, ws, seal_mean=sm, seal_std=ss, cond=cond,
                        contact_F0=f0, contact_tau=tau, fz_tau=fz_tau,
                        mask_force=mask_force, inject=inject,
-                       dfmag_mean=dm, dfmag_std=dsd, dfmag_tau=dfmag_tau, fz_off=fz_off)
+                       dfmag_mean=dm, dfmag_std=dsd, dfmag_tau=dfmag_tau, fz_off=fz_off,
+                       fmag_off=fmag_off, fmag_tau=fmag_tau)
 
     from lerobot.datasets.lerobot_dataset import LeRobotDataset
     from lerobot.policies.smolvla.modeling_smolvla import SmolVLAPolicy

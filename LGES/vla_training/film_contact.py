@@ -49,7 +49,7 @@ WRENCH_LO, WRENCH_HI = 9, 15   # wrench (fx,fy,fz,tx,ty,tz) dims in observation.
 FZ_IDX = 11                    # fz (vertical force) — fed to FiLM as a continuous channel
 SEAL_IDX = 8                   # vacuum_sealed bit in observation.state
 DFMAG_IDX = 15                 # d|F|/dt (N/frame) — only in *_dF datasets (state dim 16)
-CHANNELS = ("contact", "fz", "seal", "dfmag")  # available condition channels (canonical order)
+CHANNELS = ("contact", "fz", "fmag", "seal", "dfmag")  # available condition channels (canonical order)
 _CFG = {"variant": "v0", "mask_force": True, "cond": ("contact", "seal"),
         "inject": "suffix"}  # mutated by apply()
 INJECTS = ("suffix", "output", "prefix")  # where FiLM modulates
@@ -135,6 +135,17 @@ def _fz_from_state(self, state: torch.Tensor) -> torch.Tensor:
     return (fz_raw - self._fz_off) / self._fz_tau
 
 
+def _fmag_from_state(self, state: torch.Tensor) -> torch.Tensor:
+    """|F[:3]| (force magnitude) as a continuous channel, shape (B,1):
+    (|F| - fmag_off)/fmag_tau. The unclipped sibling of 'contact' — keeps the
+    gradation contact's clip throws away (hover ~4.7N -> ~-0.1, sealed ~8.8N ->
+    ~+0.7 with off=5.1/tau=5, the 0721_0727 |F| median). Requested 2026-07-28:
+    cond=(contact, fmag, seal) replaces fz/dfmag on the new robot."""
+    w = state[..., WRENCH_LO:WRENCH_HI] * self._wrench_std + self._wrench_mean
+    fmag = torch.linalg.norm(w[..., :3], dim=-1, keepdim=True)
+    return (fmag - self._fmag_off) / self._fmag_tau
+
+
 def _dfmag_from_state(self, state: torch.Tensor) -> torch.Tensor:
     """d|F|/dt (force change rate) as a continuous signed channel, shape (B,1):
     raw dfmag (N/frame, 15fps) / dfmag_tau. The contact dip is a sharp NEGATIVE
@@ -155,7 +166,7 @@ def _seal_from_state(self, state: torch.Tensor) -> torch.Tensor:
 def _condition_from_state(self, state: torch.Tensor) -> torch.Tensor:
     """Concatenate the enabled channels (canonical order) -> c-hat (B, cond_dim)."""
     fns = {"contact": _contact_from_state, "fz": _fz_from_state, "seal": _seal_from_state,
-           "dfmag": _dfmag_from_state}
+           "dfmag": _dfmag_from_state, "fmag": _fmag_from_state}
     cols = [fns[ch](self, state) for ch in self._film_cond]
     return torch.cat(cols, dim=-1)
 
@@ -165,7 +176,8 @@ def apply(variant: str, wrench_mean: torch.Tensor, wrench_std: torch.Tensor,
           cond=("contact", "fz", "seal"), contact_F0: float = 6.0, contact_tau: float = 4.0,
           fz_tau: float = 5.0, mask_force: bool = True, inject: str = "suffix",
           dfmag_mean: torch.Tensor = None, dfmag_std: torch.Tensor = None,
-          dfmag_tau: float = 5.0, fz_off: float = 2.6) -> None:
+          dfmag_tau: float = 5.0, fz_off: float = 2.6,
+          fmag_off: float = 5.1, fmag_tau: float = 5.0) -> None:
     """Patch VLAFlowMatching for the given variant + condition channels.
 
     cond: which channels feed FiLM — any subset of CHANNELS ('contact', 'fz', 'seal').
@@ -221,9 +233,12 @@ def apply(variant: str, wrench_mean: torch.Tensor, wrench_std: torch.Tensor,
                   else self.vlm_with_expert.expert_hidden_size)
         self._film_cond = cond
         self.contact_film = ContactFiLM(hidden, cond_dim=len(cond))
-        if "contact" in cond or "fz" in cond:   # both read the (un-normalized) wrench
+        if "contact" in cond or "fz" in cond or "fmag" in cond:  # all read the raw wrench
             self.register_buffer("_wrench_mean", wrench_mean.clone())
             self.register_buffer("_wrench_std", wrench_std.clone())
+        if "fmag" in cond:
+            self.register_buffer("_fmag_off", torch.tensor(float(fmag_off)), persistent=False)
+            self.register_buffer("_fmag_tau", torch.tensor(float(fmag_tau)), persistent=False)
         if "contact" in cond:
             # non-persistent: these are a runtime eval hyperparameter, not a learned/trained
             # value -- persistent=True would let from_pretrained's state_dict load silently
@@ -276,7 +291,7 @@ def apply(variant: str, wrench_mean: torch.Tensor, wrench_std: torch.Tensor,
             self._cur_contact = c
             if _CFG["mask_force"]:                                 # bottleneck: mask conditioned dims
                 state = state.clone()                              # (c was already read above)
-                if "contact" in self._film_cond:
+                if "contact" in self._film_cond or "fmag" in self._film_cond:
                     state[..., WRENCH_LO:WRENCH_HI] = 0.0
                 if "fz" in self._film_cond:
                     state[..., FZ_IDX] = 0.0

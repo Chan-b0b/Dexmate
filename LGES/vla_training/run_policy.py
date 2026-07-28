@@ -351,6 +351,8 @@ def load_policy(checkpoint: Path, film: bool = False):
         fz_tau = float(os.environ.get("FILM_FZ_TAU", "5"))  # fz scale; MUST match training
         fz_off = float(os.environ.get("FILM_FZ_OFF", "2.6"))  # fz centering; MUST match training
         dfmag_tau = float(os.environ.get("FILM_DFMAG_TAU", "5"))  # d|F|/dt scale; MUST match training
+        fmag_off = float(os.environ.get("FILM_FMAG_OFF", "5.1"))  # |F| centering; MUST match training
+        fmag_tau = float(os.environ.get("FILM_FMAG_TAU", "5"))    # |F| scale; MUST match training
         # wrench/seal stats only depend on observation.state (shared by delta and
         # abs conversions of the same recordings), so either dataset variant works;
         # lges_suction (pre-0708) no longer exists on this machine. dfmag checkpoints
@@ -363,7 +365,8 @@ def load_policy(checkpoint: Path, film: bool = False):
         film_contact.apply("v2", wm, ws, seal_mean=sm, seal_std=ss, cond=cond,
                            contact_F0=f0, contact_tau=tau, fz_tau=fz_tau,
                            mask_force=mask_force, inject=inject,
-                           dfmag_mean=dm, dfmag_std=dsd, dfmag_tau=dfmag_tau, fz_off=fz_off)
+                           dfmag_mean=dm, dfmag_std=dsd, dfmag_tau=dfmag_tau, fz_off=fz_off,
+                           fmag_off=fmag_off, fmag_tau=fmag_tau)
         print(f"[run_policy] FiLM ENABLED (cond={cond} inject={inject} mask_force={mask_force} "
               f"F0={f0:.0f} tau={tau:.0f} fz_tau={fz_tau:.0f} fz_off={fz_off:g} dfmag_tau={dfmag_tau:.0f})")
 
