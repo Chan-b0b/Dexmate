@@ -128,10 +128,11 @@ def _fz_from_state(self, state: torch.Tensor) -> torch.Tensor:
     loses, and separates descent (~14N) / contact (~0N) / loaded (~17N) that the rectified
     contact drop cannot (contact reads 0 for both descent AND loaded)."""
     fz_raw = state[..., FZ_IDX:FZ_IDX + 1] * self._wrench_std[2] + self._wrench_mean[2]
-    # -20 offset + fz_tau=5 is the NEW-ROBOT (0721+) calibration the 0721 checkpoints were
-    # TRAINED with (constant absorbed by the FiLM MLP bias during training — but that means
-    # deploy must reproduce it exactly). 0708 checkpoints predate the offset (plain fz/30).
-    return (fz_raw - 20) / self._fz_tau
+    # (fz - fz_off)/fz_tau. The offset is a constant the FiLM MLP bias absorbs during
+    # TRAINING — so deploy must reproduce the training-time value exactly (FILM_FZ_OFF).
+    # Generations: 0708 ckpts = off 0, tau 30 | 0721 ckpts = off 20, tau 5 |
+    # 0721_0727+ = off = dataset fz median (set per round by the orchestrator).
+    return (fz_raw - self._fz_off) / self._fz_tau
 
 
 def _dfmag_from_state(self, state: torch.Tensor) -> torch.Tensor:
@@ -161,10 +162,10 @@ def _condition_from_state(self, state: torch.Tensor) -> torch.Tensor:
 
 def apply(variant: str, wrench_mean: torch.Tensor, wrench_std: torch.Tensor,
           seal_mean: torch.Tensor = None, seal_std: torch.Tensor = None,
-          cond=("contact", "fz", "seal"), contact_F0: float = 12.0, contact_tau: float = 10.0,
-          fz_tau: float = 30.0, mask_force: bool = True, inject: str = "suffix",
+          cond=("contact", "fz", "seal"), contact_F0: float = 6.0, contact_tau: float = 4.0,
+          fz_tau: float = 5.0, mask_force: bool = True, inject: str = "suffix",
           dfmag_mean: torch.Tensor = None, dfmag_std: torch.Tensor = None,
-          dfmag_tau: float = 5.0) -> None:
+          dfmag_tau: float = 5.0, fz_off: float = 2.6) -> None:
     """Patch VLAFlowMatching for the given variant + condition channels.
 
     cond: which channels feed FiLM — any subset of CHANNELS ('contact', 'fz', 'seal').
@@ -231,6 +232,7 @@ def apply(variant: str, wrench_mean: torch.Tensor, wrench_std: torch.Tensor,
             self.register_buffer("_contact_tau", torch.tensor(float(contact_tau)), persistent=False)
         if "fz" in cond:
             self.register_buffer("_fz_tau", torch.tensor(float(fz_tau)), persistent=False)
+            self.register_buffer("_fz_off", torch.tensor(float(fz_off)), persistent=False)
         if "seal" in cond:
             self.register_buffer("_seal_mean", seal_mean.clone())
             self.register_buffer("_seal_std", seal_std.clone())

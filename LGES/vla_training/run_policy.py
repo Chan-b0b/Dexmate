@@ -346,9 +346,10 @@ def load_policy(checkpoint: Path, film: bool = False):
               f"inject={inject} (contact_film hidden={det_hidden}) | mask_force={mask_force} "
               f"({'FILM_MASK_FORCE env' if 'FILM_MASK_FORCE' in os.environ else '\"_mask1\" in repo name'} "
               f"-- NOT verifiable from weights, override with FILM_MASK_FORCE=0/1 if wrong)")
-        f0 = float(os.environ.get("FILM_F0", "12"))
-        tau = float(os.environ.get("FILM_TAU", "10"))        # contact-DROP scale; MUST match training
-        fz_tau = float(os.environ.get("FILM_FZ_TAU", "30"))  # fz scale; MUST match training
+        f0 = float(os.environ.get("FILM_F0", "6"))
+        tau = float(os.environ.get("FILM_TAU", "4"))        # contact-DROP scale; MUST match training
+        fz_tau = float(os.environ.get("FILM_FZ_TAU", "5"))  # fz scale; MUST match training
+        fz_off = float(os.environ.get("FILM_FZ_OFF", "2.6"))  # fz centering; MUST match training
         dfmag_tau = float(os.environ.get("FILM_DFMAG_TAU", "5"))  # d|F|/dt scale; MUST match training
         # wrench/seal stats only depend on observation.state (shared by delta and
         # abs conversions of the same recordings), so either dataset variant works;
@@ -362,9 +363,9 @@ def load_policy(checkpoint: Path, film: bool = False):
         film_contact.apply("v2", wm, ws, seal_mean=sm, seal_std=ss, cond=cond,
                            contact_F0=f0, contact_tau=tau, fz_tau=fz_tau,
                            mask_force=mask_force, inject=inject,
-                           dfmag_mean=dm, dfmag_std=dsd, dfmag_tau=dfmag_tau)
+                           dfmag_mean=dm, dfmag_std=dsd, dfmag_tau=dfmag_tau, fz_off=fz_off)
         print(f"[run_policy] FiLM ENABLED (cond={cond} inject={inject} mask_force={mask_force} "
-              f"F0={f0:.0f} tau={tau:.0f} fz_tau={fz_tau:.0f} dfmag_tau={dfmag_tau:.0f})")
+              f"F0={f0:.0f} tau={tau:.0f} fz_tau={fz_tau:.0f} fz_off={fz_off:g} dfmag_tau={dfmag_tau:.0f})")
 
     policy = get_policy_class(cfg.type).from_pretrained(model_dir, config=cfg)
     policy.eval()
