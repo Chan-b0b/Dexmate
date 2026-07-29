@@ -112,46 +112,64 @@ def _action_summary(pred, state, abs_action: bool, suction_idx: int):
 
 
 def _plot(result: dict, out: Path):
+    """Summarize each counterfactual as an action delta from real across poses."""
     import matplotlib
     matplotlib.use("Agg")
     import matplotlib.pyplot as plt
 
     poses = result["poses"]
-    scenarios = list(poses[0]["scenarios"])
-    clearance_cm = np.array([p["clearance_m"] for p in poses]) * 100
-    colors = {"real": "black", "no_contact": "tab:blue",
-              "contact": "tab:orange", "sealed": "tab:green"}
-    fig, axes = plt.subplots(3, 1, figsize=(11, 10), sharex=True,
-                             constrained_layout=True)
-    cmap = plt.get_cmap("tab10")
-    for scenario_i, scenario in enumerate(scenarios):
-        rows = [p["scenarios"][scenario] for p in poses]
-        color = colors.get(scenario, cmap(scenario_i % 10))
-        axes[0].plot(clearance_cm, [r["dpos_m"][2] * 1000 for r in rows],
-                     marker="o", label=scenario, color=color)
-        axes[1].plot(clearance_cm, [r["suction"] for r in rows],
-                     marker="o", label=scenario, color=color)
-        axes[2].plot(clearance_cm, [r["film"]["gamma"]["rms"] for r in rows],
-                     marker="o", label=f"gamma {scenario}", color=color)
-        axes[2].plot(clearance_cm, [r["film"]["beta"]["rms"] for r in rows],
-                     marker="x", linestyle="--", label=f"beta {scenario}", color=color)
-    axes[0].axhline(0, color="0.4", linewidth=0.7)
-    axes[0].set_ylabel("predicted dz (mm)")
-    axes[1].set_ylabel("predicted suction")
-    axes[1].axhline(0.5, color="0.4", linewidth=0.7)
-    axes[2].set_ylabel("FiLM RMS")
-    axes[2].set_xlabel("clearance above case top (cm)")
-    for ax in axes:
-        ax.grid(alpha=0.25)
-        ax.legend(ncols=2)
-    axes[-1].invert_xaxis()
-    fig.suptitle("Live FiLM counterfactual authority")
+    scenarios = [name for name in poses[0]["scenarios"] if name != "real"]
+    metrics = {name: {"dz": [], "suction": [], "translation": [], "rotation": []}
+               for name in scenarios}
+    abs_action = result.get("action_space") == "absolute"
+
+    def rotation_delta(action, real_action):
+        if not abs_action:
+            return float(np.linalg.norm(np.asarray(action[3:6]) - np.asarray(real_action[3:6])))
+        q0 = np.asarray(real_action[3:7], dtype=float)
+        q1 = np.asarray(action[3:7], dtype=float)
+        q0 /= np.linalg.norm(q0)
+        q1 /= np.linalg.norm(q1)
+        return float(2 * np.arccos(np.clip(abs(np.dot(q0, q1)), 0.0, 1.0)))
+
+    for pose in poses:
+        real = pose["scenarios"]["real"]
+        real_dpos = np.asarray(real["dpos_m"], dtype=float)
+        for name in scenarios:
+            row = pose["scenarios"][name]
+            delta_pos = np.asarray(row["dpos_m"], dtype=float) - real_dpos
+            metrics[name]["dz"].append(float(delta_pos[2] * 1000))
+            metrics[name]["suction"].append(float(row["suction"] - real["suction"]))
+            metrics[name]["translation"].append(float(np.linalg.norm(delta_pos) * 1000))
+            metrics[name]["rotation"].append(
+                rotation_delta(row["action"], real["action"]) * 1000)
+
+    fig, axes = plt.subplots(4, 1, figsize=(13, 14), constrained_layout=True)
+    specs = (("dz", "delta dz vs real (mm)"),
+             ("suction", "delta suction vs real"),
+             ("translation", "translation action distance vs real (mm)"),
+             ("rotation", "rotation action distance vs real (mrad)"))
+    colors = plt.get_cmap("tab10")(np.arange(len(scenarios)) % 10)
+    for ax, (key, ylabel) in zip(axes, specs):
+        values = [metrics[name][key] for name in scenarios]
+        boxes = ax.boxplot(values, labels=scenarios, showmeans=True, patch_artist=True)
+        for patch, color in zip(boxes["boxes"], colors):
+            patch.set_facecolor(color)
+            patch.set_alpha(0.35)
+        for i, vals in enumerate(values, start=1):
+            jitter = np.linspace(-0.08, 0.08, len(vals)) if len(vals) > 1 else [0.0]
+            ax.scatter(i + jitter, vals, color=colors[i - 1], s=28, zorder=3)
+            ax.text(i, max(vals) if vals else 0.0, f"mean {np.mean(vals):+.3g}",
+                    ha="center", va="bottom", fontsize=8)
+        ax.axhline(0, color="black", linewidth=0.7)
+        ax.set_ylabel(ylabel)
+        ax.grid(axis="y", alpha=0.25)
+        ax.tick_params(axis="x", rotation=25)
+    fig.suptitle(f"Counterfactual action change vs real ({len(poses)} frozen poses)")
     fig.savefig(out, dpi=160)
     plt.close(fig)
 
-
-
-def _plot_pose(pose: dict, out: Path):
+def _plot_pose(pose: dict, out: Path, action_space: str = "delta"):
     """Plot one clearance separately so overlapping scenarios stay readable."""
     import matplotlib
     matplotlib.use("Agg")
@@ -171,13 +189,32 @@ def _plot_pose(pose: dict, out: Path):
     axes[1].axhline(0.5, color="black", linewidth=0.7)
     axes[1].set_ylabel("predicted suction")
 
+    real = pose["scenarios"]["real"]
+    real_dpos = np.asarray(real["dpos_m"], dtype=float)
+    translation_delta = [np.linalg.norm(np.asarray(row["dpos_m"]) - real_dpos) * 1000
+                         for row in rows]
+    if action_space == "absolute":
+        real_q = np.asarray(real["action"][3:7], dtype=float)
+        real_q /= np.linalg.norm(real_q)
+        rotation_delta = []
+        for row in rows:
+            q = np.asarray(row["action"][3:7], dtype=float)
+            q /= np.linalg.norm(q)
+            rotation_delta.append(2 * np.arccos(np.clip(abs(np.dot(real_q, q)), 0, 1)) * 1000)
+    else:
+        real_rot = np.asarray(real["action"][3:6], dtype=float)
+        rotation_delta = [np.linalg.norm(np.asarray(row["action"][3:6]) - real_rot) * 1000
+                          for row in rows]
     width = 0.38
-    axes[2].bar(x - width / 2, [row["film"]["gamma"]["rms"] for row in rows],
-                width, label="gamma RMS", color="tab:blue")
-    axes[2].bar(x + width / 2, [row["film"]["beta"]["rms"] for row in rows],
-                width, label="beta RMS", color="tab:orange")
-    axes[2].set_ylabel("FiLM RMS")
-    axes[2].legend()
+    axes[2].bar(x - width / 2, translation_delta, width,
+                label="translation distance", color="tab:blue")
+    rotation_ax = axes[2].twinx()
+    rotation_ax.bar(x + width / 2, rotation_delta, width,
+                    label="rotation distance", color="tab:orange")
+    axes[2].set_ylabel("translation delta vs real (mm)")
+    rotation_ax.set_ylabel("rotation delta vs real (mrad)")
+    axes[2].legend(loc="upper left")
+    rotation_ax.legend(loc="upper right")
 
     cond_names = rows[0]["film"]["cond_names"]
     c_hat = np.asarray([row["film"]["c_hat"] for row in rows], dtype=float)
@@ -229,8 +266,8 @@ def main():
 
     checkpoint = args.checkpoint or rp.latest_checkpoint()
     clearances = tuple(args.clearances or ikcfg.VLA_FILM_PROBE_CLEARANCES_M)
-    if not clearances or min(clearances) < 0.03:
-        raise SystemExit("clearances must be >= 0.03 m for this non-contact probe")
+    # if not clearances or min(clearances) < 0.03:
+    #     raise SystemExit("clearances must be >= 0.03 m for this non-contact probe")
     clearances = tuple(sorted((float(v) for v in clearances), reverse=True))
     layers = int(ikcfg.SRC_LAYERS_REMAINING if args.layers is None else args.layers)
     fz_deltas_n = tuple(args.fz_deltas_n or ikcfg.VLA_FILM_PROBE_FZ_DELTAS_N)
@@ -392,7 +429,7 @@ def main():
     for pose in result["poses"]:
         clearance_label = f"{pose['clearance_m'] * 100:g}".replace(".", "p")
         pose_path = args.output_dir / f"{stem}_{clearance_label}cm.png"
-        _plot_pose(pose, pose_path)
+        _plot_pose(pose, pose_path, action_space=result.get("action_space", "delta"))
         pose_pngs.append(pose_path)
     print(f"\nresult: {json_path}\nsummary: {png_path}")
     for pose_path in pose_pngs:
@@ -406,7 +443,7 @@ FILM_COND=contact,fz,seal FILM_INJECT=prefix FILM_MASK_FORCE=1 \
 FILM_F0=6 FILM_TAU=4 FILM_FZ_TAU=5 \
 FILM_DATASET=lges_case_pick_0721 \
 python probe_film_authority_live.py --go \
-  --clearances 0.25 0.15 0.10 0.05 0.03 \
+  --clearances 0.05 0.04 0.03 0.02 0.01 0.00 -0.01 -0.02 -0.03 -0.04\
   --checkpoint Chanho-Lee/smolvla_film_0721_prefix_mask1 \
   --fz-deltas-n -6 -3 3 6
 """

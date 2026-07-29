@@ -3,9 +3,8 @@
 One keyboard-gated cycle per episode:
 
     ENTER -> BEV-detect the case -> record ON -> pick (approach@transport ->
-    hover -> descend-to-contact -> seal -> lift) -> record OFF -> place the
-    case back where it was picked (NOT recorded) -> park the arm clear of the
-    head camera -> wait for the next ENTER.
+    hover -> descend-to-contact -> seal -> lift) -> record OFF -> suction OFF
+    -> wait 2 seconds -> return home -> wait for the next ENTER.
 
 Move the box / restack layers between cycles for position + depth diversity;
 the fresh detection each cycle re-centers everything (that variation is the
@@ -369,14 +368,14 @@ def _cycle(bot, mover: SuctionMover, rec: EpisodeRecorder, layers: int) -> None:
                    "contact_ee_z": None if res.contact_ee_z is None else float(res.contact_ee_z)})
 
     if res.success:
-        logger.info("placing the case back (not recorded)")
-        pres = mover.place(pick_pose, expected_z=res.contact_ee_z)
-        if not pres.success:
-            logger.warning("place-back failed: {} — check the case before the next cycle", pres.reason)
+        logger.info("pick complete — suction off, then home")
+        suction_io.suction_off()
+        time.sleep(cfg.CASE_PICK_RELEASE_WAIT_S)
+        mover.move_joints(mover._home_seed)
     else:
         logger.warning("pick failed: {} — recovering to transport height", res.reason)
         _recover_to_transport(mover)
-    _view_park(mover, "collect")
+        _view_park(mover, "collect")
 
 
 def _main() -> None:
@@ -389,7 +388,7 @@ def _main() -> None:
 
     logger.warning("=" * 60)
     logger.warning("MOVES THE REAL ARM + SUCTION. Each ENTER runs one recorded")
-    logger.warning("case pick, then places the case back. Move the box between")
+    logger.warning("case pick, then releases it and returns home. Move the box between")
     logger.warning("cycles for position/depth diversity. E-stop in reach.")
     logger.warning("=" * 60)
     if input("Continue? [y/N]: ").strip().lower() != "y":

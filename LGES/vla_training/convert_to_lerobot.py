@@ -224,6 +224,9 @@ def main():
     ap.add_argument("--tasks", nargs="+", default=SUCTION_TASKS)
     ap.add_argument("--val-per-task", type=int, default=2,
                     help="hold out the N most recent takes per task into <name>_val")
+    ap.add_argument("--val-takes", nargs="+", default=None,
+                    help="exact take directory names to force into val, overriding "
+                         "--val-per-task's automatic last-N selection; the rest go to train")
     ap.add_argument("--name", default="lges_suction")
     ap.add_argument("--no-depth", action="store_true",
                     help="omit the colorized depth camera (depth is on by default)")
@@ -239,9 +242,14 @@ def main():
     splits = {"train": [], "val": []}
     for task in args.tasks:
         takes = sorted(p for p in (args.recordings / task).iterdir() if p.is_dir())
-        n_val = args.val_per_task
-        splits["train"] += takes[:-n_val] if n_val else takes
-        splits["val"] += takes[-n_val:] if n_val else []
+        if args.val_takes:
+            val_names = set(args.val_takes)
+            splits["val"] += [t for t in takes if t.name in val_names]
+            splits["train"] += [t for t in takes if t.name not in val_names]
+        else:
+            n_val = args.val_per_task
+            splits["train"] += takes[:-n_val] if n_val else takes
+            splits["val"] += takes[-n_val:] if n_val else []
 
     for split, takes in splits.items():
         if not takes:
