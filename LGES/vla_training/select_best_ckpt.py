@@ -60,9 +60,12 @@ def main():
             inject=os.environ.get("FILM_INJECT", "prefix"))
         print(f"[best] FiLM patched: cond={cond}")
 
+    from lerobot.configs.policies import PreTrainedConfig
     from lerobot.datasets.lerobot_dataset import LeRobotDataset
-    from lerobot.policies.smolvla.modeling_smolvla import SmolVLAPolicy
-    from lerobot.policies.factory import make_pre_post_processors
+    from lerobot.policies.factory import get_policy_class, make_pre_post_processors
+    ptype = PreTrainedConfig.from_pretrained(ckpts[-1] / "pretrained_model").type
+    PolicyCls = get_policy_class(ptype)
+    print(f"[best] policy type: {ptype}")
 
     torch.manual_seed(0)
     ds = LeRobotDataset(args.repo_id, root=args.val_root,
@@ -70,7 +73,7 @@ def main():
     results = {}
     for ck in ckpts:
         model_dir = ck / "pretrained_model"
-        policy = SmolVLAPolicy.from_pretrained(model_dir)
+        policy = PolicyCls.from_pretrained(model_dir)
         policy.eval()
         pre, _ = make_pre_post_processors(
             policy_cfg=policy.config, pretrained_path=str(model_dir),

@@ -2,3 +2,4 @@ naive_smolvla
 film(contact,fz,seal)_smolvla prefix_mask1
 film(contact,fz,seal)_smolvla prefix_mask0
 film(contact,fz,seal)_smolvla suffix_mask1
+act
