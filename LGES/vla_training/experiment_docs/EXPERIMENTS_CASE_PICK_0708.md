@@ -247,6 +247,37 @@ python run_policy.py --film --checkpoint Chanho-Lee/smolvla_film_0721_dF_prefix_
 # 베이스라인: smolvla_naive_0721 (--film 없이)
 ```
 
+## 6.8 0721_0727 라운드 — 데이터 2배 + 멀티모델 비교 (2026-07-28~29)
+
+데이터: `Chanho-Lee/lges_case_pick_0721_0727` (116 eps / 24,648 frames, rel 7d, layer 1·5).
+fz 오프셋을 데이터 중앙값(2.6)으로 변경하고 **현세대 캘리브레이션을 코드 기본값으로 고정**
+(F0=6 tau=4 fz_tau=5 fz_off=2.6 — env 없이 배포 가능; 구세대는 env 필수, §6.7 참조).
+스토리지는 /data 볼륨으로 이사 (`/data/home/maverick_data`, 심링크 경유 — /home 포화 재발 방지).
+
+전 런 50k (30k에서 warm-restart 연장, save_freq=10000, 종료 후 last만 유지):
+
+| run | loss@50k | probe std | probe 현실 접촉 |
+|---|---|---|---|
+| `smolvla_naive_0721_0727` | 0.076 | — | — |
+| `…prefix_mask1` | 0.074 | **61% PASS** | **24% WEAK** |
+| `…prefix_mask1_os3` | 0.068 | 60% PASS | 21% WEAK |
+| `…suffix_mask1` | 0.062 | 51% PASS | 16% WEAK |
+| `xvla_0721_0727` | 0.001* | (probe는 SmolVLA 전용) | |
+| `pi05_naive_0721_0727` / `act_0721_0727` | 완료 후 기입 | | |
+
+(*loss 정의 상이 — 모델 간 loss 직접 비교 불가; 판단은 로봇 평가로)
+
+**관찰**: ① 30k→50k 연장은 loss만 소폭 개선, c-hat 권한은 불변 (62/25→61/24) — 권한은
+데이터가 결정하고 스텝으로는 안 오름. ② prefix > suffix 재확인 (61/24 vs 51/16).
+③ os3 이득 소멸 (데이터 2배로 자연 전이 노출 충분). ④ 현실-접촉 권한은 ~25%에서 plateau —
+남은 레버는 접촉 높이 다양화(중간 layer 데이터) 또는 gate-oracle 증류.
+⑤ 새 베이스라인 3종 추가: pi0.5(train_pi05.py shim), X-VLA(train_xvla.py shims 4종),
+ACT. FiLM-pi0.5 포팅(film_contact_pi05.py, suffix 전용, 스모크 통과) 준비됨.
+
+**로봇 평가 1순위**: `smolvla_film_0721_0727_prefix_mask1` (env 불필요, 코드 기본값 일치)
++ 베이스라인 `smolvla_naive_0721_0727`, 여유 되면 pi05/ACT/XVLA 순.
+**핵심 테스트: 학습에 없는 중간 layer(2–4) 보간.**
+
 ## 7. 앞으로 진행할 실험 (PROGRESS.md S1–S5 매핑)
 
 | 우선순위 | 실험 | 내용 | 필요 자원 |

@@ -32,6 +32,13 @@ META = {
     "smolvla_film_0721_dF_prefix_mask1":     ("Chanho-Lee/lges_case_pick_0721_dF", "FiLM v2 from base, cond=contact,fz,seal,dfmag inject=prefix mask_force=1 F0=6 tau=4 fz_tau=5, 30k, state 16"),
     "smolvla_film_0721_dF_prefix_mask1_os3": ("Chanho-Lee/lges_case_pick_0721_dF", "FiLM v2 from base, cond=contact,fz,seal,dfmag inject=prefix mask_force=1 F0=6 tau=4 fz_tau=5, transition oversampling x3, 30k, state 16"),
     "smolvla_film_0721_prefix_mask1_os3": ("Chanho-Lee/lges_case_pick_0721", "FiLM v2 from base, cond=contact,fz,seal inject=prefix mask_force=1 F0=6 tau=4 fz_tau=5, transition oversampling x3, 30k"),
+    "smolvla_naive_0721_0727":                  ("Chanho-Lee/lges_case_pick_0721_0727", "vanilla SmolVLA finetune, new robot, rel, 50k"),
+    "smolvla_film_0721_0727_prefix_mask1":      ("Chanho-Lee/lges_case_pick_0721_0727", "FiLM v2, cond=contact,fz,seal inject=prefix mask_force=1 F0=6 tau=4 fz=(fz-2.6)/5, 50k"),
+    "smolvla_film_0721_0727_prefix_mask1_os3":  ("Chanho-Lee/lges_case_pick_0721_0727", "FiLM v2, prefix mask1 + transition oversampling x3, 50k"),
+    "smolvla_film_0721_0727_suffix_mask1":      ("Chanho-Lee/lges_case_pick_0721_0727", "FiLM v2, cond=contact,fz,seal inject=suffix mask_force=1, 50k"),
+    "xvla_0721_0727":                           ("Chanho-Lee/lges_case_pick_0721_0727", "X-VLA (2toINF/X-VLA-Pt init via train_xvla.py shims), 224x224 pad, 50k"),
+    "pi05_naive_0721_0727":                     ("Chanho-Lee/lges_case_pick_0721_0727", "pi0.5 (lerobot/pi05_base) finetune, bs8 grad-ckpt, 50k"),
+    "act_0721_0727":                            ("Chanho-Lee/lges_case_pick_0721_0727", "ACT from scratch, bs32, 50k"),
 }
 
 api = HfApi()
