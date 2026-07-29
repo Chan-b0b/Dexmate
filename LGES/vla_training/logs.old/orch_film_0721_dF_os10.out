@@ -1,0 +1,170 @@
+[train-film] variant=v2  init=/home/maverick/.cache/huggingface/hub/models--lerobot--smolvla_base/snapshots/c83c3163b8ca9b7e67c509fffd9121e66cb96205  out=/home/maverick/Dexmate/LGES/vla_training/outputs/smolvla_film_0721_dF_prefix_mask1_os10
+[film] patched VLAFlowMatching: variant=v2 cond=('contact', 'fz', 'seal', 'dfmag') inject=prefix mask_force=True contact=clip((6-|F|)/4) fz=fz/5 dfmag=d|F|/5 wrench_mean=[2.3, 4.61, 2.92, -0.17, -0.48, -0.4]
+INFO 2026-07-23 18:12:45 ot_train.py:197 {'batch_size': 32,
+ 'checkpoint_path': None,
+ 'cudnn_deterministic': False,
+ 'dataset': {'episodes': None,
+             'image_transforms': {'enable': False,
+                                  'max_num_transforms': 3,
+                                  'random_order': False,
+                                  'tfs': {'affine': {'kwargs': {'degrees': [-5.0,
+                                                                            5.0],
+                                                                'translate': [0.05,
+                                                                              0.05]},
+                                                     'type': 'RandomAffine',
+                                                     'weight': 1.0},
+                                          'brightness': {'kwargs': {'brightness': [0.8,
+                                                                                   1.2]},
+                                                         'type': 'ColorJitter',
+                                                         'weight': 1.0},
+                                          'contrast': {'kwargs': {'contrast': [0.8,
+                                                                               1.2]},
+                                                       'type': 'ColorJitter',
+                                                       'weight': 1.0},
+                                          'hue': {'kwargs': {'hue': [-0.05,
+                                                                     0.05]},
+                                                  'type': 'ColorJitter',
+                                                  'weight': 1.0},
+                                          'saturation': {'kwargs': {'saturation': [0.5,
+                                                                                   1.5]},
+                                                         'type': 'ColorJitter',
+                                                         'weight': 1.0},
+                                          'sharpness': {'kwargs': {'sharpness': [0.5,
+                                                                                 1.5]},
+                                                        'type': 'SharpnessJitter',
+                                                        'weight': 1.0}}},
+             'repo_id': 'Chanho-Lee/lges_case_pick_0721_dF',
+             'revision': None,
+             'root': '/home/maverick/Dexmate/LGES/vla_training/datasets/lges_case_pick_0721_dF',
+             'streaming': False,
+             'use_imagenet_stats': True,
+             'video_backend': 'torchcodec'},
+ 'env': None,
+ 'eval': {'batch_size': 50, 'n_episodes': 50, 'use_async_envs': False},
+ 'eval_freq': 20000,
+ 'job_name': 'smolvla_film_0721_dF_prefix_mask1_os10',
+ 'log_freq': 50,
+ 'num_workers': 32,
+ 'optimizer': {'betas': [0.9, 0.95],
+               'eps': 1e-08,
+               'grad_clip_norm': 10.0,
+               'lr': 0.0001,
+               'type': 'adamw',
+               'weight_decay': 1e-10},
+ 'output_dir': '/home/maverick/Dexmate/LGES/vla_training/outputs/smolvla_film_0721_dF_prefix_mask1_os10',
+ 'peft': None,
+ 'policy': {'adapt_to_pi_aloha': False,
+            'add_image_special_tokens': False,
+            'attention_mode': 'cross_attn',
+            'chunk_size': 50,
+            'compile_mode': 'max-autotune',
+            'compile_model': False,
+            'device': 'cuda',
+            'empty_cameras': 0,
+            'expert_width_multiplier': 0.75,
+            'freeze_vision_encoder': True,
+            'input_features': {'observation.images.camera1': {'shape': [3,
+                                                                        256,
+                                                                        256],
+                                                              'type': <FeatureType.VISUAL: 'VISUAL'>},
+                               'observation.images.camera2': {'shape': [3,
+                                                                        256,
+                                                                        256],
+                                                              'type': <FeatureType.VISUAL: 'VISUAL'>},
+                               'observation.images.camera3': {'shape': [3,
+                                                                        256,
+                                                                        256],
+                                                              'type': <FeatureType.VISUAL: 'VISUAL'>},
+                               'observation.state': {'shape': [16],
+                                                     'type': <FeatureType.STATE: 'STATE'>}},
+            'license': None,
+            'load_vlm_weights': True,
+            'max_action_dim': 32,
+            'max_period': 4.0,
+            'max_state_dim': 32,
+            'min_period': 0.004,
+            'n_action_steps': 50,
+            'n_obs_steps': 1,
+            'normalization_mapping': {'ACTION': <NormalizationMode.MEAN_STD: 'MEAN_STD'>,
+                                      'STATE': <NormalizationMode.MEAN_STD: 'MEAN_STD'>,
+                                      'VISUAL': <NormalizationMode.IDENTITY: 'IDENTITY'>},
+            'num_expert_layers': 0,
+            'num_steps': 10,
+            'num_vlm_layers': 16,
+            'optimizer_betas': [0.9, 0.95],
+            'optimizer_eps': 1e-08,
+            'optimizer_grad_clip_norm': 10.0,
+            'optimizer_lr': 0.0001,
+            'optimizer_weight_decay': 1e-10,
+            'output_features': {'action': {'shape': [6],
+                                           'type': <FeatureType.ACTION: 'ACTION'>}},
+            'pad_language_to': 'max_length',
+            'prefix_length': 0,
+            'pretrained_path': '/home/maverick/.cache/huggingface/hub/models--lerobot--smolvla_base/snapshots/c83c3163b8ca9b7e67c509fffd9121e66cb96205',
+            'private': None,
+            'push_to_hub': False,
+            'repo_id': None,
+            'resize_imgs_with_padding': [512, 512],
+            'rtc_config': None,
+            'scheduler_decay_lr': 2.5e-06,
+            'scheduler_decay_steps': 30000,
+            'scheduler_warmup_steps': 1000,
+            'self_attn_every_n_layers': 2,
+            'tags': None,
+            'tokenizer_max_length': 48,
+            'train_expert_only': True,
+            'train_state_proj': True,
+            'type': 'smolvla',
+            'use_amp': False,
+            'use_cache': True,
+            'use_delta_joint_actions_aloha': False,
+            'use_peft': False,
+            'vlm_model_name': 'HuggingFaceTB/SmolVLM2-500M-Video-Instruct'},
+ 'rabc_epsilon': 1e-06,
+ 'rabc_head_mode': 'sparse',
+ 'rabc_kappa': 0.01,
+ 'rabc_progress_path': None,
+ 'rename_map': {'observation.images.head': 'observation.images.camera1',
+                'observation.images.head_depth': 'observation.images.camera2'},
+ 'resume': False,
+ 'save_checkpoint': True,
+ 'save_freq': 4000,
+ 'scheduler': {'decay_lr': 2.5e-06,
+               'num_decay_steps': 30000,
+               'num_warmup_steps': 1000,
+               'peak_lr': 0.0001,
+               'type': 'cosine_decay_with_warmup'},
+ 'seed': 1000,
+ 'steps': 30000,
+ 'tolerance_s': 0.0001,
+ 'use_policy_training_preset': True,
+ 'use_rabc': False,
+ 'wandb': {'add_tags': True,
+           'disable_artifact': False,
+           'enable': False,
+           'entity': None,
+           'mode': None,
+           'notes': None,
+           'project': 'lerobot',
+           'run_id': None}}
+INFO 2026-07-23 18:12:45 ot_train.py:205 Logs will be saved locally.
+INFO 2026-07-23 18:12:45 ot_train.py:221 Creating dataset
+INFO 2026-07-23 18:12:45 eo_utils.py:108 Using video codec: libsvtav1
+INFO 2026-07-23 18:12:45 ot_train.py:239 Creating policy
+`torch_dtype` is deprecated! Use `dtype` instead!
+Loading  HuggingFaceTB/SmolVLM2-500M-Video-Instruct weights ...
+Loading weights:   0%|          | 0/489 [00:00<?, ?it/s]Loading weights:  76%|███████▋  | 373/489 [00:00<00:00, 3728.97it/s]Loading weights: 100%|██████████| 489/489 [00:00<00:00, 4047.26it/s]
+WARNING 2026-07-23 18:12:58 ies/utils.py:92 Missing key(s) when loading model: {'model._dfmag_tau', 'model.contact_film.scale.2.bias', 'model.contact_film.shift.2.weight', 'model.contact_film.scale.0.bias', 'model.contact_film.shift.0.weight', 'model._wrench_mean', 'model._seal_mean', 'model.contact_film.shift.0.bias', 'model.contact_film.shift.2.bias', 'model.contact_film.scale.2.weight', 'model._dfmag_mean', 'model._seal_std', 'model.contact_film.scale.0.weight', 'model._wrench_std', 'model._dfmag_std'}
+INFO 2026-07-23 18:13:00 ot_train.py:306 Creating optimizer and scheduler
+INFO 2026-07-23 18:13:00 ot_train.py:341 Output dir: /home/maverick/Dexmate/LGES/vla_training/outputs/smolvla_film_0721_dF_prefix_mask1_os10
+INFO 2026-07-23 18:13:00 ot_train.py:348 cfg.steps=30000 (30K)
+INFO 2026-07-23 18:13:00 ot_train.py:349 dataset.num_frames=12449 (12K)
+INFO 2026-07-23 18:13:00 ot_train.py:350 dataset.num_episodes=58
+INFO 2026-07-23 18:13:00 ot_train.py:353 Effective batch size: 32 x 1 = 32
+INFO 2026-07-23 18:13:00 ot_train.py:354 num_learnable_params=100006432 (100M)
+INFO 2026-07-23 18:13:00 ot_train.py:355 num_total_params=450171616 (450M)
+[film-os] oversampling 1985/12449 transition frames x10 (thresh=2N/frame window=+-5) -> 65.5% of samples
+Reducing the number of VLM layers to 16 ...
+Loading weights from local directory
+Training:   0%|          | 0/30000 [00:00<?, ?step/s]INFO 2026-07-23 18:13:00 ot_train.py:419 Start offline training on a fixed dataset, with effective batch size: 32
+Training:   0%|          | 1/30000 [00:46<391:15:04, 46.95s/step]Training:   0%|          | 2/30000 [00:47<162:47:05, 19.54s/step]Training:   0%|          | 3/30000 [00:47<89:19:24, 10.72s/step] Training:   0%|          | 4/30000 [00:47<54:58:25,  6.60s/step]Training:   0%|          | 5/30000 [00:48<35:58:46,  4.32s/step]Training:   0%|          | 6/30000 [00:48<24:40:41,  2.96s/step]Training:   0%|          | 7/30000 [00:48<17:17:21,  2.08s/step]Training:   0%|          | 8/30000 [00:48<12:31:10,  1.50s/step]Training:   0%|          | 9/30000 [00:49<9:15:36,  1.11s/step] Training:   0%|          | 10/30000 [00:49<7:13:40,  1.15step/s]Training:   0%|          | 11/30000 [00:50<6:16:12,  1.33step/s]Training:   0%|          | 12/30000 [00:50<5:19:11,  1.57step/s]Training:   0%|          | 13/30000 [00:50<4:42:55,  1.77step/s]Training:   0%|          | 14/30000 [00:51<3:55:19,  2.12step/s]Training:   0%|          | 15/30000 [00:51<3:26:29,  2.42step/s]Training:   0%|          | 16/30000 [00:51<3:09:14,  2.64step/s]종료됨

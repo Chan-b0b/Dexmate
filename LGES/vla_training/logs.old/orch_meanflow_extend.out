@@ -1,0 +1,5 @@
+[mf-extend] extending both MeanFlow runs to 35000 steps on GPU 6
+[mf-extend] smolvla_meanflow_0708_abs finished rc=0
+[tb_log] wrote 19 step records -> /home/maverick/Dexmate/LGES/vla_training/logs/smolvla_meanflow_0708_abs/tb
+[mf-extend] smolvla_meanflow_0708 finished rc=0
+[mf-extend] DONE  meanflow_0708=0 meanflow_0708_abs=0
