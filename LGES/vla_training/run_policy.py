@@ -38,6 +38,7 @@ Run with the vla_venv python (imports lerobot AND the ik/detection stack):
 
 import argparse
 import json
+import re
 import select
 import sys
 import termios
@@ -807,6 +808,29 @@ def _grab_depth(bot):
 # ── live loop ─────────────────────────────────────────────────────────
 
 
+def _read_layers(prompt: str, current_layers: int) -> int:
+    """Read one line; blank keeps current_layers, 'l <N>' (or bare '<N>') switches
+    layers for the upcoming run. Raises KeyboardInterrupt/EOFError like input()."""
+    while True:
+        ans = input(prompt).strip()
+        if not ans:
+            return current_layers
+        m = re.fullmatch(r"[lL]\s*(\d+)", ans) or re.fullmatch(r"(\d+)", ans)
+        if not m:
+            print(f"  (unrecognized '{ans}' -- expected blank or 'l <N>')")
+            continue
+        new_layers = int(m.group(1))
+        print(f"  layer -> {new_layers}")
+        return new_layers
+
+
+def _prompt_next_run(current_layers: int) -> int:
+    """ENTER to run again at the same layer; 'l <N>' (or bare '<N>') to switch
+    layers for the next run when the operator restacks between runs."""
+    return _read_layers(f"\n>>> Press Enter to run again (layer={current_layers}), "
+                        f"'l <N>' to switch layers, Ctrl-C to stop <<< ", current_layers)
+
+
 def run_live(checkpoint: Path, tasks: list[str], *, commit: bool,
              home: bool = True, force_limit_n: float | None = None,
              max_ticks: int = 1000, enforce_box: bool = False,
@@ -844,6 +868,7 @@ def run_live(checkpoint: Path, tasks: list[str], *, commit: bool,
         policy.config.n_action_steps = n_action_steps
     chunk_steps = int(getattr(policy.config, "n_action_steps", 1))
     layers = int(ikcfg.SRC_LAYERS_REMAINING if layers is None else layers)
+    checkpoint_name = Path(checkpoint).name
     # abs-action checkpoints (convert_to_lerobot.py --action-space abs) predict
     # the ABSOLUTE next EE pose [x,y,z,qw,qx,qy,qz,suction] instead of a delta
     # -- no running reference to integrate onto, just a per-tick safety clamp.
@@ -877,7 +902,8 @@ def run_live(checkpoint: Path, tasks: list[str], *, commit: bool,
                   + (f" | DESCEND-UNTIL-CONTACT gate (stop@{contact_n:.0f}N, floor {descend_floor:.2f}m)"
                      if descend_until_contact else ""))
             try:
-                input("  >>> ENTER to authorize motion (Ctrl-C to cancel) <<< ")
+                layers = _read_layers(f"  >>> ENTER to authorize motion (layer={layers}), "
+                                      f"'l <N>' to change, Ctrl-C to cancel <<< ", layers)
             except (KeyboardInterrupt, EOFError):
                 print("cancelled — no motion."); return
 
@@ -925,15 +951,16 @@ def run_live(checkpoint: Path, tasks: list[str], *, commit: bool,
                     if not loop:
                         break
                     try:
-                        input("\n>>> Press Enter to run again (Ctrl-C to stop) <<< ")
+                        layers = _prompt_next_run(layers)
                     except (KeyboardInterrupt, EOFError):
                         print("\nloop stopped.")
                         break
                     continue
 
-            log = RolloutLog(log_dir, checkpoint, save_images=log_images, run_num=run_num,
+            log_root = (log_dir / checkpoint_name / f"L{layers}") if log_dir is not None else None
+            log = RolloutLog(log_root, checkpoint, save_images=log_images, run_num=run_num,
                               action_space_label="ee_abs+suction" if abs_action else "ee_delta+suction"
-                              ) if log_dir is not None else None
+                              ) if log_root is not None else None
             # Poll stdin each tick: 'q' breaks the current run; any other line
             # is the --go ENTER-abort.
             watch_stdin = commit or loop
@@ -1140,7 +1167,7 @@ def run_live(checkpoint: Path, tasks: list[str], *, commit: bool,
             if not loop or run_stop == "ABORT: KeyboardInterrupt":
                 break
             try:
-                input("\n>>> Press Enter to run again (Ctrl-C to stop) <<< ")
+                layers = _prompt_next_run(layers)
             except (KeyboardInterrupt, EOFError):
                 print("\nloop stopped."); break
 
@@ -1179,8 +1206,10 @@ def main():
     ap.add_argument("--max-ticks", type=int, default=1000,
                     help="per-task tick cap (episodes are ~230-275 frames)")
     ap.add_argument("--log-dir", type=Path, default=None, metavar="DIR",
-                    help="persist the rollout to DIR as states.jsonl/meta.json takes "
-                         "(detection IVs included) for Research analysis")
+                    help="persist rollouts under DIR/<checkpoint_name>/L<layer>/ as "
+                         "states.jsonl/meta.json takes (detection IVs included) for "
+                         "Research analysis; switch layers between loop runs with the "
+                         "'l <N>' prompt")
     ap.add_argument("--log-images", action="store_true",
                     help="with --log-dir, also save per-frame head_rgb/ + head_depth/ "
                          "(recorder format) so the rollout is replayable by the policy")
