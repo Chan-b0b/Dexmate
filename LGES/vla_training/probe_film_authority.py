@@ -62,6 +62,10 @@ def main():
     ap.add_argument("--checkpoint", type=Path,
                     default=VLA_DIR / "outputs/film_v3_contactfzseal_nomask/checkpoints/last")
     ap.add_argument("--dataset-root", type=Path, default=VLA_DIR / "datasets/lges_suction")
+    ap.add_argument("--stats-root", type=Path, default=None,
+                    help="dataset whose stats feed c-hat (default: --dataset-root). Set this "
+                         "to the TRAINING dataset when probing on held-out/val episodes so "
+                         "c-hat matches training exactly.")
     ap.add_argument("--repo-id", default="local/lges_suction")
     ap.add_argument("--episode", type=int, default=None,
                     help="episode index (default: first case_pick episode)")
@@ -80,9 +84,10 @@ def main():
     inject = os.environ.get("FILM_INJECT", "suffix")
     print(f"[probe] FiLM cond={cond} inject={inject} mask_force={mask_force}  ckpt={args.checkpoint}")
 
-    wm, ws = film_contact.load_wrench_stats(args.dataset_root)
-    sm, ss = film_contact.load_seal_stats(args.dataset_root)
-    dm, dsd = film_contact.load_dfmag_stats(args.dataset_root)
+    stats_root = args.stats_root or args.dataset_root
+    wm, ws = film_contact.load_wrench_stats(stats_root)
+    sm, ss = film_contact.load_seal_stats(stats_root)
+    dm, dsd = film_contact.load_dfmag_stats(stats_root)
     dfmag_tau = float(os.environ.get("FILM_DFMAG_TAU", "5"))
     fz_off = float(os.environ.get("FILM_FZ_OFF", "2.6"))
     f0 = float(os.environ.get("FILM_F0", "6"))

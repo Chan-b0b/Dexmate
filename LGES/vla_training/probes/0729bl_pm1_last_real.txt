@@ -1,0 +1,55 @@
+`torch_dtype` is deprecated! Use `dtype` instead!
+[probe] FiLM cond=('contact', 'fz', 'seal') inject=prefix mask_force=True  ckpt=outputs/smolvla_film_0729_prefix_mask1/checkpoints/last
+Loading  HuggingFaceTB/SmolVLM2-500M-Video-Instruct weights ...
+Loading weights:   0%|          | 0/489 [00:00<?, ?it/s]Loading weights:  65%|██████▌   | 320/489 [00:00<00:00, 3199.32it/s]Loading weights: 100%|██████████| 489/489 [00:00<00:00, 3718.58it/s]
+Reducing the number of VLM layers to 16 ...
+Loading weights from local directory
+
+── Tier 0  (static, no data) ───────────────────────────────────────
+  |Δγ| max=0.4896 mean=0.1016   |Δβ| max=0.4836 mean=0.1075   (c: 0 -> 1)
+  γ is a multiplicative gain on the action-token embedding; ~0 => FiLM ignores its own input.
+
+── Tier 1  (counterfactual on training data) ───────────────────────
+  episode 0: "pick up the case with the suction cup"  frames 0..218
+  forced patterns: c0=[0.0, 0.0, 0.0]  c1=[0.6, 0.42, 0.0]  (channels ('contact', 'fz', 'seal'))
+
+   frame    ee_z   |F|N | expert_dz  dz(c=0)  dz(c=1)      Δdz  dz(real)
+  --------------------------------------------------------------------------
+       0   1.098    5.0 |      0.2m    -0.2m     2.5m     2.7m     -0.1m
+       5   1.126    5.7 |     16.5m    12.9m    13.3m     0.4m     13.0m
+      10   1.196    5.3 |      5.3m     5.8m     5.2m    -0.5m      5.7m
+      15   1.195    4.4 |     -9.8m    -6.3m    -6.4m    -0.1m     -6.3m
+      20   1.139    3.8 |     -6.7m    -8.6m    -8.5m     0.1m     -8.6m
+      25   1.117    5.2 |     -6.1m    -2.1m    -1.2m     0.9m     -2.2m
+      30   1.074    5.5 |     -7.2m    -9.4m    -9.5m    -0.0m     -9.5m
+      35   1.063    4.7 |      0.0m    -2.9m    -3.4m    -0.5m     -2.5m
+      40   1.063    4.7 |      0.0m    -3.1m    -3.8m    -0.7m     -2.7m
+      45   1.055    5.1 |     -4.5m    -3.2m    -2.7m     0.5m     -2.9m
+      50   1.014    5.3 |    -10.1m   -13.0m   -11.8m     1.2m    -12.7m
+      55   0.964    5.2 |    -10.1m   -10.4m   -11.5m    -1.1m    -10.4m
+      60   0.914    5.5 |    -13.0m   -13.4m   -12.1m     1.3m    -13.4m
+      65   0.869    5.6 |     -4.0m    -4.2m    -5.0m    -0.8m     -4.3m
+      70   0.858    4.9 |      0.0m    -2.1m    -2.0m     0.2m     -2.1m
+      75   0.857    5.2 |      0.0m    -1.4m    -0.8m     0.6m     -1.4m
+      80   0.855    5.2 |     -1.8m    -1.6m    -0.2m     1.4m     -1.6m
+      85   0.847    4.9 |     -1.2m    -1.8m    -0.5m     1.4m     -1.8m
+      90   0.838    5.1 |     -1.3m    -1.7m    -0.5m     1.3m     -1.7m
+      95   0.831    4.7 |     -1.5m    -1.7m    -0.6m     1.1m     -1.7m
+     100   0.823    5.2 |     -1.6m    -1.7m    -0.7m     1.0m     -1.7m
+     105   0.816    5.1 |     -1.5m    -1.7m    -0.8m     0.9m     -1.7m
+     110   0.808    5.0 |     -1.6m    -1.7m    -0.7m     1.0m     -1.7m
+     115   0.801    5.3 |     -1.5m    -1.7m    -0.6m     1.1m     -1.7m
+     120   0.794    4.6 |     -1.5m    -1.7m    -0.4m     1.3m     -1.7m
+     125   0.786    4.9 |     -1.5m    -1.7m    -0.3m     1.4m     -1.8m
+     130   0.778    5.1 |     -1.5m    -1.7m    -0.2m     1.5m     -1.7m
+     135   0.772    5.1 |     -1.8m    -1.6m     0.0m     1.7m     -1.7m
+     214   1.035    5.9 |     13.9m    11.3m    12.8m     1.5m     13.1m
+  --------------------------------------------------------------------------
+  mean over 143 pre-contact frames:  dz(c=0)=-2.86mm  dz(c=1)=-2.03mm  meanΔdz=+0.83mm  max|Δdz|=9.06mm
+
+  phase split (the transition must fire in the COMMITTED-descent band):
+    approach/hover  dz(c=0)>=-3mm: n=101  dz(c=0)= -0.44mm  dz(c=1)= +0.44mm  Δdz= +0.88mm
+    COMMITTED desc  dz(c=0)< -3mm: n= 42  dz(c=0)= -8.66mm  dz(c=1)= -7.95mm  Δdz= +0.70mm
+
+── verdict ─────────────────────────────────────────────────────────
+  WEAK: c=1 only cancels 8% of the committed descent (dz -8.7->-8.0mm). Right sign, too weak to STOP -> the depth/image cue still dominates the descend command. Likely the under-reach cause.

@@ -39,13 +39,22 @@ META = {
     "xvla_0721_0727":                           ("Chanho-Lee/lges_case_pick_0721_0727", "X-VLA (2toINF/X-VLA-Pt init via train_xvla.py shims), 224x224 pad, 50k"),
     "pi05_naive_0721_0727":                     ("Chanho-Lee/lges_case_pick_0721_0727", "pi0.5 (lerobot/pi05_base) finetune, bs8 grad-ckpt, 50k"),
     "act_0721_0727":                            ("Chanho-Lee/lges_case_pick_0721_0727", "ACT from scratch, bs32, 50k"),
+    "smolvla_film_0721_0727_prefix_mask1_cs": ("Chanho-Lee/lges_case_pick_0721_0727", "FiLM v2, cond=contact,seal (no fz) inject=prefix mask_force=1, 50k"),
+    "smolvla_naive_0729":               ("Chanho-Lee/lges_case_pick_0729", "vanilla SmolVLA, 50k, val-best selected"),
+    "smolvla_film_0729_prefix_mask1":   ("Chanho-Lee/lges_case_pick_0729", "FiLM v2 cond=contact,fz,seal prefix mask1 FZ_OFF=2.1, 50k, val-best"),
+    "smolvla_film_0729_prefix_mask0":   ("Chanho-Lee/lges_case_pick_0729", "FiLM v2 cond=contact,fz,seal prefix mask0 FZ_OFF=2.1 (ablation), 50k, val-best"),
+    "smolvla_film_0729_suffix_mask1":   ("Chanho-Lee/lges_case_pick_0729", "FiLM v2 cond=contact,fz,seal suffix mask1 FZ_OFF=2.1, 50k, val-best"),
+    "act_0729":                         ("Chanho-Lee/lges_case_pick_0729", "ACT from scratch, 50k, val-best"),
 }
 
 api = HfApi()
 for run in sys.argv[1:]:
-    src = VLA / "outputs" / run / "checkpoints" / "last" / "pretrained_model"
+    ck = VLA / "outputs" / run / "checkpoints"
+    which = "best" if (ck / "best").exists() else "last"   # val-best if selected (2026-07-30 policy)
+    src = ck / which / "pretrained_model"
     if not src.is_dir():
         print(f"[upload] SKIP {run}: {src} not found"); continue
+    print(f"[upload] {run}: using '{which}' checkpoint ({(ck / which).resolve().name})")
     ds, setting = META.get(run, ("?", "?"))
     repo = f"Chanho-Lee/{run}"
     api.create_repo(repo, repo_type="model", exist_ok=True)
