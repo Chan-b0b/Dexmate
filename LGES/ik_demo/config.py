@@ -223,6 +223,7 @@ VACUUM_SEAL_TIMEOUT_S: float = 8.0          # DI0 takes ~3-4s to latch
 SEAL_PRELIFT_M: float = 0.00               # relieve contact press before suction on
 RELEASE_PRELIFT_M: float = 0.014            # lift before the blow-off release
 PLACE_Z_BUFFER_M: float = 0.10              # accept a seat within this of the taught z
+CASE_PICK_RELEASE_WAIT_S: float = 2.0       # wait after release before returning home
 
 # ---------------------------------------------------------------------------
 # Task sequence / failure recovery (sequence.py)

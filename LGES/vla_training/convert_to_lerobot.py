@@ -157,6 +157,16 @@ def load_take(take_dir: Path, with_depth: bool, action_space: str = "delta"):
     frames = [json.loads(line) for line in (take_dir / "states.jsonl").open()]
     rgb_paths = sorted((take_dir / "head_rgb").glob("*.jpg"))
     depth_paths = sorted((take_dir / "head_depth").glob("*.png")) if with_depth else None
+    # A wrench read can race the take start (recorder logs wrench=null) — drop
+    # such leading frames with their images; a null mid-take is still fatal.
+    k = 0
+    while k < len(frames) and frames[k].get("wrench") is None:
+        k += 1
+    if k:
+        print(f"  {take_dir.name}: dropped {k} leading null-wrench frame(s)")
+        frames, rgb_paths = frames[k:], rgb_paths[k:]
+        if with_depth:
+            depth_paths = depth_paths[k:]
     n = min(len(frames), len(rgb_paths))
     if with_depth:
         n = min(n, len(depth_paths))

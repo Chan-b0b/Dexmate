@@ -54,9 +54,18 @@ LOG_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "logs")
 
 
 class LeftArmIK:
-    """Minimal Pink IK for the left arm only (chest-relative, torso stays put)."""
+    """Minimal Pink IK for one arm (chest-relative, torso stays put).
 
-    def __init__(self) -> None:
+    Historical name: with ``side="right"`` the class solves/monitors the
+    RIGHT arm — the ``left_*`` attribute and method names then refer to that
+    arm (kept so existing callers work unchanged)."""
+
+    def __init__(self, side: str = "left") -> None:
+        if side not in ("left", "right"):
+            raise ValueError(f"side must be 'left' or 'right', got {side!r}")
+        self.side = side
+        prefix = "L" if side == "left" else "R"
+        self.ee_frame = f"{prefix}_gripper_base"
         vega_dir = os.path.dirname(URDF_PATH)
         package_dir = os.path.dirname(os.path.dirname(os.path.dirname(vega_dir)))
         robot_pin = pin.RobotWrapper.BuildFromURDF(
@@ -68,26 +77,30 @@ class LeftArmIK:
         self.data = robot_pin.data
         self.configuration = pink.Configuration(self.model, self.data, pin.neutral(self.model))
 
-        # L_gripper_base relative to arm_center: the kinematic path contains only
-        # the 7 left-arm joints, so torso/right-arm joints stay out of the Jacobian.
+        # EE frame relative to arm_center: the kinematic path contains only
+        # the 7 monitored-arm joints, so torso/other-arm joints stay out of
+        # the Jacobian.
         self.left_task = RelativeFrameTask(
-            "L_gripper_base", root="arm_center",
+            self.ee_frame, root="arm_center",
             position_cost=2.0, orientation_cost=1.0,
         )
         self.posture_task = PostureTask(cost=1e-3)
 
         self.solver = "daqp" if "daqp" in qpsolvers.available_solvers else qpsolvers.available_solvers[0]
 
-        self.left_idx = [self.model.getJointId(f"L_arm_j{j+1}") for j in range(7)]
-        self.right_idx = [self.model.getJointId(f"R_arm_j{j+1}") for j in range(7)]
+        self._L_idx = [self.model.getJointId(f"L_arm_j{j+1}") for j in range(7)]
+        self._R_idx = [self.model.getJointId(f"R_arm_j{j+1}") for j in range(7)]
+        # Monitored arm (historical names — see class docstring).
+        self.left_idx = self._L_idx if side == "left" else self._R_idx
+        self.right_idx = self._R_idx
         self.torso_idx = [self.model.getJointId(f"torso_j{j+1}") for j in range(3)]
 
     def sync_from_robot(self, bot: Robot) -> None:
         """Overwrite the IK configuration with the live robot joint state."""
         q = self.configuration.q.copy()
-        for j, idx in enumerate(self.left_idx):
+        for j, idx in enumerate(self._L_idx):
             q[self.model.idx_qs[idx]] = bot.left_arm.get_joint_pos().astype(float)[j]
-        for j, idx in enumerate(self.right_idx):
+        for j, idx in enumerate(self._R_idx):
             q[self.model.idx_qs[idx]] = bot.right_arm.get_joint_pos().astype(float)[j]
         for j, idx in enumerate(self.torso_idx):
             q[self.model.idx_qs[idx]] = bot.torso.get_joint_pos().astype(float)[j]
@@ -95,10 +108,11 @@ class LeftArmIK:
         self.configuration.update(q)
 
     def left_ee_pose(self) -> tuple[np.ndarray, np.ndarray]:
-        """Return (position, rotation) of L_gripper_base in the arm_center frame."""
+        """Return (position, rotation) of the monitored arm's gripper base in
+        the arm_center frame."""
         pin.framesForwardKinematics(self.model, self.data, self.configuration.q)
         T_ac = self.data.oMf[self.model.getFrameId("arm_center")]
-        T_left = T_ac.inverse() * self.data.oMf[self.model.getFrameId("L_gripper_base")]
+        T_left = T_ac.inverse() * self.data.oMf[self.model.getFrameId(self.ee_frame)]
         return T_left.translation.copy(), T_left.rotation.copy()
 
     def solve_left(self, target_pos: np.ndarray, target_rot: np.ndarray) -> np.ndarray:

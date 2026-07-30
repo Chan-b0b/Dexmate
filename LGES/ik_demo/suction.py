@@ -16,6 +16,7 @@ projected onto base-vertical via the EE rotation — no external read_force.
 
 from __future__ import annotations
 
+import threading
 import time
 from dataclasses import dataclass
 
@@ -238,6 +239,11 @@ class SuctionMover(ArmMover):
         if reason != "at_floor":
             return PickResult(False, reason, z)
         suction_io.suction_on()
+        return self._seal_and_lift(rpy)
+
+    def _seal_and_lift(self, rpy) -> PickResult:
+        """Suction already ON at creep height: creep-seal, then lift to
+        transport on success (suction off on failure). Shared pick tail."""
         res = self._creep_seal(rpy, self._live_arm_q())
         if res.success:
             # Relieve the creep-contact press before lifting (mirrors place()'s
@@ -251,6 +257,66 @@ class SuctionMover(ArmMover):
         else:
             suction_io.suction_off()
         return res
+
+    def pick_retreat(self, pose, expected_z=None, touch_n=10.0,
+                     retreat_m=0.03) -> PickResult:
+        """pick() variant (VLA collection default): suction ON from creep_z as
+        usual, but instead of stopping at the seal, press on to ``touch_n``
+        (tared vertical N), RETREAT ``retreat_m`` straight up, and HOVER there
+        (no re-descent) until the vacuum grabs the case and seals — then lift
+        immediately. The hover height is referenced to the LIVE touch z (the
+        actual surface), not the pressed-in commanded z. A seal that latches
+        during the press skips the retreat and lifts right away; no seal
+        within VACUUM_SEAL_TIMEOUT_S fails the take ('vacuum_timeout')."""
+        ee_pos, rpy = self.taught_target(pose)
+        ez = float(ee_pos[2]) if expected_z is None else float(expected_z)
+        logger.info("[suction] pick_retreat: touch {:.1f}N -> +{:.0f}mm hover -> wait seal",
+                    touch_n, retreat_m * 1e3)
+        q_hover = self._approach_and_hover(ee_pos, rpy, ez)
+        if q_hover is None:
+            return PickResult(False, "unreachable")
+        suction_io.suction_off()
+        self.tare()  # empty cup, no contact
+        creep_z = ez + cfg.DESCENT_CREEP_GAP_M
+        _last_q, z, reason = self._descend_open(creep_z, rpy, q_hover, cfg.FORCE_HARD_LIMIT_N)
+        if reason != "at_floor":
+            return PickResult(False, reason, z)
+        suction_io.suction_on()
+        _q, z, reason = self._creep_to_force(rpy, self._live_arm_q(), touch_n)
+        if reason not in ("touched", "sealed"):
+            suction_io.suction_off()
+            return PickResult(False, reason, z)
+        if reason == "touched":
+            z = float(self.current_ee_pose()[0][2]) + retreat_m  # live surface + gap
+            q = self.move_ee_vertical(z, rpy)
+            if q is None:
+                suction_io.suction_off()
+                return PickResult(False, "unreachable", z)
+            # HOVER: hold here with suction on; the vacuum pulls the case film
+            # up into the cup. No re-descent (a creep-seal here reads as an
+            # up-down bounce and re-presses the case).
+            vac = suction_io.VacuumMonitor(); vac.start()
+            try:
+                sealed = False
+                deadline = time.time() + cfg.VACUUM_SEAL_TIMEOUT_S
+                while time.time() < deadline:
+                    self._arm.set_joint_pos_vel(q, np.zeros(len(q)))
+                    if vac.is_sealed():
+                        sealed = True
+                        logger.info("[suction] sealed from hover at ee_z={:.4f}", z)
+                        break
+                    time.sleep(0.05)
+            finally:
+                threading.Thread(target=vac.stop, daemon=True).start()
+            if not sealed:
+                suction_io.suction_off()
+                return PickResult(False, "vacuum_timeout", z)
+        # Sealed (mid-press or from hover) -> lift immediately.
+        if cfg.SEAL_PRELIFT_M > 0.0:
+            pos, _ = self.current_ee_pose()
+            self.move_ee_vertical(pos[2] + cfg.SEAL_PRELIFT_M, rpy)
+        self._lift_to_transport(rpy)
+        return PickResult(True, "sealed", z)
 
     def place(self, pose, expected_z=None) -> PickResult:
         """Hover above the seat, descend to contact within buffer, release.
@@ -396,7 +462,52 @@ class SuctionMover(ArmMover):
             _halt(prev_q)
             return PickResult(False, "max_descent", z)
         finally:
-            vac.stop()
+            # Off the critical path: stop() blocks ~1.3s on the socketio
+            # disconnect, which held the arm frozen between seal and lift
+            # (the post-seal dwell visible in every collected take).
+            threading.Thread(target=vac.stop, daemon=True).start()
+
+    def _creep_to_force(self, rpy, start_q, touch_n: float):
+        """Suction already ON. Creep straight down until the tared vertical
+        force exceeds ``touch_n`` ('touched'), the vacuum seals ('sealed'), or
+        abort ('force_limit'/'unreachable'/'max_descent'). Returns
+        (last_q, z, reason). pick_retreat's press leg — unlike _creep_seal it
+        does NOT hold and wait for the seal at contact."""
+        dt = 1.0 / float(cfg.CONTROL_HZ)
+        prev_q = np.asarray(start_q, dtype=float)
+        pos, _ = self.fk(prev_q)
+        x, y, z = float(pos[0]), float(pos[1]), float(pos[2])
+        descended = 0.0
+        vac = suction_io.VacuumMonitor(); vac.start()
+
+        def _halt(q):
+            self._arm.set_joint_pos_vel(np.asarray(q), np.zeros(len(q)))
+
+        try:
+            while descended < cfg.DESCENT_MAX_M:
+                if vac.is_sealed():
+                    _halt(prev_q)
+                    logger.info("[suction] sealed mid-press at ee_z={:.4f}", z)
+                    return prev_q, z, "sealed"
+                z_next = z - cfg.DESCENT_CREEP_SPEED_M_S * dt
+                sol = self.solve_pose([x, y, z_next], rpy, seed=prev_q, min_motion=True)
+                if sol.pos_err_m > cfg.REACH_TOL_M:
+                    _halt(prev_q); return prev_q, z, "unreachable"
+                self._arm.set_joint_pos_vel(sol.q, (sol.q - prev_q) / dt)
+                f = self.vertical_force()
+                if f is not None:
+                    if f > cfg.FORCE_HARD_LIMIT_N:
+                        _halt(sol.q); return sol.q, z_next, "force_limit"
+                    if f > touch_n:
+                        _halt(sol.q)
+                        logger.info("[suction] bounce touch {:.1f}N at ee_z={:.4f} — retreat", f, z_next)
+                        return sol.q, z_next, "touched"
+                descended += (z - z_next); z, prev_q = z_next, sol.q
+                time.sleep(dt)
+            _halt(prev_q)
+            return prev_q, z, "max_descent"
+        finally:
+            threading.Thread(target=vac.stop, daemon=True).start()  # see _creep_seal
 
     def _sweep_scan(self, ee_pos, rpy, scanner, case_center):
         """Raised a bit above the creep z — no tilt — raster x/y around the

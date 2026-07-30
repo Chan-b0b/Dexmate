@@ -98,11 +98,11 @@ SOFT_GRIP_CU_STOP: int = 3     # gCU counts (~10 mA each) treated as contact. Th
                                 # sensing): a single finger nudging the object aside
                                 # reads ~2-4 sustained, a BOTH-finger squeeze ramps
                                 # through 5+ — this sits between the two.
-SOFT_GRIP_CU_CONSECUTIVE: int = 3  # polls in a row >= CU_STOP before freezing:
+SOFT_GRIP_CU_CONSECUTIVE: int = 5  # polls in a row >= CU_STOP before freezing:
                                    # filters single-poll noise spikes and brief
                                    # one-finger grazes; the object self-centers while
                                    # the close continues until BOTH fingers load up
-SOFT_GRIP_SQUEEZE: int = 5      # counts commanded past the contact position (hold margin)
+SOFT_GRIP_SQUEEZE: int = 1      # counts commanded past the contact position (hold margin)
 SOFT_GRIP_TIMEOUT_S: float = 6.0
 
 # Release-to-contact: lower the held object onto the table on the wrist F/T
@@ -134,8 +134,8 @@ OBJECT_MASS_KG: float = 0.1
 # transfer measured j2 excess 1.21 A vs the suggested 1.137 A threshold, so
 # it gets headroom by default (raise OBJECT_MASS_KG instead for a tighter
 # guard). Layer A (impact) is payload-robust — keep at 1.0.
-COLLISION_ABS_SCALE: float = 1.3
-COLLISION_CHG_SCALE: float = 1.0
+COLLISION_ABS_SCALE: float = 1.5
+COLLISION_CHG_SCALE: float = 1.2
 
 # ---------------------------------------------------------------------------
 # Recording

@@ -10,6 +10,17 @@ Move the box / restack layers between cycles for position + depth diversity;
 the fresh detection each cycle re-centers everything (that variation is the
 point — it decorrelates contact depth from the habitual ee_z).
 
+Every cycle is a press-retreat pick (SuctionMover.pick_retreat): suction ON
+from creep_z as usual, press on to a per-episode random force (TOUCH_N_RANGE,
+tared vertical), retreat RETREAT_M_RANGE (per-episode random) above the
+touched surface, and HOVER there
+(no re-descent) until the vacuum grabs the case and seals — then lift
+immediately. Every take thus shows force-rise -> stop -> +dz before the seal
+— the retreat reflex press-hold-seal-only demos never show (policies trained
+without it keep descending on contact and over-press; see
+experiment_docs/EXPERIMENTS_CASE_PICK_0708.md §6.8). Sampled params land in
+meta.json under "retreat".
+
 Takes are written in the exact case_battery_demo recorder format, so the
 existing converter ingests them unchanged:
 
@@ -42,6 +53,7 @@ from __future__ import annotations
 
 import json
 import os
+import random
 import re
 import shutil
 import threading
@@ -69,6 +81,8 @@ from LGES.ik_demo.chassis_sequence import (detect, _center_from_det,  # noqa: E4
                                            descent_reachable, _view_park)
 
 RECORD_HZ = 15.0
+TOUCH_N_RANGE = (8.0, 15.0)      # press force before the retreat (tared vertical N)
+RETREAT_M_RANGE = (0.005, 0.01)  # contact-referenced suction-hover height (m)
 _KST = timezone(timedelta(hours=9))
 OUT_DIR = (Path(__file__).resolve().parents[1] / "recordings"
            / datetime.now(_KST).strftime("%Y%m%d"))
@@ -141,15 +155,14 @@ class EpisodeRecorder:
         self._cur: dict | None = None
         self._stop = threading.Event()
         self._thread: threading.Thread | None = None
-        # Resume episode numbering from the takes already in this date folder
-        # (a second run the same day must not restart at ep0001).
+        # Resume episode numbering AND the takes counter from the takes already
+        # in this date folder (a second run the same day must not restart at
+        # ep0001 / takes=0).
         done = self._out / PHASE
-        self._ep_index = max(
-            (int(m.group(1)) for p in (done.iterdir() if done.is_dir() else ())
-             if (m := re.search(r"_ep(\d+)_", p.name))),
-            default=0,
-        )
-        self.kept = 0
+        existing = [int(m.group(1)) for p in (done.iterdir() if done.is_dir() else ())
+                    if (m := re.search(r"_ep(\d+)_", p.name))]
+        self._ep_index = max(existing, default=0)
+        self.kept = len(existing)
         self._last_final: Path | None = None
 
     # -- lifecycle -----------------------------------------------------------
@@ -355,14 +368,21 @@ def _cycle(bot, mover: SuctionMover, rec: EpisodeRecorder, layers: int) -> None:
     # below for analysis. Worst-case creep, layer 1: ~10 cm, ~5 s.)
     exp_z = float(cfg.SOURCE_CASE_CENTER[2])
 
+    # Per-episode random press force and hover gap so neither is a single
+    # memorizable value (6-15N spans the FiLM contact channel's F0=6..
+    # saturation range, below FORCE_HARD_LIMIT_N=20).
+    touch_n = round(random.uniform(*TOUCH_N_RANGE), 2)
+    retreat_m = round(random.uniform(*RETREAT_M_RANGE), 4)
     rec.begin(tag=f"L{layers}", extra={
         "detected_center_xyzyaw": [float(v) for v in center],
         "top_face_z": float(det.top_face_z),
         "detect_conf": float(det.conf),
         "layers_remaining": int(layers),
         "expected_ee_z": float(exp_z),
+        "retreat": {"touch_n": touch_n, "retreat_m": retreat_m},
     })
-    res = mover.pick(pick_pose, expected_z=exp_z)
+    res = mover.pick_retreat(pick_pose, expected_z=exp_z,
+                             touch_n=touch_n, retreat_m=retreat_m)
     rec.end(success=bool(res.success),
             extra={"pick_reason": res.reason,
                    "contact_ee_z": None if res.contact_ee_z is None else float(res.contact_ee_z)})

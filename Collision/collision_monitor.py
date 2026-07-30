@@ -139,7 +139,8 @@ class CollisionMonitor:
     def __init__(
         self,
         bot,
-        calib_path: str = CALIB_PATH,
+        side: str = "left",
+        calib_path: str | None = None,
         thresholds: np.ndarray | float | None = None,
         change_thresholds: np.ndarray | float | None = None,
         change_window: float | None = None,
@@ -153,8 +154,15 @@ class CollisionMonitor:
         on_collision: Callable[[np.ndarray], None] | None = None,
     ) -> None:
         self._bot = bot
+        self._side = side
+        if calib_path is None:
+            calib_path = os.path.join(
+                os.path.dirname(os.path.abspath(__file__)), f"calibration_{side}.json")
         with open(calib_path) as f:
             calib = json.load(f)
+        if calib.get("side", "left") != side:
+            logger.warning(f"CollisionMonitor: calibration file says side="
+                           f"{calib.get('side', 'left')!r} but monitoring {side!r}")
         self._use_torque = calib["signal"] == "torque"
         self._v_eps = float(calib.get("v_eps", 0.03))
         self._m = float(calib["payload_mass_kg"])
@@ -192,7 +200,7 @@ class CollisionMonitor:
         # Gravity model: bare URDF + (+1 kg payload basis) — same construction
         # as the calibration script, so predictions match it exactly.
         from calibrate_gravity_model import build_payload_model
-        ik = LeftArmIK()
+        ik = LeftArmIK(side)
         self._model = ik.model
         self._data_u = self._model.createData()
         self._model_p, self._data_p = build_payload_model(ik)
@@ -217,6 +225,7 @@ class CollisionMonitor:
         self._running = False
         self._triggered = False
         self._retaring = False
+        self._suppressed = False
         self._streak_abs = 0
         self._streak_chg = 0
         # History of (res, v) for the change layer.
@@ -275,6 +284,17 @@ class CollisionMonitor:
     def last_change_excess(self) -> np.ndarray:
         """Layer A (change) excess at the most recent poll."""
         return self._last_change_excess.copy()
+
+    def suppress(self, flag: bool) -> None:
+        """Disable triggering during INTENTIONAL contact (gripper close,
+        place-until-contact). On resume the change-layer history and streaks
+        are cleared so the contact-induced residual step is not read as an
+        impact. Release the contact force before resuming."""
+        self._suppressed = bool(flag)
+        if not flag:
+            self._hist.clear()
+            self._streak_abs = 0
+            self._streak_chg = 0
 
     def set_extra_payload(self, mass_kg: float) -> None:
         """Set the grasped-object mass [kg] directly (0 after release)."""
@@ -383,7 +403,7 @@ class CollisionMonitor:
     # ── internal ──────────────────────────────────────────────────────────────
 
     def _read(self) -> tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
-        arm = self._bot.left_arm
+        arm = getattr(self._bot, f"{self._side}_arm")
         left_q = arm.get_joint_pos().astype(float)
         torso_q = self._bot.torso.get_joint_pos().astype(float)
         v = arm.get_joint_vel().astype(float)
@@ -402,8 +422,8 @@ class CollisionMonitor:
     def _check(self) -> None:
         if self._triggered:
             return  # already stopped; wait for reset()
-        if self._retaring:
-            return  # detection suspended during payload re-estimation
+        if self._retaring or self._suppressed:
+            return  # detection suspended (payload re-estimation / intentional contact)
 
         left_q, torso_q, v, y = self._read()
         pred = self._predict(left_q, torso_q, v)
@@ -450,7 +470,7 @@ class CollisionMonitor:
         self._triggered = True
         self.trigger_info = {"layer": layer, "excess": excess.copy()}
         logger.warning(
-            f"CollisionMonitor: COLLISION on left arm ({layer} layer)! "
+            f"CollisionMonitor: COLLISION on {self._side} arm ({layer} layer)! "
             f"joints={np.where(excess > thr)[0] + 1}  "
             f"excess={np.round(excess, 3)}  thresholds={np.round(thr, 3)}"
         )
@@ -478,7 +498,7 @@ class CollisionMonitor:
 
 # ── standalone entry point ─────────────────────────────────────────────────────
 
-def main(dry_run: bool = False, print_hz: float = 5.0) -> None:
+def main(dry_run: bool = False, print_hz: float = 5.0, side: str = "left") -> None:
     """Run the monitor standalone until Ctrl+C.
 
     Args:
@@ -486,13 +506,14 @@ def main(dry_run: bool = False, print_hz: float = 5.0) -> None:
             residuals of both layers and their running peaks (useful for
             threshold tuning: push the arm and watch what a contact produces).
         print_hz: Print rate in dry-run mode.
+        side: Which arm to monitor (needs calibration_<side>.json).
     """
     from dexcontrol.robot import Robot
 
     check_environment()
     logger.info("Connecting to robot...")
     bot = Robot()
-    monitor = CollisionMonitor(bot, freeze_on_trigger=not dry_run)
+    monitor = CollisionMonitor(bot, side=side, freeze_on_trigger=not dry_run)
 
     try:
         if dry_run:

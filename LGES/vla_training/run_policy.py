@@ -1152,6 +1152,10 @@ def run_live(checkpoint: Path, tasks: list[str], *, commit: bool,
 def main():
     ap = argparse.ArgumentParser(description=__doc__)
     ap.add_argument("--checkpoint", type=Path, default=None)
+    ap.add_argument("--revision", default=None,
+                    help="HF Hub branch/tag of a repo-id --checkpoint (e.g. 'last', 'val_best'): "
+                         "snapshot-downloads that revision and loads it as a local dir "
+                         "(from_pretrained alone always fetches the default branch)")
     ap.add_argument("--self-test", type=Path, metavar="TAKE_DIR",
                     help="offline validation against a recorded take (no robot)")
     ap.add_argument("--dry-run", action="store_true",
@@ -1206,6 +1210,13 @@ def main():
     ap.add_argument("--descend-rate", type=float, default=0.006,
                     help="min downward z step (m/tick) the contact-gate enforces (default 0.006)")
     args = ap.parse_args()
+
+    if args.revision:
+        if args.checkpoint is None or args.checkpoint.exists():
+            ap.error("--revision needs --checkpoint <hub repo id> (not a local path)")
+        from huggingface_hub import snapshot_download
+        args.checkpoint = Path(snapshot_download(str(args.checkpoint), revision=args.revision))
+        print(f"[policy] revision '{args.revision}' -> {args.checkpoint}")
 
     if args.self_test:
         self_test(args.self_test, args.checkpoint or latest_checkpoint(), film=args.film)

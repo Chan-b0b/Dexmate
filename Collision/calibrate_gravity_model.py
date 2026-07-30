@@ -60,6 +60,10 @@ SAMPLE_DT = 0.02
 V_EPS = 0.03
 CALIB_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), "calibration_left.json")
 
+
+def calib_path_for(side: str) -> str:
+    return os.path.join(os.path.dirname(os.path.abspath(__file__)), f"calibration_{side}.json")
+
 # Designated calibration poses: joint-space offsets [rad] from the start pose,
 # clipped to joint limits before execution. Estimating the payload mass and the
 # per-joint torque-to-signal gains needs poses where the gravity torque of each
@@ -96,14 +100,15 @@ CALIB_POSE_OFFSETS = [
 # ── model helpers ─────────────────────────────────────────────────────────────
 
 def build_payload_model(ik: LeftArmIK) -> tuple:
-    """Return (model, data) equal to the URDF plus 1 kg point mass at L_gripper_base.
+    """Return (model, data) equal to the URDF plus 1 kg point mass at the
+    monitored arm's gripper base.
 
     Used as the linear payload basis: gravity(q; m) = gravity_urdf(q) + m * phi(q)
     with phi(q) = gravity_1kg(q) - gravity_urdf(q).
     """
-    payload = LeftArmIK()  # fresh URDF load so ik.model stays untouched
+    payload = LeftArmIK(ik.side)  # fresh URDF load so ik.model stays untouched
     model = payload.model
-    fid = model.getFrameId("L_gripper_base")
+    fid = model.getFrameId(ik.ee_frame)
     frame = model.frames[fid]
     jid = frame.parentJoint if hasattr(frame, "parentJoint") else frame.parent
     extra = pin.Inertia(1.0, frame.placement.translation.copy(), np.zeros((3, 3)))
@@ -133,10 +138,15 @@ def q_full_from_left(ik: LeftArmIK, left_q: np.ndarray) -> np.ndarray:
 
 
 def make_pose_targets(ik: LeftArmIK, q_home: np.ndarray, scale: float) -> list[np.ndarray]:
-    """Designated calibration poses as absolute left-arm joint targets, limit-clipped."""
+    """Designated calibration poses as absolute arm joint targets, limit-clipped.
+
+    For side="right" the offsets are mirrored: the URDF flips the axis of
+    j1/j6 on the right arm (values keep their sign) while j2/j3/j5/j7 share
+    the axis with mirrored limits (values flip sign); j4 is identical."""
+    signs = np.ones(7) if ik.side == "left" else np.array([+1, -1, -1, +1, -1, +1, -1], dtype=float)
     lo = np.array([ik.model.lowerPositionLimit[ik.model.idx_qs[i]] for i in ik.left_idx]) + 0.05
     hi = np.array([ik.model.upperPositionLimit[ik.model.idx_qs[i]] for i in ik.left_idx]) - 0.05
-    return [np.clip(q_home + scale * off, lo, hi) for off in CALIB_POSE_OFFSETS]
+    return [np.clip(q_home + scale * signs * off, lo, hi) for off in CALIB_POSE_OFFSETS]
 
 
 def preview_pose_targets(ik: LeftArmIK, q_home: np.ndarray, targets: list[np.ndarray]) -> None:
@@ -263,13 +273,14 @@ def read_signal(arm, use_torque: bool) -> np.ndarray:
     return (arm.get_joint_torque() if use_torque else arm.get_joint_current()).astype(float)
 
 
-def move_left(bot: Robot, q_from: np.ndarray, q_to: np.ndarray, duration: float) -> None:
-    """Smoothstep the left arm between two joint configurations."""
+def move_left(bot: Robot, q_from: np.ndarray, q_to: np.ndarray, duration: float,
+              side: str = "left") -> None:
+    """Smoothstep the calibrated arm between two joint configurations."""
     n_steps = max(1, int(duration / CONTROL_DT))
     for step in range(n_steps):
         t = (step + 1) / n_steps
         alpha = t * t * (3 - 2 * t)
-        bot.set_joint_pos({"left_arm": q_from + alpha * (q_to - q_from)})
+        bot.set_joint_pos({f"{side}_arm": q_from + alpha * (q_to - q_from)})
         time.sleep(CONTROL_DT)
 
 
@@ -283,17 +294,19 @@ def collect_motion_stroke(
     seg: int,
     t0: float,
     store: dict,
+    side: str = "left",
 ) -> None:
     """Smoothstep one stroke while sampling (q, v, signal) every control tick."""
+    arm = getattr(bot, f"{side}_arm")
     n_steps = max(1, int(duration / CONTROL_DT))
     for step in range(n_steps):
         t = (step + 1) / n_steps
         alpha = t * t * (3 - 2 * t)
-        bot.set_joint_pos({"left_arm": q_from + alpha * (q_to - q_from)})
+        bot.set_joint_pos({f"{side}_arm": q_from + alpha * (q_to - q_from)})
 
-        q = bot.left_arm.get_joint_pos().astype(float)
-        vel = bot.left_arm.get_joint_vel().astype(float)
-        y = read_signal(bot.left_arm, use_torque)
+        q = arm.get_joint_pos().astype(float)
+        vel = arm.get_joint_vel().astype(float)
+        y = read_signal(arm, use_torque)
         store["q"].append(q)
         store["v"].append(vel)
         store["y"].append(y)
@@ -309,17 +322,21 @@ def collect_motion_stroke(
 def main(
     pose_scale: float = 1.0,
     amp_x: float = 0.10,
-    amp_y: float = 0.15,
+    amp_y: float = 0.10,
     amp_z: float = 0.10,
     n_validate: int = 8,
     joint_speed: float = 0.5,
     stroke_duration: float = 2.5,
     settle: float = 0.3,
     m_max: float = 3.0,
+    side: str = "left",
 ) -> None:
     """Identify EE payload mass, per-joint gains and friction from motion data.
 
     Args:
+        side: Which arm to calibrate ("left" or "right"). Right-arm pose
+            offsets are mirrored automatically; output goes to
+            calibration_<side>.json.
         pose_scale: Scale factor on the designated CALIB_POSE_OFFSETS
             (0.5 = half-size sweep for a cautious first run).
         amp_x: Validation random-stroke range [m] forward/back — match the
@@ -341,14 +358,14 @@ def main(
     check_environment()
 
     logger.info("Loading robot model (URDF + payload basis)...")
-    ik = LeftArmIK()
+    ik = LeftArmIK(side)
     model_p, data_p = build_payload_model(ik)
     data_u = ik.model.createData()
     vidx = [ik.model.idx_vs[idx] for idx in ik.left_idx]
 
     n_strokes = 2 * (len(CALIB_POSE_OFFSETS) - 1)
     logger.warning("=" * 60)
-    logger.warning(f"The LEFT arm will sweep {len(CALIB_POSE_OFFSETS)} designated poses")
+    logger.warning(f"The {side.upper()} arm will sweep {len(CALIB_POSE_OFFSETS)} designated poses")
     logger.warning(f"forward and back ({n_strokes} strokes, ~{n_strokes * (stroke_duration + settle):.0f} s, "
                    f"scale {pose_scale:.2f}), then do one validation wiggle.")
     logger.warning("Clear the arm's workspace; keep the e-stop within reach.")
@@ -361,17 +378,18 @@ def main(
     bot = Robot()
 
     try:
-        use_torque = torque_available(bot.left_arm)
+        cal_arm = getattr(bot, f"{side}_arm")
+        use_torque = torque_available(cal_arm)
         signal_name = "torque [Nm]" if use_torque else "current [A]"
         logger.info(f"Firmware torque readback: {'YES — fitting on torque' if use_torque else 'no — fitting on current'}")
         try:
-            brake = bot.left_arm.get_brake_status()
+            brake = cal_arm.get_brake_status()
             logger.info(f"Brake status: enabled={brake.get('enabled')} joints={brake.get('joints')}")
         except Exception as exc:
             logger.info(f"Brake status query unavailable ({exc}) — the moving-sample filter covers this.")
 
         ik.sync_from_robot(bot)
-        q_home = bot.left_arm.get_joint_pos().astype(float)
+        q_home = cal_arm.get_joint_pos().astype(float)
         pose_targets = make_pose_targets(ik, q_home, pose_scale)
 
         # FK preview of every designated pose, then final go/no-go
@@ -403,7 +421,7 @@ def main(
                 logger.info(f"Stroke {i+1}/{len(sequence)}")
                 collect_motion_stroke(
                     bot, use_torque, q_prev, q_target, stroke_duration,
-                    writer, i, t0, store,
+                    writer, i, t0, store, side=side,
                 )
                 q_prev = q_target
                 time.sleep(settle)
@@ -411,7 +429,7 @@ def main(
         logger.info(f"Motion samples saved to {motion_path}  ({len(store['q'])} ticks)")
 
         logger.info("Returning to start pose...")
-        move_left(bot, q_prev, q_home, stroke_duration)
+        move_left(bot, q_prev, q_home, stroke_duration, side=side)
         time.sleep(settle)
 
         # ── Phase 2: fit ──────────────────────────────────────────────────────
@@ -487,11 +505,11 @@ def main(
                 for step in range(n_steps):
                     t = (step + 1) / n_steps
                     alpha = t * t * (3 - 2 * t)
-                    bot.set_joint_pos({"left_arm": q_prev + alpha * (q_target - q_prev)})
+                    bot.set_joint_pos({f"{side}_arm": q_prev + alpha * (q_target - q_prev)})
 
-                    q_meas = bot.left_arm.get_joint_pos().astype(float)
-                    v_meas = bot.left_arm.get_joint_vel().astype(float)
-                    y_meas = read_signal(bot.left_arm, use_torque)
+                    q_meas = cal_arm.get_joint_pos().astype(float)
+                    v_meas = cal_arm.get_joint_vel().astype(float)
+                    y_meas = read_signal(cal_arm, use_torque)
                     g_u, ph = gravity_basis(ik, model_p, data_p, data_u, q_full_from_left(ik, q_meas), vidx)
                     pred = predict_signal(k, c, d, b, m, g_u, ph, v_meas)
                     res = np.abs(y_meas - pred)
@@ -553,11 +571,13 @@ def main(
             "validation_amps": [amp_x, amp_y, amp_z],
             "validation_joint_speed": joint_speed,
             "urdf": URDF_PATH,
+            "side": side,
             "timestamp": ts,
         }
-        with open(CALIB_PATH, "w") as f:
+        out_path = calib_path_for(side)
+        with open(out_path, "w") as f:
             json.dump(calib, f, indent=2)
-        logger.info(f"Calibration saved to {CALIB_PATH}")
+        logger.info(f"Calibration saved to {out_path}")
         logger.info(f"Validation log:      {validate_path}")
 
     except KeyboardInterrupt:

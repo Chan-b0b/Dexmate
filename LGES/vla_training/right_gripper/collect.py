@@ -566,10 +566,10 @@ def _home_via_lift(mover: ArmMover) -> None:
     entirely when the EE is already at/above it."""
     pos, rpy = mover.current_ee_pose()
     home_z = float(mover.fk(mover._home_seed)[0][2])
-    target_z = min(home_z, float(pos[2]) + rcfg.HOME_LIFT_DZ_M)
-    if target_z > float(pos[2]) + 0.01:
-        if mover.move_ee_vertical(target_z, tuple(rpy)) is None:
-            logger.warning("[home] lift stalled — homing from the current pose")
+    # target_z = min(home_z, float(pos[2]) + rcfg.HOME_LIFT_DZ_M)
+    # if target_z > float(pos[2]) + 0.01:
+    #     if mover.move_ee_vertical(target_z, tuple(rpy)) is None:
+    #         logger.warning("[home] lift stalled — homing from the current pose")
     mover.move_joints(mover._home_seed)
 
 

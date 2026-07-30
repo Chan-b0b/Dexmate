@@ -419,16 +419,17 @@ def main():
     if result is None or not result["poses"]:
         print("no probe poses captured")
         return
-    args.output_dir.mkdir(parents=True, exist_ok=True)
+    save_dir = args.output_dir / Path(checkpoint).name
+    save_dir.mkdir(parents=True, exist_ok=True)
     stem = time.strftime("%Y%m%d-%H%M%S") + "_live_film_authority"
-    json_path = args.output_dir / f"{stem}.json"
-    png_path = args.output_dir / f"{stem}.png"
+    json_path = save_dir / f"{stem}.json"
+    png_path = save_dir / f"{stem}.png"
     json_path.write_text(json.dumps(result, indent=2))
     _plot(result, png_path)
     pose_pngs = []
     for pose in result["poses"]:
         clearance_label = f"{pose['clearance_m'] * 100:g}".replace(".", "p")
-        pose_path = args.output_dir / f"{stem}_{clearance_label}cm.png"
+        pose_path = save_dir / f"{stem}_{clearance_label}cm.png"
         _plot_pose(pose, pose_path, action_space=result.get("action_space", "delta"))
         pose_pngs.append(pose_path)
     print(f"\nresult: {json_path}\nsummary: {png_path}")
@@ -440,7 +441,7 @@ if __name__ == "__main__":
     main()
 """
 FILM_COND=contact,fz,seal FILM_INJECT=prefix FILM_MASK_FORCE=1 \
-FILM_F0=6 FILM_TAU=4 FILM_FZ_TAU=5 \
+FILM_F0=6 FILM_TAU=4 FILM_FZ_TAU=-2.6 \
 FILM_DATASET=lges_case_pick_0721 \
 python probe_film_authority_live.py --go \
   --clearances 0.05 0.04 0.03 0.02 0.01 0.00 -0.01 -0.02 -0.03 -0.04\
