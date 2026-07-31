@@ -74,7 +74,9 @@ def main():
     for ck in ckpts:
         model_dir = ck / "pretrained_model"
         policy = PolicyCls.from_pretrained(model_dir)
-        policy.eval()
+        # ACT's forward needs the VAE encoder, which only runs in train mode
+        # (eval-mode forward crashes on None latents). Grads stay off either way.
+        policy.train() if ptype == "act" else policy.eval()
         pre, _ = make_pre_post_processors(
             policy_cfg=policy.config, pretrained_path=str(model_dir),
             preprocessor_overrides={"device_processor": {"device": str(policy.config.device)}})

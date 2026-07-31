@@ -282,6 +282,34 @@ ACT. FiLM-pi0.5 포팅(film_contact_pi05.py, suffix 전용, 스모크 통과) �
 + 베이스라인 `smolvla_naive_0721_0727`, 여유 되면 pi05/ACT/XVLA 순.
 **핵심 테스트: 학습에 없는 중간 layer(2–4) 보간.**
 
+## 6.9 0729 라운드 — val split 도입, 과적합 발견, best-vs-last (2026-07-29~31)
+
+데이터: `Chanho-Lee/lges_case_pick_0729` (train 100 eps/19,446f) + `_0729_val` (6 eps/1,169f).
+힘 프로파일: hover 4.6N / sealed 6.6N (분리 좁음 — 수집 시 press 약했던 듯), **FZ_MEDIAN=2.1**
+→ 이 라운드 체크포인트는 **배포 시 `FILM_FZ_OFF=2.1` 필수** (코드 기본 2.6과 다름).
+새 정책 적용: save_freq=5000(=5k 간격 val 곡선), `select_best_ckpt.py`로 val-best 선정,
+**HF 업로드 = main 브랜치(val-best) + `last` 브랜치(50k)**, last+best만 로컬 유지.
+
+**핵심 발견 ① — VLA 파인튜닝은 5–15k 이후 과적합**: val loss 최저점 naive=10k(0.151),
+prefix_mask1=5k(0.146), prefix_mask0=15k; 이후 50k까지 단조 상승(+50%). train loss만 보던
+이전 라운드들의 50k 체크포인트는 전부 과적합 상태였을 가능성 높음. (ACT는 예외 —
+from-scratch 소형이라 50k까지 val 하락, best=50k, 0.11.)
+
+**핵심 발견 ② — best가 권한도 우위** (val 에피소드 probe, stats-root=train):
+| run | best std/현실 | last(50k) std/현실 |
+|---|---|---|
+| prefix_mask1 | **76% / 7%** (5k) | 54% / 8% |
+| suffix_mask1 | 60% / 10% (5k) | 42% / 1% |
+| prefix_mask0 | 7% / 3% | 8% / 4% |
+
+과적합 구간에서 std 권한도 함께 하락 → **val-best 배포가 loss·권한 모두 정답**.
+mask0 붕괴 3번째 데이터셋에서 재재현. held-out 재-probe(0721_0727 ckpt를 0729_val로)에서도
+권한 일반화 확인(§probes/0727val_*): pm1 std 77%, mask0 9% — 순위 구조 유지.
+현실-접촉 상쇄율이 0729에서 낮은 것(7–10%)은 힘 분리 협소와 일관 — 다음 수집 때 press 강화 권장.
+
+**로봇 평가 추천**: `Chanho-Lee/smolvla_film_0729_prefix_mask1` (main=5k best) vs
+`smolvla_naive_0729`, env `FILM_FZ_OFF=2.1`; 필요 시 `revision="last"`로 50k와 A/B.
+
 ## 7. 앞으로 진행할 실험 (PROGRESS.md S1–S5 매핑)
 
 | 우선순위 | 실험 | 내용 | 필요 자원 |
