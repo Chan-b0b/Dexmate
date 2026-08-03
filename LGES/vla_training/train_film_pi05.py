@@ -11,6 +11,7 @@ import sys
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
+import train_pi05  # noqa: E402,F401  registers the relative_actions_processor shim
 import film_contact_pi05 as fcp  # noqa: E402
 
 _variant = os.environ.get("FILM_VARIANT", "v2")

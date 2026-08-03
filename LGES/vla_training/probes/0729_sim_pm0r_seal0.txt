@@ -1,0 +1,25 @@
+`torch_dtype` is deprecated! Use `dtype` instead!
+[sim] FiLM cond=('contact', 'fmag', 'fz', 'seal') inject=prefix mask_force=False  ckpt=/home/maverick/Dexmate/LGES/vla_training/outputs/smolvla_film_0729_prefix_mask0_recal/checkpoints/best
+[sim] stiffness=1.0N/mm  f_base=6.8N  seal_depth=nevermm  max_steps=40
+Loading  HuggingFaceTB/SmolVLM2-500M-Video-Instruct weights ...
+Loading weights:   0%|          | 0/489 [00:00<?, ?it/s]Loading weights:  89%|████████▉ | 437/489 [00:00<00:00, 4369.12it/s]Loading weights: 100%|██████████| 489/489 [00:00<00:00, 4520.33it/s]
+Reducing the number of VLM layers to 16 ...
+Loading weights from local directory
+[sim] contact direction=[0.19 0.82 0.53]  torque=[ 0.02 -0.48 -0.46]
+  ep0 (z=0.763): STOP    steps=22 depth= 10.6mm  |F|end=17.4N  sealed=False
+        first steps [|F|/dz(mm)]: 6.8N/-0.7  7.5N/-0.8  8.3N/-0.7  9.0N/-0.8  9.8N/-0.8  10.6N/-0.9  11.5N/-1.0  12.5N/-1.0
+  ep1 (z=0.765): STOP    steps=33 depth= 12.1mm  |F|end=18.9N  sealed=False
+        first steps [|F|/dz(mm)]: 6.8N/-0.7  7.5N/-0.8  8.3N/-1.0  9.3N/-1.1  10.4N/-1.2  11.6N/-1.2  12.7N/-1.1  13.9N/-1.0
+  ep2 (z=0.762): STOP    steps=31 depth= 11.6mm  |F|end=18.4N  sealed=False
+        first steps [|F|/dz(mm)]: 6.8N/-0.6  7.4N/-0.8  8.2N/-0.9  9.1N/-0.9  10.0N/-0.9  10.9N/-1.0  11.8N/-1.0  12.8N/-0.9
+  ep3 (z=0.818): STOP    steps=24 depth=  8.7mm  |F|end=15.5N  sealed=False
+        first steps [|F|/dz(mm)]: 6.8N/-0.6  7.4N/-0.8  8.2N/-0.8  9.0N/-0.8  9.9N/-0.8  10.7N/-0.8  11.5N/-0.7  12.2N/-0.6
+  ep4 (z=0.817): STOP    steps=33 depth= 10.8mm  |F|end=17.6N  sealed=False
+        first steps [|F|/dz(mm)]: 6.8N/-0.6  7.4N/-0.7  8.2N/-0.7  8.9N/-0.7  9.6N/-0.8  10.4N/-0.9  11.3N/-1.0  12.3N/-1.0
+  ep5 (z=0.817): STOP    steps=27 depth= 10.2mm  |F|end=17.0N  sealed=False
+        first steps [|F|/dz(mm)]: 6.8N/-0.5  7.3N/-0.7  8.0N/-0.7  8.7N/-0.7  9.3N/-0.7  10.0N/-0.7  10.7N/-0.8  11.5N/-0.8
+
+── summary ─────────────────────────────────────────────────────────
+  stopped 6/6 episodes   penetration depth mean=10.7mm  max=12.1mm
+    z~0.763: stopped 3/3  depth mean=11.4mm
+    z~0.817: stopped 3/3  depth mean=9.9mm

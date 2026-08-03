@@ -1,0 +1,56 @@
+`torch_dtype` is deprecated! Use `dtype` instead!
+[probe] NAIVE checkpoint (no FiLM)  ckpt=/home/maverick/Dexmate/LGES/vla_training/outputs/smolvla_naive_0729/checkpoints/best
+Loading  HuggingFaceTB/SmolVLM2-500M-Video-Instruct weights ...
+Loading weights:   0%|          | 0/489 [00:00<?, ?it/s]Loading weights:  73%|███████▎  | 356/489 [00:00<00:00, 3544.48it/s]Loading weights: 100%|██████████| 489/489 [00:00<00:00, 3755.08it/s]
+Reducing the number of VLM layers to 16 ...
+Loading weights from local directory
+  episodes: [0, 1, 2]
+  swap wrench (median over 18 FIRST-CONTACT frames, fz>3.0N trigger, all episodes): [ 1.32  5.63  3.65  0.02 -0.48 -0.46]  |F|=6.8N  seal stays 0  [--swap firstcontact]
+  ep0: "pick up the case with the suction cup"  frames 0..218  descent=143  first-contact@+141  seal@+180
+  ep1: "pick up the case with the suction cup"  frames 218..438  descent=144  first-contact@+141  seal@+181
+  ep2: "pick up the case with the suction cup"  frames 438..649  descent=135  first-contact@+136  seal@+179
+
+   frame    ee_z   |F|N |  expert  dz(own) dz(swap)    dzRAW   dzFiLM |    dTot    dRaw   dFiLM
+  ---------------------------------------------------------------------------------------------
+       0   1.098    5.0 |    0.2m    -1.8m    -1.0m     nanm     nanm |    0.8m    nanm    nanm
+      16   1.185    3.1 |  -10.8m    -9.4m   -10.4m     nanm     nanm |   -1.0m    nanm    nanm
+      32   1.063    5.2 |   -0.0m    -5.0m    -5.1m     nanm     nanm |   -0.1m    nanm    nanm
+      48   1.034    5.3 |  -10.0m   -13.0m    -1.6m     nanm     nanm |   11.3m    nanm    nanm
+      64   0.873    5.5 |   -3.7m    -6.4m    -2.5m     nanm     nanm |    3.8m    nanm    nanm
+      80   0.855    5.2 |   -1.8m    -1.8m    -0.1m     nanm     nanm |    1.7m    nanm    nanm
+      96   0.830    5.2 |   -1.6m    -1.5m     0.1m     nanm     nanm |    1.6m    nanm    nanm
+     112   0.805    5.3 |   -1.4m    -1.7m     0.0m     nanm     nanm |    1.7m    nanm    nanm
+     128   0.782    5.0 |   -1.2m    -1.8m     0.2m     nanm     nanm |    1.9m    nanm    nanm
+     219   1.067    5.4 |    0.3m    -2.0m    -0.8m     nanm     nanm |    1.2m    nanm    nanm
+     236   1.150    4.0 |   -4.1m    -7.3m    -7.4m     nanm     nanm |   -0.1m    nanm    nanm
+     252   1.065    5.2 |   -2.6m    -5.2m    -3.8m     nanm     nanm |    1.4m    nanm    nanm
+     268   1.038    4.8 |   -9.6m   -11.6m    -9.0m     nanm     nanm |    2.6m    nanm    nanm
+     284   0.877    5.0 |   -7.4m   -10.1m    -4.3m     nanm     nanm |    5.8m    nanm    nanm
+     301   0.853    4.7 |   -1.2m    -1.2m    -0.1m     nanm     nanm |    1.1m    nanm    nanm
+     317   0.828    5.1 |   -1.4m    -1.7m     0.1m     nanm     nanm |    1.8m    nanm    nanm
+     333   0.804    5.1 |   -2.0m    -1.7m     0.1m     nanm     nanm |    1.8m    nanm    nanm
+     349   0.780    5.2 |   -1.8m    -1.5m     0.1m     nanm     nanm |    1.6m    nanm    nanm
+     439   1.067    5.3 |    1.2m    -2.0m    -2.4m     nanm     nanm |   -0.5m    nanm    nanm
+     457   1.118    4.8 |   -2.5m    -3.5m    -6.8m     nanm     nanm |   -3.3m    nanm    nanm
+     473   1.063    5.2 |    0.0m    -4.3m    -4.6m     nanm     nanm |   -0.3m    nanm    nanm
+     489   0.954    4.4 |  -10.0m   -12.9m   -11.7m     nanm     nanm |    1.2m    nanm    nanm
+     505   0.859    5.1 |    0.0m    -2.8m     0.1m     nanm     nanm |    2.9m    nanm    nanm
+     521   0.842    5.2 |   -1.9m    -1.6m    -0.1m     nanm     nanm |    1.4m    nanm    nanm
+     537   0.818    5.2 |   -1.6m    -1.7m    -0.1m     nanm     nanm |    1.6m    nanm    nanm
+     553   0.794    5.0 |   -1.5m    -1.7m     0.0m     nanm     nanm |    1.7m    nanm    nanm
+     569   0.769    5.1 |   -1.4m    -1.6m     0.1m     nanm     nanm |    1.7m    nanm    nanm
+  ---------------------------------------------------------------------------------------------
+
+  decomposition over 422 descent frames (d* = dz(cell) - dz(own,own)):
+    ALL frames                  : n=422  dz(own)= -3.56mm  dTotal= +1.57mm
+    approach/hover dz(own)>=-3mm: n=264  dz(own)= -0.67mm  dTotal= +1.36mm
+    COMMITTED desc dz(own)< -3mm: n=158  dz(own)= -8.38mm  dTotal= +1.92mm
+
+  time-to-contact split (pooled over 3 episode(s), per-episode first-contact detection):
+    >=4s before contact (early) : n=238  dz(own)= -5.29mm  dTotal= +1.55mm
+    2-4s before contact         : n= 89  dz(own)= -1.61mm  dTotal= +1.60mm
+    <2s before contact (late)   : n= 82  dz(own)= -1.65mm  dTotal= +1.75mm
+    after contact (press phase) : n= 13  dz(own)= +2.80mm  dTotal= +0.68mm
+
+── verdict ─────────────────────────────────────────────────────────
+  raw-state authority (naive): swapping wrench+seal to contact values cancels 23% of the committed descent (dz -8.4 -> -6.5mm).

@@ -1,0 +1,61 @@
+`torch_dtype` is deprecated! Use `dtype` instead!
+[probe] FiLM cond=('contact', 'fmag', 'fz', 'seal') inject=prefix mask_force=True  ckpt=/home/maverick/Dexmate/LGES/vla_training/outputs/smolvla_film_0729_prefix_mask1_recal/checkpoints/last
+Loading  HuggingFaceTB/SmolVLM2-500M-Video-Instruct weights ...
+Loading weights:   0%|          | 0/489 [00:00<?, ?it/s]Loading weights:  52%|█████▏    | 253/489 [00:00<00:00, 2522.09it/s]Loading weights: 100%|██████████| 489/489 [00:00<00:00, 3548.03it/s]
+Reducing the number of VLM layers to 16 ...
+Loading weights from local directory
+  episodes: [0, 3]
+  swap wrench (median over 18 FIRST-CONTACT frames, fz>3.0N trigger, all episodes): [ 1.55  6.59  4.27  0.02 -0.48 -0.46]  |F|=8.0N  seal stays 0  [--swap fcscale]
+  c-hat: own(example)=[[ 0.    -1.029 -0.471  0.   ]]  swap=[[1.    1.808 2.5   0.   ]]  (channels ('contact', 'fmag', 'fz', 'seal'))
+  ep0: "pick up the case with the suction cup"  frames 0..218  descent=143  first-contact@+141  seal@+180
+  ep3: "pick up the case with the suction cup"  frames 649..821  descent=102  first-contact@+100  seal@+140
+
+   frame    ee_z   |F|N |  expert  dz(own) dz(swap)    dzRAW   dzFiLM |    dTot    dRaw   dFiLM
+  ---------------------------------------------------------------------------------------------
+       0   1.098    5.0 |    0.2m    -0.3m     1.4m    -0.3m     1.4m |    1.7m    0.0m    1.7m
+       9   1.184    4.2 |   11.9m     8.2m     8.6m     8.2m     8.6m |    0.3m    0.0m    0.3m
+      18   1.165    4.1 |  -14.6m   -10.0m   -10.4m   -10.0m   -10.4m |   -0.4m    0.0m   -0.4m
+      27   1.104    4.5 |  -10.5m   -10.0m    -3.2m   -10.0m    -3.2m |    6.8m    0.0m    6.8m
+      36   1.063    4.7 |    0.0m    -2.6m    -4.0m    -2.6m    -4.0m |   -1.4m    0.0m   -1.4m
+      45   1.055    5.1 |   -4.5m    -2.0m    -3.2m    -2.0m    -3.2m |   -1.2m    0.0m   -1.2m
+      54   0.974    5.1 |  -10.1m   -12.8m    -9.3m   -12.8m    -9.3m |    3.4m    0.0m    3.4m
+      63   0.884    5.3 |  -10.5m   -10.6m    -7.8m   -10.6m    -7.8m |    2.8m    0.0m    2.8m
+      72   0.857    5.2 |    0.0m    -2.3m    -1.6m    -2.3m    -1.6m |    0.7m    0.0m    0.7m
+      81   0.853    4.8 |   -1.8m    -1.2m     3.3m    -1.2m     3.3m |    4.6m    0.0m    4.6m
+      90   0.838    5.1 |   -1.3m    -1.5m     4.6m    -1.5m     4.6m |    6.1m    0.0m    6.1m
+      99   0.825    4.9 |   -1.5m    -1.6m     3.4m    -1.6m     3.4m |    4.9m    0.0m    4.9m
+     108   0.811    4.9 |   -1.4m    -1.6m     1.3m    -1.6m     1.3m |    2.9m    0.0m    2.9m
+     117   0.798    4.7 |   -1.5m    -1.6m    -0.3m    -1.6m    -0.3m |    1.3m    0.0m    1.3m
+     126   0.785    4.8 |   -1.6m    -1.7m     0.0m    -1.7m     0.0m |    1.7m    0.0m    1.7m
+     135   0.772    5.1 |   -1.8m    -1.6m     0.1m    -1.6m     0.1m |    1.7m    0.0m    1.7m
+     650   1.067    5.1 |    1.7m     0.2m     0.1m     0.2m     0.1m |   -0.1m    0.0m   -0.1m
+     659   1.139    4.7 |    4.1m     4.0m     3.6m     4.0m     3.6m |   -0.3m    0.0m   -0.3m
+     668   1.118    5.5 |   -3.7m    -2.8m    -1.5m    -2.8m    -1.5m |    1.3m    0.0m    1.3m
+     677   1.062    5.0 |    0.0m    -4.2m    -5.7m    -4.2m    -5.7m |   -1.5m    0.0m   -1.5m
+     686   1.058    5.3 |   -0.8m    -2.2m    -5.0m    -2.2m    -5.0m |   -2.8m    0.0m   -2.8m
+     695   0.995    5.1 |   -9.7m   -11.4m   -11.6m   -11.4m   -11.6m |   -0.2m    0.0m   -0.2m
+     704   0.906    5.2 |   -9.8m   -12.3m   -10.8m   -12.3m   -10.8m |    1.5m    0.0m    1.5m
+     713   0.860    4.6 |   -0.3m    -1.3m    -1.8m    -1.3m    -1.8m |   -0.5m    0.0m   -0.5m
+     722   0.856    5.3 |   -0.7m    -0.9m     0.2m    -0.9m     0.2m |    1.1m    0.0m    1.1m
+     731   0.844    5.0 |   -1.0m    -1.3m    -0.4m    -1.3m    -0.4m |    0.8m    0.0m    0.8m
+     740   0.831    4.9 |   -1.4m    -1.5m    -0.6m    -1.5m    -0.6m |    0.9m    0.0m    0.9m
+     803   0.922    5.9 |    7.5m     3.6m     4.8m     3.6m     4.8m |    1.2m    0.0m    1.2m
+  ---------------------------------------------------------------------------------------------
+
+  decomposition over 245 descent frames (d* = dz(cell) - dz(own,own)):
+    ALL frames                  : n=245  dz(own)= -2.97mm  dTotal= +1.29mm  dRaw= +0.00mm  dFiLM= +1.29mm  interact= +0.00mm
+    approach/hover dz(own)>=-3mm: n=164  dz(own)= -0.23mm  dTotal= +1.14mm  dRaw= +0.00mm  dFiLM= +1.14mm  interact= +0.00mm
+    COMMITTED desc dz(own)< -3mm: n= 81  dz(own)= -8.52mm  dTotal= +1.58mm  dRaw= +0.00mm  dFiLM= +1.58mm  interact= +0.00mm
+
+  time-to-contact split (pooled over 2 episode(s), per-episode first-contact detection):
+    >=4s before contact (early) : n=123  dz(own)= -3.45mm  dTotal= +0.83mm  dRaw= +0.00mm  dFiLM= +0.83mm  interact= +0.00mm
+    2-4s before contact         : n= 60  dz(own)= -4.30mm  dTotal= +2.43mm  dRaw= +0.00mm  dFiLM= +2.43mm  interact= +0.00mm
+    <2s before contact (late)   : n= 56  dz(own)= -1.49mm  dTotal= +1.19mm  dRaw= +0.00mm  dFiLM= +1.19mm  interact= +0.00mm
+    after contact (press phase) : n=  6  dz(own)= +6.36mm  dTotal= +0.13mm  dRaw= +0.00mm  dFiLM= +0.13mm  interact= +0.00mm
+
+── verdict ─────────────────────────────────────────────────────────
+  committed descent, cancellation of dz(own)=-8.5mm:
+    TOTAL (state+c swap) :   +19%
+    RAW path only        :    +0%   (state swap, c pinned to own)
+    FiLM path only       :   +19%   (c swap, state kept own)
+  -> the FiLM path carries the contact response; the raw path adds little.
