@@ -142,6 +142,15 @@ class ArmMover:
         self._q_hi = self._model.upperPositionLimit.copy()
         self._v_max = self._model.velocityLimit.copy()
 
+        # IK-side-only tightening (this class's model/config_limit_gain only —
+        # URDF and dexcontrol's hardware command clamping are untouched): keep
+        # L_arm_j4 (elbow) from swinging above -0.5 rad, well inside its URDF
+        # range of [-3.071, 0.244].
+        if self._side == "left":
+            j4_idx = self._model.idx_qs[self._model.getJointId("L_arm_j4")]
+            self._q_hi[j4_idx] = min(float(self._q_hi[j4_idx]), -0.5)
+            self._model.upperPositionLimit[j4_idx] = self._q_hi[j4_idx]
+
     def _setup_ik(self) -> None:
         # Position weighted 2x over orientation (grasp.py's proven ratio).
         self._ee_task = FrameTask(
