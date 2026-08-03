@@ -1,0 +1,23 @@
+{
+  "phase": "case_pick",
+  "instruction": "pick up the case with the suction cup",
+  "action_space": "ee_delta+suction",
+  "ee_rotation": "quat_wxyz, base_link",
+  "source": "run_policy.py rollout",
+  "checkpoint": "Chanho-Lee/smolvla_naive_0721",
+  "frames": 297,
+  "success": false,
+  "peak_force_n": 20.86,
+  "peak_force_frame": 296,
+  "peak_contact_n": 15.32,
+  "layers_remaining": 5,
+  "detected_center_xyzyaw": [
+    0.9555497233072917,
+    0.046899312337239596,
+    0.8109999999999999,
+    0.04057933038240474
+  ],
+  "top_face_z": 0.635,
+  "detect_conf": 0.9704484939575195,
+  "baseline_force_n": 5.54
+}

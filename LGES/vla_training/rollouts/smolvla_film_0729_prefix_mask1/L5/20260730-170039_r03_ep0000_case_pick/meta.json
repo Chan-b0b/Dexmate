@@ -1,0 +1,23 @@
+{
+  "phase": "case_pick",
+  "instruction": "pick up the case with the suction cup",
+  "action_space": "ee_delta+suction",
+  "ee_rotation": "quat_wxyz, base_link",
+  "source": "run_policy.py rollout",
+  "checkpoint": "Chanho-Lee/smolvla_film_0729_prefix_mask1",
+  "frames": 313,
+  "success": true,
+  "peak_force_n": 9.18,
+  "peak_force_frame": 250,
+  "peak_contact_n": 3.52,
+  "layers_remaining": 5,
+  "detected_center_xyzyaw": [
+    0.9282363891601563,
+    0.02319007873535156,
+    0.8109999999999999,
+    0.06103434250719279
+  ],
+  "top_face_z": 0.635,
+  "detect_conf": 0.9646267294883728,
+  "baseline_force_n": 5.66
+}

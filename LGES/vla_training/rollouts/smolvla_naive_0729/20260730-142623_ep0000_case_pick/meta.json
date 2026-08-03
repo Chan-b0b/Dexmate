@@ -1,0 +1,23 @@
+{
+  "phase": "case_pick",
+  "instruction": "pick up the case with the suction cup",
+  "action_space": "ee_delta+suction",
+  "ee_rotation": "quat_wxyz, base_link",
+  "source": "run_policy.py rollout",
+  "checkpoint": "/home/dexmate/.cache/huggingface/hub/models--Chanho-Lee--smolvla_naive_0729/snapshots/0058ddf090eb66192db60964cd23bb60c7a6268d",
+  "frames": 220,
+  "success": false,
+  "peak_force_n": 22.86,
+  "peak_force_frame": 219,
+  "peak_contact_n": 17.8,
+  "layers_remaining": 5,
+  "detected_center_xyzyaw": [
+    0.9619510904947917,
+    0.08249313354492188,
+    0.8109999999999999,
+    -0.008521582856035546
+  ],
+  "top_face_z": 0.635,
+  "detect_conf": 0.967709481716156,
+  "baseline_force_n": 5.06
+}
