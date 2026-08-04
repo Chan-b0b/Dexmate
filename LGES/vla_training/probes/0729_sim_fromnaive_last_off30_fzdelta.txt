@@ -1,0 +1,25 @@
+`torch_dtype` is deprecated! Use `dtype` instead!
+[sim] FiLM cond=('contact', 'fmag', 'fz', 'seal') inject=prefix mask_force=True  ckpt=/home/maverick/Dexmate/LGES/vla_training/outputs/smolvla_film_0729_prefix_mask1_recal_fromnaive/checkpoints/last
+[sim] stiffness=1.0N/mm  f_base=6.8N  seal_depth=nevermm  max_steps=40  start_offset=30  force_model=fzdelta
+Loading  HuggingFaceTB/SmolVLM2-500M-Video-Instruct weights ...
+Loading weights:   0%|          | 0/489 [00:00<?, ?it/s]Loading weights:  73%|███████▎  | 359/489 [00:00<00:00, 3556.96it/s]Loading weights: 100%|██████████| 489/489 [00:00<00:00, 4024.79it/s]
+Reducing the number of VLM layers to 16 ...
+Loading weights from local directory
+[sim] contact direction=[0.19 0.82 0.53]  torque=[ 0.02 -0.48 -0.46]
+  ep0 (z=0.763): STOP    steps=11 depth=  0.4mm  |F|end= 6.1N  sealed=False
+        first steps [|F|/dz(mm)]: 5.8N/-0.2  6.0N/-0.1  6.0N/-0.0  6.1N/-0.0  6.1N/-0.0  6.1N/-0.0  6.1N/-0.0  6.1N/-0.0
+  ep1 (z=0.765): STOP    steps=18 depth=  0.5mm  |F|end= 6.3N  sealed=False
+        first steps [|F|/dz(mm)]: 6.0N/-0.2  6.1N/-0.1  6.2N/-0.1  6.2N/-0.0  6.2N/-0.0  6.3N/-0.0  6.3N/-0.0  6.3N/-0.0
+  ep2 (z=0.762): STOP    steps= 3 depth=  0.1mm  |F|end= 5.9N  sealed=False
+        first steps [|F|/dz(mm)]: 5.8N/-0.1  5.9N/+0.0  5.9N/+0.0
+  ep3 (z=0.818): STOP    steps= 4 depth=  2.3mm  |F|end= 7.2N  sealed=False
+        first steps [|F|/dz(mm)]: 5.5N/-2.0  6.9N/-0.4  7.2N/+0.1  7.2N/+0.1
+  ep4 (z=0.817): STOP    steps=35 depth=  4.1mm  |F|end= 9.1N  sealed=False
+        first steps [|F|/dz(mm)]: 6.1N/-0.8  6.6N/-0.6  7.0N/-0.4  7.4N/-0.4  7.7N/-0.3  7.9N/-0.3  8.2N/-0.2  8.3N/-0.2
+  ep5 (z=0.817): STOP    steps=15 depth=  2.8mm  |F|end= 7.9N  sealed=False
+        first steps [|F|/dz(mm)]: 6.0N/-2.5  7.7N/-0.1  7.7N/-0.0  7.8N/-0.0  7.8N/-0.0  7.8N/-0.0  7.8N/-0.0  7.8N/-0.0
+
+── summary ─────────────────────────────────────────────────────────
+  stopped 6/6 episodes   penetration depth mean=1.7mm  max=4.1mm
+    z~0.763: stopped 3/3  depth mean=0.3mm
+    z~0.817: stopped 3/3  depth mean=3.1mm

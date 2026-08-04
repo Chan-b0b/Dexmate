@@ -41,6 +41,9 @@ def main():
     ap.add_argument("--film", action="store_true",
                     help="evaluate a FiLM checkpoint (apply film_contact before load; "
                          "FILM_COND/F0/TAU/FZ_TAU/MASK_FORCE/INJECT envs MUST match training)")
+    ap.add_argument("--stats-root", type=Path, default=None,
+                    help="dataset whose stats feed c-hat (default: --val-root); set to the "
+                         "TRAINING dataset to match training exactly")
     args = ap.parse_args()
 
     ckpt = args.checkpoint or latest_checkpoint()
@@ -60,14 +63,22 @@ def main():
         f0 = float(os.environ.get("FILM_F0", "12"))
         tau = float(os.environ.get("FILM_TAU", "10"))
         fz_tau = float(os.environ.get("FILM_FZ_TAU", "30"))
-        train_ds = VLA_DIR / "datasets" / "lges_suction"   # film stats from TRAIN (matches training)
-        wm, ws = film_contact.load_wrench_stats(train_ds)
-        sm, ss = film_contact.load_seal_stats(train_ds)
+        fz_off = float(os.environ.get("FILM_FZ_OFF", "2.6"))
+        fmag_off = float(os.environ.get("FILM_FMAG_OFF", "5.1"))
+        fmag_tau = float(os.environ.get("FILM_FMAG_TAU", "5"))
+        stats_root = args.stats_root or args.val_root
+        wm, ws = film_contact.load_wrench_stats(stats_root)
+        sm, ss = film_contact.load_seal_stats(stats_root)
+        dm, dsd = film_contact.load_dfmag_stats(stats_root)
         film_contact.apply("v2", wm, ws, seal_mean=sm, seal_std=ss, cond=cond,
-                           contact_F0=f0, contact_tau=tau, fz_tau=fz_tau,
-                           mask_force=mask_force, inject=inject)
+                           contact_F0=f0, contact_tau=tau, fz_tau=fz_tau, fz_off=fz_off,
+                           mask_force=mask_force, inject=inject,
+                           dfmag_mean=dm, dfmag_std=dsd,
+                           dfmag_tau=float(os.environ.get("FILM_DFMAG_TAU", "5")),
+                           fmag_off=fmag_off, fmag_tau=fmag_tau)
         print(f"[eval] FiLM ENABLED (cond={cond} inject={inject} mask_force={mask_force} "
-              f"F0={f0:.0f} tau={tau:.0f} fz_tau={fz_tau:.0f})")
+              f"F0={f0:.0f} tau={tau:.0f} fz_tau={fz_tau:.0f} fz_off={fz_off:g} "
+              f"fmag={fmag_off:g}/{fmag_tau:g} stats={stats_root})")
 
     policy = SmolVLAPolicy.from_pretrained(model_dir)
     policy.eval()
@@ -91,13 +102,10 @@ def main():
         errs = []
         for i in range(lo, hi):
             frame = ds[i]
-            obs = {
-                "observation.images.head": frame["observation.images.head"].unsqueeze(0),
-                "observation.state": frame["observation.state"].unsqueeze(0),
-                "task": task,
-            }
-            if "observation.images.head_depth" in frame:   # match the trained model's camera2
-                obs["observation.images.head_depth"] = frame["observation.images.head_depth"].unsqueeze(0)
+            obs = {"observation.state": frame["observation.state"].unsqueeze(0), "task": task}
+            for k in frame:                    # all cameras (0729 sets use camera1/2/3)
+                if k.startswith("observation.images."):
+                    obs[k] = frame[k].unsqueeze(0)
             obs = pre(obs)
             with torch.inference_mode():
                 action = policy.select_action(obs)

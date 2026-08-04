@@ -1,0 +1,22 @@
+`torch_dtype` is deprecated! Use `dtype` instead!
+checkpoint: /home/maverick/Dexmate/LGES/vla_training/outputs/smolvla_film_0729_prefix_mask1_recal_fromnaive/checkpoints/last
+[eval] FiLM ENABLED (cond=('contact', 'fmag', 'fz', 'seal') inject=prefix mask_force=True F0=6 tau=1 fz_tau=1 fz_off=3 fmag=5.5/1 stats=/home/maverick/Dexmate/LGES/vla_training/datasets/lges_case_pick_0729_val)
+Loading  HuggingFaceTB/SmolVLM2-500M-Video-Instruct weights ...
+Loading weights:   0%|          | 0/489 [00:00<?, ?it/s]Loading weights:  89%|████████▉ | 437/489 [00:00<00:00, 4357.98it/s]Loading weights: 100%|██████████| 489/489 [00:00<00:00, 4581.23it/s]
+Reducing the number of VLM layers to 16 ...
+Loading weights from local directory
+val: 6 episodes, 1169 frames
+
+task                                        pos(mm)  rot(mrad)  suction
+pick up the case with the suction cup          0.81       1.56    99.7%
+------------------------------------------------------------------------
+OVERALL mean |err| per step                    0.81       1.56    99.7%
+
+per-dimension mean |err|:
+  dx       0.00058
+  dy       0.00067
+  dz       0.00118
+  drx      0.00116
+  dry      0.00181
+  drz      0.00169
+  suction  0.00840

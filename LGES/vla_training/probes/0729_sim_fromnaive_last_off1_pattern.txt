@@ -1,0 +1,25 @@
+`torch_dtype` is deprecated! Use `dtype` instead!
+[sim] FiLM cond=('contact', 'fmag', 'fz', 'seal') inject=prefix mask_force=True  ckpt=/home/maverick/Dexmate/LGES/vla_training/outputs/smolvla_film_0729_prefix_mask1_recal_fromnaive/checkpoints/last
+[sim] stiffness=1.0N/mm  f_base=6.8N  seal_depth=nevermm  max_steps=40  start_offset=1  force_model=pattern
+Loading  HuggingFaceTB/SmolVLM2-500M-Video-Instruct weights ...
+Loading weights:   0%|          | 0/489 [00:00<?, ?it/s]Loading weights:  43%|████▎     | 212/489 [00:00<00:00, 2094.89it/s]Loading weights: 100%|██████████| 489/489 [00:00<00:00, 3091.64it/s]
+Reducing the number of VLM layers to 16 ...
+Loading weights from local directory
+[sim] contact direction=[0.19 0.82 0.53]  torque=[ 0.02 -0.48 -0.46]
+  ep0 (z=0.763): STOP    steps= 2 depth=  0.0mm  |F|end= 6.8N  sealed=False
+        first steps [|F|/dz(mm)]: 6.8N/+0.3  6.8N/+0.3
+  ep1 (z=0.765): STOP    steps= 2 depth=  0.0mm  |F|end= 6.8N  sealed=False
+        first steps [|F|/dz(mm)]: 6.8N/+0.3  6.8N/+0.3
+  ep2 (z=0.762): STOP    steps= 2 depth=  0.0mm  |F|end= 6.8N  sealed=False
+        first steps [|F|/dz(mm)]: 6.8N/+0.4  6.8N/+0.4
+  ep3 (z=0.818): STOP    steps=13 depth=  2.5mm  |F|end= 9.3N  sealed=False
+        first steps [|F|/dz(mm)]: 6.8N/-0.4  7.2N/-0.4  7.6N/-0.5  8.1N/-0.4  8.6N/-0.3  8.9N/-0.2  9.1N/-0.1  9.2N/-0.0
+  ep4 (z=0.817): STOP    steps=31 depth=  3.6mm  |F|end=10.4N  sealed=False
+        first steps [|F|/dz(mm)]: 6.8N/-0.3  7.1N/-0.3  7.4N/-0.3  7.7N/-0.3  8.0N/-0.3  8.3N/-0.3  8.6N/-0.3  8.9N/-0.3
+  ep5 (z=0.817): STOP    steps= 2 depth=  0.0mm  |F|end= 6.8N  sealed=False
+        first steps [|F|/dz(mm)]: 6.8N/+0.0  6.8N/+0.0
+
+── summary ─────────────────────────────────────────────────────────
+  stopped 6/6 episodes   penetration depth mean=1.0mm  max=3.6mm
+    z~0.763: stopped 3/3  depth mean=0.0mm
+    z~0.817: stopped 3/3  depth mean=2.0mm
