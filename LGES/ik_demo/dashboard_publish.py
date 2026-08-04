@@ -103,7 +103,10 @@ class DashboardPublisher:
         self,
         robot,
         spool_dir: str = DEFAULT_SPOOL_DIR,
-        hz: float = 15.0,
+        # 5 Hz is plenty for a monitoring view; 15 Hz reads the RGB+depth
+        # streams hard enough to compete with the demo's own detection reads
+        # over zenoh.
+        hz: float = 5.0,
         max_image_width: int = 720,
         jpeg_quality: int = 80,
         depth_range_m: tuple[float, float] = (0.3, 1.0),
@@ -122,6 +125,7 @@ class DashboardPublisher:
         self._thread: threading.Thread | None = None
         self._stop = threading.Event()
         self._seq = 0
+        self._img_streak = 0
         os.makedirs(spool_dir, exist_ok=True)
         try:
             self._fk: _EEKinematics | None = _EEKinematics()
@@ -164,12 +168,18 @@ class DashboardPublisher:
         return self._robot.left_arm if cfg.ARM_SIDE == "left" else self._robot.right_arm
 
     def _run(self) -> None:
+        fails = 0
         while not self._stop.is_set():
             t0 = time.time()
             try:
                 self._sample_once()
+                fails = 0
             except Exception as e:  # noqa: BLE001 - never let one bad read kill the thread
-                logger.debug("[dashboard] sample error: {}", e)
+                fails += 1
+                if fails == 1 or fails % 100 == 0:
+                    # visible (throttled) — a silently failing publisher looks
+                    # like a "frozen dashboard" with no clue in the terminal
+                    logger.warning("[dashboard] sample error x{}: {}", fails, e)
             dt = time.time() - t0
             self._stop.wait(max(0.0, self._period - dt))
 
@@ -191,6 +201,16 @@ class DashboardPublisher:
                     self._write_depth_raw(depth)
         except Exception as e:  # noqa: BLE001
             logger.debug("[dashboard] camera read error: {}", e)
+        # A persistently image-less spool is the "frozen dashboard" symptom —
+        # surface it (throttled) instead of freezing silently.
+        if has_image:
+            self._img_streak = 0
+        else:
+            self._img_streak += 1
+            if self._img_streak == 50 or self._img_streak % 1000 == 0:
+                logger.warning("[dashboard] no camera frame for {} ticks (~{:.0f} s) — "
+                               "camera stream stalled?", self._img_streak,
+                               self._img_streak * self._period)
         state["has_image"] = has_image
         state["has_depth"] = has_depth
         state["depth_range_m"] = list(self._depth_range)

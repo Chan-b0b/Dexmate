@@ -407,9 +407,28 @@ function accumulate(s){
   while(samples.length && samples[0].t < cut) samples.shift();
 }
 
+// fetch with a hard timeout + per-poller in-flight guard: fetch() has NO
+// default timeout, so a brief WiFi hiccup left hanging requests piling up at
+// 10 Hz until the browser's per-host connection limit (6) was exhausted —
+// the page then froze for good (white reload) even after the link recovered.
+const _inflight = {};
+async function fetchT(url, opts={}, ms=1500){
+  const ctl = new AbortController();
+  const t = setTimeout(() => ctl.abort(), ms);
+  try{ return await fetch(url, {...opts, signal: ctl.signal}); }
+  finally{ clearTimeout(t); }
+}
+function guarded(name, fn){
+  return async () => {
+    if(_inflight[name]) return;
+    _inflight[name] = true;
+    try{ await fn(); } finally{ _inflight[name] = false; }
+  };
+}
+
 async function tick(){
   try{
-    const r = await fetch("/state.json", {cache:"no-store"});
+    const r = await fetchT("/state.json", {cache:"no-store"});
     if(!r.ok) throw new Error("no state");
     const s = await r.json();
     const ageMs = Date.now() - (s.stamp*1000);
@@ -434,7 +453,7 @@ async function tick(){
 let detectSeq = -1;
 async function tickDetect(){
   try{
-    const r = await fetch("/detect.json", {cache:"no-store"});
+    const r = await fetchT("/detect.json", {cache:"no-store"});
     if(!r.ok) throw new Error("no detector");
     const d = await r.json();
     if(d.seq !== detectSeq){ detectSeq = d.seq; $("detect").src = "/detect.jpg?seq=" + d.seq; }
@@ -465,7 +484,7 @@ function targetInfo(){
 }
 async function tickTarget(){
   try{
-    const r = await fetch("/target.json", {cache:"no-store"});
+    const r = await fetchT("/target.json", {cache:"no-store"});
     if(!r.ok) throw new Error("none");
     const d = await r.json();
     targetZ = d.target_z_m; targetDz = d.dst_dz;
@@ -476,7 +495,7 @@ async function tickTarget(){
 let barcodeSeq = -1;
 async function tickBarcode(){
   try{
-    const r = await fetch("/barcode.json", {cache:"no-store"});
+    const r = await fetchT("/barcode.json", {cache:"no-store"});
     if(!r.ok) throw new Error("no reader");
     const d = await r.json();
     if(d.ok && d.seq !== barcodeSeq){ barcodeSeq = d.seq; $("barcode").src = "/barcode.jpg?seq=" + d.seq; }
@@ -494,7 +513,7 @@ async function tickBarcode(){
 async function tickBarcodeRead(){
   const el = $("barcoderead");
   try{
-    const r = await fetch("/barcode_read.json", {cache:"no-store"});
+    const r = await fetchT("/barcode_read.json", {cache:"no-store"});
     if(!r.ok) throw new Error("none");
     const d = await r.json();
     const age = ((Date.now() - d.stamp*1000)/1000).toFixed(0);
@@ -518,12 +537,12 @@ window.addEventListener("resize", drawAll);
 
 // ---- recording controls (drive the same recorder as the keyboard) --------
 async function postRecord(cmd){
-  try{ await fetch("/record?cmd=" + cmd, {cache:"no-store", method:"POST"}); }catch(e){}
+  try{ await fetchT("/record?cmd=" + cmd, {cache:"no-store", method:"POST"}); }catch(e){}
 }
 async function tickRecord(){
   const btn = $("recbtn"), dec = $("recdecide"), info = $("recinfo");
   try{
-    const r = await fetch("/record.json", {cache:"no-store"});
+    const r = await fetchT("/record.json", {cache:"no-store"});
     if(!r.ok) throw new Error("no recorder");
     const d = await r.json();
     if(d.state === "recording"){
@@ -545,6 +564,15 @@ $("recbtn").addEventListener("click", () => postRecord("toggle"));
 $("keepbtn").addEventListener("click", () => postRecord("keep"));
 $("discardbtn").addEventListener("click", () => postRecord("discard"));
 
+// in-flight guards: an interval never stacks a second request behind a slow
+// one — combined with fetchT's timeout, a network blip costs one skipped
+// update instead of wedging the page.
+tick = guarded("tick", tick);
+tickDetect = guarded("detect", tickDetect);
+tickTarget = guarded("target", tickTarget);
+tickBarcode = guarded("barcode", tickBarcode);
+tickBarcodeRead = guarded("barcoderead", tickBarcodeRead);
+tickRecord = guarded("record", tickRecord);
 setInterval(tick, 100);
 setInterval(tickDetect, 200);
 setInterval(tickTarget, 1000);
@@ -658,6 +686,9 @@ def main() -> None:
         ensure_camera(host=args.camera_host or NANO_HOST)
 
     _Handler.spool_dir = os.path.abspath(args.spool)
+    # default listen backlog is 5 — a wedged client reconnecting with a burst
+    # of sockets (post-WiFi-blip) overflows it and new page loads hang white
+    ThreadingHTTPServer.request_queue_size = 32
     httpd = ThreadingHTTPServer((args.host, args.port), _Handler)
     shown_host = "localhost" if args.host in ("0.0.0.0", "") else args.host
     print(f"Dashboard serving {_Handler.spool_dir}")

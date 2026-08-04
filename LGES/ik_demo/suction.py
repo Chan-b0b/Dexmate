@@ -196,14 +196,51 @@ class SuctionMover(ArmMover):
         """Lift to SAFE_TRANSPORT_Z: straight up (xy held per tick) to
         LIFT_CLEAR_EE_Z — clear of the case walls from any layer's pick —
         then the remaining free-air ascent as a faster joint-space move_ee
-        (endpoint xy held; the arc in between is harmless up there)."""
+        (endpoint xy held; the arc in between is harmless up there). Either
+        leg falling short (the per-tick stream can dead-end on a diverging IK
+        branch right at the reach boundary — observed 4 mm under LIFT_CLEAR at
+        the place column) hands off to _best_effort_ascent."""
         pos, _ = self.current_ee_pose()
         z_clear = min(max(float(pos[2]), cfg.LIFT_CLEAR_EE_Z), cfg.SAFE_TRANSPORT_Z)
         q = self.move_ee_vertical(z_clear, rpy)
-        if q is None or z_clear >= cfg.SAFE_TRANSPORT_Z:
+        if q is None:
+            self._best_effort_ascent(rpy)
+            return
+        if z_clear >= cfg.SAFE_TRANSPORT_Z:
             return
         x, y = self.fk(q)[0][:2]
-        self.move_ee([float(x), float(y), cfg.SAFE_TRANSPORT_Z], rpy, quiet=True)
+        if self.move_ee([float(x), float(y), cfg.SAFE_TRANSPORT_Z], rpy, quiet=True) is None:
+            self._best_effort_ascent(rpy)
+
+    def _best_effort_ascent(self, rpy) -> None:
+        """Recover as much transport height as possible after a lift leg fell
+        short: scan z from SAFE_TRANSPORT_Z DOWN (DESCENT_CHECK_STEP_M steps)
+        at the CURRENT xy with fresh min-motion solves from the halted config
+        — the streamed per-tick chain dead-ends on one branch while a static
+        solve can converge (descent_reachable proves these columns statically
+        reachable) — and joint-move to the FIRST valid solution that gains at
+        least LIFT_RECOVER_MIN_GAIN_M. Only runs with the EE already near or
+        above LIFT_CLEAR_EE_Z (LIFT_RECOVER_MIN_CLEAR_M band): the recovery
+        move is joint-space, so its EE arc must not happen down between the
+        case walls."""
+        pos, _ = self.current_ee_pose()
+        x, y, z_now = float(pos[0]), float(pos[1]), float(pos[2])
+        if z_now < cfg.LIFT_CLEAR_EE_Z - cfg.LIFT_RECOVER_MIN_CLEAR_M:
+            logger.warning("[suction] lift fell short at z={:.4f} — below the wall-clear "
+                           "band, staying put (no joint-space recovery)", z_now)
+            return
+        seed = self._live_arm_q()
+        z = float(cfg.SAFE_TRANSPORT_Z)
+        while z > z_now + cfg.LIFT_RECOVER_MIN_GAIN_M:
+            sol = self.solve_pose((x, y, z), rpy, seed=seed, min_motion=True)
+            if sol.pos_err_m <= cfg.REACH_TOL_M and sol.in_limits and not sol.in_collision:
+                logger.info("[suction] best-effort ascent: z {:.4f} -> {:.4f} "
+                            "(transport target {:.2f})", z_now, z, cfg.SAFE_TRANSPORT_Z)
+                self.move_joints(sol.q)
+                return
+            z -= float(cfg.DESCENT_CHECK_STEP_M)
+        logger.warning("[suction] best-effort ascent: no reachable z above {:.4f} at "
+                       "xy=({:.3f},{:+.3f}) — staying", z_now, x, y)
 
     def _approach_and_hover(self, ee_pos, rpy, ez):
         """Travel to the column at transport height (sideways clearance), then

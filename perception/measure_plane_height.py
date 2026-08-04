@@ -12,37 +12,55 @@
 """Measure the height of a planar surface in front of the robot, in base frame.
 
 Pipeline:
-    1. Grab N head-camera frames (left_rgb + depth) and take a per-pixel median
+    1. Pitch the head down (torso-compensated, grasp_box tuning) so the
+       surface in front is in view.
+    2. Grab N head-camera frames (left_rgb + depth) and take a per-pixel median
        to suppress stereo noise.
-    2. Back-project the depth ROI into 3D points using the left camera
+    3. Back-project the depth ROI into 3D points using the left camera
        intrinsics from ``sensors/head_camera/info``.
-    3. Transform the points into the robot base frame using forward kinematics
-       (``dexmotion.MotionManager.fk``) on the current torso/head joint state.
-    4. Fit a plane with RANSAC + SVD in base frame. The inlier centroid's z is
+    4. Transform the points into the robot base frame. By default this uses a
+       closed-form joint chain with offsets hardcoded from the vega_1p URDF
+       (the same math as perception.py), reading the current torso/head joint
+       state; ``--use-dexmotion`` switches to ``dexmotion.MotionManager.fk``.
+    5. Fit a plane with RANSAC + SVD in base frame. The inlier centroid's z is
        the plane height; the normal's tilt from base +z is the quality check.
+       The vega_1p base origin sits 55 mm above the ground (wheel contact z
+       computed from the URDF wheel meshes, front and rear agree), so z=0 is
+       shifted down to the floor; override with ``--base-height``.
 
-The camera frame name comes from the URDF and differs per robot model, so run
-``--list-frames`` first to find it:
+By default no URDF is loaded at all: the camera pose comes from the manual
+torso+head joint chain (base -> zed_left_camera, optical convention) hardcoded
+from the vega_1p URDF. On another robot model pass ``--use-dexmotion`` to use
+URDF/pinocchio FK instead, and find the camera frame name with:
 
-    python examples/advanced_examples/measure_plane_height.py --list-frames
+    python measure_plane_height.py --use-dexmotion --list-frames
 
 Then measure (drag a box over the surface in the RGB window, press Enter):
 
-    python examples/advanced_examples/measure_plane_height.py \
-        --camera-frame head_camera_left_optical_frame
+    python measure_plane_height.py
 
-Headless, with an explicit ROI and a floor cross-check:
+Headless, with an explicit ROI and a floor cross-check (pixel coordinates are
+in the depth image, e.g. 960x600 on the ZED X Mini at SVGA):
 
-    python examples/advanced_examples/measure_plane_height.py \
-        --camera-frame head_camera_left_optical_frame \
-        --roi 700 500 1200 800 --floor-roi 800 950 1100 1070
+    python measure_plane_height.py \
+        --roi 300 250 650 450 --floor-roi 350 500 600 590
 
-IMPORTANT - frame convention: if the FK frame you pass is a ROS-style camera
-*link* frame (x forward, y left, z up) rather than an *optical* frame (x right,
-y down, z forward), pass ``--link-frame-convention`` so the optical->link
-rotation is applied. Use ``--floor-roi`` to verify: the reported floor height
+IMPORTANT - frame convention (``--use-dexmotion`` only): if the FK frame you
+pass is a ROS-style camera *link* frame (x forward, y left, z up) rather than
+an *optical* frame (x right, y down, z forward), pass
+``--link-frame-convention`` so the optical->link rotation is applied. Use ``--floor-roi`` to verify: the reported floor height
 must come out near 0 and its tilt near 0 degrees. If it does not, the frame name
-or the convention flag is wrong.
+or the convention flag is wrong. Note the ZED X Mini in NEURAL mode only
+produces depth inside its configured range (0.10-1.5 m here) - a floor patch
+further than that from the camera has no depth pixels at all.
+
+If the kinematic stack is unusable (e.g. dexmotion/pinocchio segfaults), pass
+``--no-fk``: both planes are fitted in the camera frame and the measured floor
+plane becomes the height reference, so the reported target height is its
+distance above the floor. This requires a floor ROI but no URDF/FK at all:
+
+    python measure_plane_height.py --no-fk \
+        --roi 300 250 650 450 --floor-roi 350 500 600 590
 """
 
 from __future__ import annotations
@@ -102,6 +120,7 @@ def extract_intrinsics(
         ValueError: If no intrinsics could be located in the payload.
     """
     candidates: list[tuple[int, tuple[float, float, float, float], Any, Any]] = []
+    resolutions: list[tuple[Any, Any]] = []
 
     def score(path: str) -> int:
         p = path.lower()
@@ -121,6 +140,12 @@ def extract_intrinsics(
             return
 
         lower = {str(k).lower(): v for k, v in node.items()}
+
+        # The ZED payload carries the stream resolution in a separate block
+        # ("actual: {width, height, fps}") rather than next to the intrinsics;
+        # remember any width/height pair as a fallback for the rescale check.
+        if "width" in lower and "height" in lower:
+            resolutions.append((lower["width"], lower["height"]))
 
         # Form 1: explicit scalar keys.
         if all(k in lower for k in ("fx", "fy", "cx", "cy")):
@@ -172,6 +197,8 @@ def extract_intrinsics(
 
     candidates.sort(key=lambda c: c[0], reverse=True)
     _, (fx, fy, cx, cy), info_w, info_h = candidates[0]
+    if (not info_w or not info_h) and resolutions:
+        info_w, info_h = resolutions[0]
 
     height, width = depth_shape
     if info_w and info_h:
@@ -344,6 +371,41 @@ def analyze_plane(
 # --------------------------------------------------------------------------- #
 # Acquisition
 # --------------------------------------------------------------------------- #
+def set_head_pitch(bot: Robot, wait_time: float = 6.0) -> None:
+    """Pitch the head down so the surface in front is in view.
+
+    Keeps torso_pitch_deg + (-head_pitch_deg) ~= 30 deg regardless of torso
+    tilt. Copied from grasp_box/utils.py so this script stays standalone
+    (perception/utils.py has a different variant under the same name).
+
+    Args:
+        bot: Connected ``Robot`` instance.
+        wait_time: Maximum time in seconds to wait for the head to arrive.
+    """
+    forward_sum_deg = 30.0
+    torso_pitch_deg = float(np.rad2deg(bot.torso.pitch_angle))
+    current_head_pos = np.asarray(bot.head.get_state()["pos"], dtype=float)
+    target_head_pos = np.zeros_like(current_head_pos)
+    target_head_pos[0] = np.deg2rad(torso_pitch_deg - forward_sum_deg)
+
+    head_error = target_head_pos - current_head_pos
+    head_kp = 0.6
+    head_min_vel = 0.02
+    head_max_vel = 1.0
+    head_joint_vel = np.clip(np.abs(head_error) * head_kp, head_min_vel, head_max_vel)
+
+    logger.info(
+        f"setting head pitch: torso pitch {torso_pitch_deg:.1f} deg -> "
+        f"head target {np.round(target_head_pos, 3).tolist()} rad"
+    )
+    bot.head.set_joint_pos_vel(
+        joint_pos=target_head_pos,
+        joint_vel=head_joint_vel,
+        wait_time=wait_time,
+        exit_on_reach=True,
+    )
+
+
 def grab_frames(
     camera, n_frames: int, timeout: float
 ) -> tuple[np.ndarray, np.ndarray]:
@@ -490,6 +552,62 @@ def show_result(
 # --------------------------------------------------------------------------- #
 # Kinematics
 # --------------------------------------------------------------------------- #
+def _rot_y(theta: float) -> np.ndarray:
+    """4x4 rotation around Y by theta (rad)."""
+    c, s = np.cos(theta), np.sin(theta)
+    t = np.eye(4)
+    t[0, 0], t[0, 2], t[2, 0], t[2, 2] = c, s, -s, c
+    return t
+
+
+def _rot_z(theta: float) -> np.ndarray:
+    """4x4 rotation around Z by theta (rad)."""
+    c, s = np.cos(theta), np.sin(theta)
+    t = np.eye(4)
+    t[0, 0], t[0, 1], t[1, 0], t[1, 1] = c, -s, s, c
+    return t
+
+
+def _trans(x: float, y: float, z: float) -> np.ndarray:
+    """4x4 translation matrix."""
+    t = np.eye(4)
+    t[:3, 3] = (x, y, z)
+    return t
+
+
+def manual_camera_to_base(q_torso: np.ndarray, q_head: np.ndarray) -> np.ndarray:
+    """T_base_camera for the vega_1p head ZED left camera, without any URDF.
+
+    Closed-form torso+head joint chain with offsets hardcoded from the vega_1p
+    URDF - the same math as perception.py's ``transform_zed_point_to_base``.
+    ZED depth is expressed in the left camera frame, hence the
+    ``zed_left_camera`` mount offsets; the mount rotation rpy(-pi/2, 0, -pi/2)
+    makes the returned frame optical convention (x right, y down, z forward).
+
+    Args:
+        q_torso: Torso joint positions (first 3 are used).
+        q_head: Head joint positions (first 3 are used).
+
+    Returns:
+        4x4 homogeneous transform T_base_camera.
+    """
+    q1, q2, q3 = np.asarray(q_torso, dtype=np.float64).ravel()[:3]
+    h1, h2, h3 = np.asarray(q_head, dtype=np.float64).ravel()[:3]
+
+    t_base_l3 = (
+        _trans(-0.235, 0.0, 0.248) @ _rot_y(-q1)
+        @ _trans(0.396, 0.0, 0.082) @ _rot_y(q2)
+        @ _trans(-0.40718, 0.0, 0.09764) @ _rot_y(-q3)
+        @ _trans(-0.05908, 0.0, 0.44528)            # torso l3 -> arm_center
+        @ _trans(-0.0735, -0.0725, 0.014) @ _rot_y(h1)
+        @ _trans(0.0, 0.0725, -0.0035) @ _rot_z(h2)
+        @ _trans(0.0, 0.002, 0.0495) @ _rot_y(-h3)
+    )
+    t_l3_cam = _trans(0.0365, 0.023, 0.0489)        # zed_left_camera mount
+    t_l3_cam[:3, :3] = R_LINK_FROM_OPTICAL          # = rpy(-pi/2, 0, -pi/2)
+    return t_base_l3 @ t_l3_cam
+
+
 def build_motion_manager(bot: Robot):
     """Create a MotionManager seeded with the robot's current joint state.
 
@@ -573,11 +691,14 @@ def transform_points(points: np.ndarray, transform: np.ndarray) -> np.ndarray:
 # Entry point
 # --------------------------------------------------------------------------- #
 def main(
-    camera_frame: str = "head_camera_left_optical_frame",
+    camera_frame: str = "zed_depth_frame",
     list_frames: bool = False,
     roi: tuple[int, int, int, int] | None = None,
     floor_roi: tuple[int, int, int, int] | None = None,
     link_frame_convention: bool = False,
+    no_fk: bool = False,
+    use_dexmotion: bool = False,
+    base_height: float = 0.055,
     sensor: str = "head_camera",
     n_frames: int = 10,
     z_range: tuple[float, float] = (0.15, 5.0),
@@ -593,13 +714,24 @@ def main(
     """Measure a planar surface's height in the robot base frame.
 
     Args:
-        camera_frame: URDF frame name of the camera used for FK.
+        camera_frame: URDF frame name of the camera used for FK. The default
+            is the vega real-robot depth frame (already optical convention).
         list_frames: Print all model frame names and exit.
         roi: Target plane ROI as x0 y0 x1 y1; prompts interactively if omitted.
         floor_roi: Optional floor ROI used as a sanity check (should report a
             height near 0 and tilt near 0).
         link_frame_convention: Set when ``camera_frame`` is a ROS link frame
             (x forward, y left, z up) instead of an optical frame.
+        no_fk: Skip any kinematics; fit in the camera frame and report the
+            target height relative to the measured floor plane. Requires a
+            floor ROI.
+        use_dexmotion: Use URDF/pinocchio FK (dexmotion) with ``camera_frame``
+            instead of the built-in vega_1p closed-form chain. Needed for
+            ``--list-frames`` and for other robot models.
+        base_height: Height of the URDF base-frame origin above the floor in
+            meters; z=0 is shifted down by this so reported heights are above
+            the floor. Default 0.055 comes from the vega_1p wheel contact
+            points (front and rear wheel meshes both touch at z=-0.055).
         sensor: Camera sensor name in the robot config.
         n_frames: Depth frames to median-filter together.
         z_range: Valid depth range in meters.
@@ -621,30 +753,57 @@ def main(
     configs.sensors[sensor].transport = "zenoh"  # depth is Zenoh-only
 
     with Robot(configs=configs) as bot:
-        motion_manager = build_motion_manager(bot)
-
-        if list_frames:
-            names = list_frame_names(motion_manager)
-            print(f"{len(names)} frames in the robot model:")
-            for name in names:
-                marker = (
-                    "  <-- camera?"
-                    if ("cam" in name.lower() or "zed" in name.lower())
-                    else ""
-                )
-                print(f"  {name}{marker}")
+        if list_frames and not use_dexmotion:
+            logger.error("--list-frames needs the URDF model; add --use-dexmotion")
             return
 
-        transform_base_cam = get_camera_to_base(motion_manager, camera_frame)
-        if link_frame_convention:
-            optical_to_link = np.eye(4)
-            optical_to_link[:3, :3] = R_LINK_FROM_OPTICAL
-            transform_base_cam = transform_base_cam @ optical_to_link
+        # Aim the camera before any joint state is read for FK.
+        if not list_frames:
+            set_head_pitch(bot)
 
-        logger.info(
-            f"camera origin in base frame: "
-            f"{np.round(transform_base_cam[:3, 3], 4).tolist()} m"
-        )
+        if no_fk:
+            transform_base_cam = np.eye(4)
+            logger.info(
+                "FK disabled: fitting in the camera frame, the floor ROI is "
+                "the height reference"
+            )
+        elif use_dexmotion:
+            motion_manager = build_motion_manager(bot)
+
+            if list_frames:
+                names = list_frame_names(motion_manager)
+                print(f"{len(names)} frames in the robot model:")
+                for name in names:
+                    marker = (
+                        "  <-- camera?"
+                        if ("cam" in name.lower() or "zed" in name.lower())
+                        else ""
+                    )
+                    print(f"  {name}{marker}")
+                return
+
+            transform_base_cam = get_camera_to_base(motion_manager, camera_frame)
+            if link_frame_convention:
+                optical_to_link = np.eye(4)
+                optical_to_link[:3, :3] = R_LINK_FROM_OPTICAL
+                transform_base_cam = transform_base_cam @ optical_to_link
+        else:
+            q_torso = np.asarray(bot.torso.get_joint_pos(), dtype=np.float64)
+            q_head = np.asarray(bot.head.get_joint_pos(), dtype=np.float64)
+            logger.info(
+                f"manual vega_1p FK: torso={np.round(q_torso, 4).tolist()} "
+                f"head={np.round(q_head, 4).tolist()}"
+            )
+            transform_base_cam = manual_camera_to_base(q_torso, q_head)
+
+        if not no_fk:
+            # The base origin sits above the ground (wheel contact is at
+            # z=-0.055 in the vega_1p URDF), so shift z=0 down to the floor.
+            transform_base_cam = _trans(0.0, 0.0, base_height) @ transform_base_cam
+            logger.info(
+                f"camera origin (base frame, z=0 at floor): "
+                f"{np.round(transform_base_cam[:3, 3], 4).tolist()} m"
+            )
 
         camera = getattr(bot.sensors, sensor)
         if not camera.wait_for_active(timeout=5.0):
@@ -669,6 +828,16 @@ def main(
                 )
                 return
             intrinsics = extract_intrinsics(info, depth.shape)
+            configured = info.get("configured") if isinstance(info, dict) else None
+            if isinstance(configured, dict):
+                d_min = configured.get("depth_min")
+                d_max = configured.get("depth_max")
+                if d_min is not None and d_max is not None:
+                    logger.info(
+                        f"camera depth range: {float(d_min):.2f}-{float(d_max):.2f} m; "
+                        "pixels outside it have no depth (ROIs further away will "
+                        "come up empty)"
+                    )
         logger.info(
             f"intrinsics fx={intrinsics[0]:.2f} fy={intrinsics[1]:.2f} "
             f"cx={intrinsics[2]:.2f} cy={intrinsics[3]:.2f}"
@@ -679,10 +848,19 @@ def main(
             if roi is None:
                 logger.error("No target ROI selected")
                 return
-        if floor_roi is None and show:
+        if floor_roi is None and (show or no_fk):
             floor_roi = select_roi(
-                rgb, "Optional: select the FLOOR for a sanity check (q to skip)"
+                rgb,
+                "Select the FLOOR (required, it is the height reference)"
+                if no_fk
+                else "Optional: select the FLOOR for a sanity check (q to skip)",
             )
+        if no_fk and floor_roi is None:
+            logger.error(
+                "--no-fk needs a floor ROI (pass --floor-roi or select one); "
+                "the floor plane is the height reference"
+            )
+            return
 
         targets: list[tuple[str, tuple[int, int, int, int]]] = [("target", roi)]
         if floor_roi is not None:
@@ -708,20 +886,68 @@ def main(
             result["roi"] = box
             results[label] = result
 
+        if no_fk:
+            if "floor" not in results or "target" not in results:
+                logger.error(
+                    "--no-fk needs a valid plane fit for both the target and "
+                    "the floor; see the errors above"
+                )
+                return
+            floor_fit, target_fit = results["floor"], results["target"]
+            n_floor = floor_fit["normal"]
+            d_floor = float(-n_floor @ floor_fit["centroid"])
+            # Orient the floor normal toward the camera (origin) so heights
+            # above the floor come out positive.
+            if d_floor < 0:
+                n_floor, d_floor = -n_floor, -d_floor
+            target_fit["height_m"] = float(
+                n_floor @ target_fit["centroid"] + d_floor
+            )
+            target_fit["tilt_deg"] = float(
+                np.degrees(
+                    np.arccos(
+                        np.clip(abs(n_floor @ target_fit["normal"]), 0.0, 1.0)
+                    )
+                )
+            )
+            # The floor defines the reference plane.
+            floor_fit["height_m"], floor_fit["tilt_deg"] = 0.0, 0.0
+
+        frame_label = "camera" if no_fk else "base"
+        height_label = "height above floor   "
+        tilt_label = "tilt from floor      " if no_fk else "tilt from base +z    "
+
         print("\n" + "=" * 66)
-        print(f"PLANE HEIGHT IN BASE FRAME  (camera frame: {camera_frame})")
+        if no_fk:
+            print("PLANE HEIGHT ABOVE THE MEASURED FLOOR  (--no-fk, camera frame)")
+        elif use_dexmotion:
+            print(
+                f"PLANE HEIGHT ABOVE THE FLOOR  (camera frame: {camera_frame}, "
+                f"base origin +{base_height * 1000:.0f} mm)"
+            )
+        else:
+            print(
+                "PLANE HEIGHT ABOVE THE FLOOR  (manual vega_1p FK, "
+                f"base origin +{base_height * 1000:.0f} mm)"
+            )
         print("=" * 66)
         for label, result in results.items():
             print(f"[{label}]  roi={result['roi']}")
-            print(f"  height above base z=0 : {result['height_m'] * 1000:8.1f} mm")
-            print(f"  tilt from base +z     : {result['tilt_deg']:8.2f} deg")
+            print(f"  {height_label} : {result['height_m'] * 1000:8.1f} mm")
+            print(f"  {tilt_label} : {result['tilt_deg']:8.2f} deg")
             print(f"  fit rms               : {result['rms_mm']:8.2f} mm")
             print(
                 f"  inliers               : {result['n_inliers']:8d} / "
                 f"{result['n_points']} ({result['inlier_ratio'] * 100:.1f}%)"
             )
-            print(f"  normal (base)         : {np.round(result['normal'], 4).tolist()}")
-            print(f"  centroid (base)       : {np.round(result['centroid'], 4).tolist()}")
+            print(
+                f"  normal ({frame_label:>6})       : "
+                f"{np.round(result['normal'], 4).tolist()}"
+            )
+            print(
+                f"  centroid ({frame_label:>6})     : "
+                f"{np.round(result['centroid'], 4).tolist()}"
+            )
 
             if result["inlier_ratio"] < 0.6 or result["rms_mm"] > 15.0:
                 print(
@@ -729,7 +955,13 @@ def main(
                     "one surface. Do not trust this height."
                 )
 
-        if "floor" in results:
+        if no_fk:
+            print("-" * 66)
+            print(
+                "note: the floor plane is the reference (0 by definition); "
+                "judge it by its fit rms / inlier ratio above"
+            )
+        elif "floor" in results:
             floor = results["floor"]
             print("-" * 66)
             print(

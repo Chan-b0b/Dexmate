@@ -67,8 +67,8 @@ GRASP_ORIENTATION_RPY: tuple[float, float, float] = (np.pi, 0.0, 0.0)
 #
 # Values are conservative starting points — TUNE on the robot.
 # ---------------------------------------------------------------------------
-SPEED_SCALE_LEFT: float = 0.8       # multiplier on every cap below, left (suction) arm
-SPEED_SCALE_RIGHT: float = 0.3      # multiplier on every cap below, right (gripper) arm
+SPEED_SCALE_LEFT: float = 1.0       # multiplier on every cap below, left (suction) arm
+SPEED_SCALE_RIGHT: float = 0.5      # multiplier on every cap below, right (gripper) arm
 # (0.7 = normal; lowered for first slow handoff test)
 
 CONTROL_HZ: float = 200.0          # motion streaming rate (set_joint_pos_vel)
@@ -100,6 +100,14 @@ SAFE_TRANSPORT_Z: float = 1.10
 # to SAFE_TRANSPORT_Z is a faster joint-space move_ee (its sideways arc is
 # harmless once clear).
 LIFT_CLEAR_EE_Z: float = 0.95
+# Best-effort ascent after a lift leg fell short (the per-tick vertical stream
+# can dead-end on a diverging IK branch right at the reach boundary while the
+# column is statically reachable): the joint-space recovery move only runs when
+# the EE is already within this of LIFT_CLEAR_EE_Z (or above) — lower means the
+# part is still between the case walls, where a joint-space arc could sweep
+# them — and only moves for a height gain of at least the MIN_GAIN.
+LIFT_RECOVER_MIN_CLEAR_M: float = 0.03
+LIFT_RECOVER_MIN_GAIN_M: float = 0.01
 # Height the cup tip hovers above a target before the descent leg (m).
 HOVER_HEIGHT_M: float = 0.25
 # Physical suction tube length, L_gripper_base origin -> cup tip (m).
@@ -132,11 +140,11 @@ SOURCE_CASE_CENTER: tuple[float, float, float, float] = (0.87, 0.454781, 0.81, 0
 GRASP_YAW: float = 1.92                       # cup approach yaw, relative to the case frame
 HALF_SLOT_SPACING_M: float = 0.08           # slots at (0, ±this) around the slot-pair center
 # Case-local (dx, dy, dz) offsets from the case center.
-CASE_GRAB_OFFSET: tuple[float, float, float] = (0.0, 0.0564, 0.0)   # cup grabs slightly left (+y)
+CASE_GRAB_OFFSET: tuple[float, float, float] = (-0.04, 0.07, 0.0)   # cup grabs slightly left (+y)
 # Slot-pair CENTER vs the detected OBB center (case-local). Both battery targets
 # shift by this together — fixes the common-bias symptom (bat1 undershoots,
 # bat2 overshoots by the same amount = center biased +y). Spacing stays symmetric.
-SLOT_CENTER_OFFSET: tuple[float, float, float] = (0.0, -0.04, 0.0)
+SLOT_CENTER_OFFSET: tuple[float, float, float] = (-0.04, -0.04, 0.0)
 SLOT_OFFSETS: dict[int, tuple[float, float, float]] = {
     1: (SLOT_CENTER_OFFSET[0], 0 - HALF_SLOT_SPACING_M, SLOT_CENTER_OFFSET[2]),  # right slot (robot -y)
     2: (SLOT_CENTER_OFFSET[0], 0 + HALF_SLOT_SPACING_M, SLOT_CENTER_OFFSET[2]),  # left slot  (robot +y)
@@ -375,9 +383,111 @@ CHASSIS_MANUAL: bool = True
 HOME_LIFT_MIN_EE_Z: float = 0.95
 HOME_LIFT_EE_Z: float = 1.05
 CHASSIS_STRAFE_SPEED_MS: float = 0.1   # m/s magnitude (move_sideways: + left, - right)
+# Speed for the LONG station<->station legs only (auto-move); small centering /
+# adjust corrections stay at CHASSIS_STRAFE_SPEED_MS — at higher speeds a
+# 3-10 cm move is ramp-dominated and lands poorly, while long-leg arrival error
+# is absorbed by centering + the per-direction leg learning. dexcontrol clips
+# to the robot's max_lin_vel (~0.5). If the carried case slips on the cup at
+# higher accel (watch the placement), lower this back.
+CHASSIS_LEG_SPEED_MS: float = 0.2
 CHASSIS_TURN_SPEED_RADS: float = 0.2   # rad/s magnitude for in-place yaw (turn: + ccw, - cw)
 CHASSIS_STRAFE_TIME_S: float = 7.2      # seconds per leg (~distance = speed*time)
 CHASSIS_SETTLE_S: float = 1.0           # settle pause after a strafe, before detecting
+# --auto-move (chassis_sequence CLI flag): chassis legs run automatically — each
+# source<->target leg is a fixed open-loop DISTANCE at CHASSIS_STRAFE_SPEED_MS
+# (overrides CHASSIS_MANUAL). Station spacing is known ~0.6-0.7 m; detection
+# recenters at each visit, so the leg only needs to land the case in view/reach.
+CHASSIS_AUTO_STRAFE_DIST_M: float = 0.5
+# Auto-adjust on a failed reach pre-check (auto-move only): turn the chassis so
+# the detected case yaw matches the taught reference (yaw 0), then translate so
+# the case center lands on the reference (x from SOURCE_CASE_CENTER at the
+# source / TARGET_DEFAULT_CASE_CENTER at the target, y from
+# CHASSIS_CENTER_CASE_Y_M), re-detect, retry. After MAX_ATTEMPTS the operator
+# gets the interactive keyboard prompt, as in manual mode. Per-attempt motion
+# is clamped; deadbands skip micro-moves.
+CHASSIS_ADJUST_MAX_ATTEMPTS: int = 2
+CHASSIS_ADJUST_MAX_TRANSLATE_M: float = 0.30   # per-attempt clamp, each axis
+CHASSIS_ADJUST_MAX_TURN_DEG: float = 30.0      # per-attempt clamp, in-place turn
+CHASSIS_ADJUST_MIN_TRANSLATE_M: float = 0.01   # deadband: skip smaller translations
+CHASSIS_ADJUST_MIN_TURN_DEG: float = 8.0       # deadband: skip smaller turns
+# Learned leg distances (auto-move): the arrival residual after each leg
+# (centering/adjust strafe, minus deliberate per-item re-alignments) feeds the
+# distance of the LEG THAT JUST RAN — left (target->source) and right
+# (source->target) learn independently, so a direction-dependent open-loop
+# travel gain calibrates out. In-memory only — final values are logged at run
+# end for a manual config update. Each clamped to CHASSIS_AUTO_STRAFE_DIST_M
+# +/- this; a persistent "clamped" log means the true station separation is
+# outside the clamp window — fix CHASSIS_AUTO_STRAFE_DIST_M instead.
+CHASSIS_LEG_LEARN_CLAMP_M: float = 0.20
+# Case centering (auto-move): at EVERY station visit the chassis first turns
+# in place so the detected case yaw reads 0 deg (deadband / clamp reuse
+# CHASSIS_ADJUST_MIN/MAX_TURN_DEG), then strafes so the case center sits at
+# CHASSIS_CENTER_CASE_Y_M in base_link (0.0 = the robot center line) — BEFORE
+# the pick/place pose is computed. Detection is most accurate, the reach
+# window widest (yaw 0 = the taught wrist branch), and the source/target
+# biases most symmetric (so they cancel through the carry), with the case
+# square and dead ahead. Up to MAX_MOVES correction rounds per visit, each
+# followed by a re-detect; applied strafes feed the learned leg distance
+# (turns are not tracked — small headings converge to the stack orientation).
+# The reach pre-check still guards every descent — if center-line picks keep
+# failing it, raise CENTER_CASE_Y toward the taught y (~0.45).
+CHASSIS_CENTER_CASE_Y_M: float = 0.0
+CHASSIS_CENTER_TOL_M: float = 0.05      # |case y - target| accepted without a move
+CHASSIS_CENTER_MAX_MOVES: int = 5       # per-visit correction rounds
+# Detection plausibility gate (auto-move): the stations are only one leg
+# (~CHASSIS_AUTO_STRAFE_DIST_M) apart, so the OTHER station's stack is in the
+# head-camera view and the detector returns the highest-confidence OBB
+# anywhere in frame. A detection whose case-center y is farther than this
+# from the expected ref is rejected as "not found" (observed: the first
+# target visit locked onto the SOURCE stack and dragged the robot back left).
+# Must be well below the leg distance and above the arrival error (~0.15).
+CHASSIS_DETECT_Y_GATE_M: float = 0.50
+# Final-detection refinement: the detection a pick/place pose is computed from
+# is the MEDIAN of this many fresh-frame samples (x/y/yaw; z comes from the
+# warp plane, identical across samples). Robust to single-frame OBB jitter and
+# one bad fit; does nothing for systematic bias. Centering rounds stay
+# single-shot. 1 = off. Cost: ~0.2-0.5 s per extra sample (fresh-frame wait +
+# YOLO inference).
+DETECT_MEDIAN_SAMPLES: int = 5
+# Bin-aligned divert positioning (chassis_sequence): before a gripper divert,
+# the head camera finds the divert bin (case_detection detect_bin) and the
+# chassis strafes so the bin center sits at DIVERT_BIN_TARGET_Y_M in base_link
+# (+left; 0.10 = 10 cm left of the robot center line). After the move the bin
+# is re-detected and a residual over DIVERT_BIN_TOL_M gets ONE more
+# correction. The net move is strafed back after the divert (or before the
+# fallback case place) so the normal target geometry is restored.
+DIVERT_BIN_TARGET_Y_M: float = 0.0
+# Plane z the bin bbox center is projected at (base_link, ~bin rim height).
+# Only weakly affects Y once the bin nears the center line — the projection-
+# ray bias scales with the lateral offset, and the re-detect pass converges
+# the residual — so a rough value is fine. (TUNE if the first-move overshoot
+# looks large in the logs.)
+DIVERT_BIN_PLANE_Z_M: float = 0.55
+DIVERT_BIN_TOL_M: float = 0.03          # accepted Y residual after the first move
+DIVERT_BIN_MAX_STRAFE_M: float = 0.6    # per-move safety clamp on the align strafe
+# Fallback when NO bin is detected: fixed extra rightward strafe (the original
+# open-loop behavior), strafed back like the aligned move. 0.0 = stay put.
+DIVERT_EXTRA_RIGHT_M: float = 0.2
+# Chassis command timing compensation (move_chassis, DISTANCE-based legs only;
+# the legacy speed*time legs keep their empirically tuned values untouched).
+# dexcontrol streams a timed velocity command for max(wait_time - 1.0, 0) s
+# (chassis.py _execute_timed_command), so a distance leg adds the clipped
+# second back. Keep this at 1.0 (the library's fixed clamp): the ~7 cm
+# over-travel that motivated lowering it was the firmware COASTING past a
+# dropped single-shot stop command — fixed by streaming the stop instead
+# (move_chassis._stop, CHASSIS_STOP_STREAM_S below). Lowering DEAD_TIME makes
+# small centering moves silently under-drive (a <=7 cm move streams 0 s).
+CHASSIS_CMD_DEAD_TIME_S: float = 1.0
+# The post-leg stop is STREAMED (zero velocity at ~50 Hz, steering kept) for
+# this long — a single stop command was observed to get lost, letting the
+# chassis coast ~0.7 s past the leg.
+CHASSIS_STOP_STREAM_S: float = 0.3
+# Pre-steer before a distance leg: command the leg's steering angles first and
+# poll chassis.steering_angle until within TOL (or TIMEOUT, then drive anyway),
+# so none of the timed drive is spent pivoting the wheels — dexcontrol's own
+# sequential-steer hold resolves to 0 s through the same -1.0 s clamp.
+CHASSIS_PRESTEER_TOL_RAD: float = 0.05
+CHASSIS_PRESTEER_TIMEOUT_S: float = 5.0
 # layers_remaining fed to the BEV detector (sets the warp plane top_face_z =
 # FLOOR_Z_BASE_M + layer*LAYER_PITCH_M). Source is a full stack picked top-down
 # (first pick = full height); target is built up from the floor. Warping at the
@@ -388,7 +498,7 @@ CHASSIS_SETTLE_S: float = 1.0           # settle pause after a strafe, before de
 # completed layer, until the source is exhausted. Set these to the physical
 # stack heights at run start (an aborted run logs the values to resume with).
 SRC_LAYERS_REMAINING: int = 5           # source stack height at run start
-TGT_LAYERS_REMAINING: int = 1           # target stack height at run start
+TGT_LAYERS_REMAINING: int = 1          # target stack height at run start
 # Arm joint pose that clears the head-camera view of the target while an item is
 # carried during transport (TUNE; defaults to the left-arm home).
 ARM_VIEW_PARK_JOINTS: tuple[float, ...] = HOME_JOINTS_LEFT
@@ -423,4 +533,11 @@ DESCENT_CHECK_STEP_M: float = 0.02          # z step of the pre-flight sweep
 # LENGTH), NOT a top-face z. 0.7545 = measured seat contact of the first case on
 # the empty target floor (2026-07-03), matching the model floor 0.566 + pitch
 # 0.0138 + suction 0.176 = 0.756 within ~1mm. Descend-to-contact still refines.
-TARGET_DEFAULT_CASE_CENTER: tuple[float, float, float, float] = (0.94, 0.0, 0.7545, 0.0)
+TARGET_DEFAULT_CASE_CENTER: tuple[float, float, float, float] = (0.90, 0.0, 0.7545, 0.0)
+# Per-layer forward trim on TARGET places (chassis_sequence): every place of a
+# layer lands (tgt_layers - 1) * this further +x (base_link forward) — layer 1
+# gets no trim. Compensates the forward placement bias that grows with the
+# stack height (the BEV warp-plane geometry biases the detected center along
+# the camera ray as the top face rises). Applies to the case AND the layer's
+# battery seats (same detection, same bias). 0.0 disables.
+PLACE_X_LAYER_TRIM_M: float = 0.008
