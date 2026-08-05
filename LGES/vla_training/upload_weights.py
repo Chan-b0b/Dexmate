@@ -45,6 +45,20 @@ META = {
     "smolvla_film_0729_prefix_mask0":   ("Chanho-Lee/lges_case_pick_0729", "FiLM v2 cond=contact,fz,seal prefix mask0 FZ_OFF=2.1 (ablation), 50k, val-best"),
     "smolvla_film_0729_suffix_mask1":   ("Chanho-Lee/lges_case_pick_0729", "FiLM v2 cond=contact,fz,seal suffix mask1 FZ_OFF=2.1, 50k, val-best"),
     "act_0729":                         ("Chanho-Lee/lges_case_pick_0729", "ACT from scratch, 50k, val-best"),
+    "smolvla_film_0729_prefix_mask1_recal": ("Chanho-Lee/lges_case_pick_0729",
+        "FiLM v2 cond=contact,fmag,fz,seal prefix mask1, RECAL calib F0=5.5 tau=1 "
+        "fmag=(|F|-5.5)/1 fz=(fz-3.0)/0.7, 50k from base, val-best@5k. "
+        "DEPLOY: override FILM_F0 = field hover baseline + 1.5 (~7) — real baseline "
+        "drifted to 5.5-5.8N vs train 4.6N (rollout analysis 2026-08-03)"),
+    "smolvla_film_0729_prefix_mask0_recal": ("Chanho-Lee/lges_case_pick_0729",
+        "FiLM v2 cond=contact,fmag,fz,seal prefix mask0 (ablation — FiLM stays inert), "
+        "RECAL calib, 50k from base, val-best@5k"),
+    "smolvla_film_0729_prefix_mask1_recal_fromnaive": ("Chanho-Lee/lges_case_pick_0729",
+        "FiLM v2 cond=contact,fmag,fz,seal prefix mask1, RECAL calib F0=5.5 tau=1 "
+        "fmag=(|F|-5.5)/1 fz=(fz-3.0)/0.7, warm-start from smolvla_naive_0729 best@10k, "
+        "20k steps, val-best@2500. Offline deploy pick 2026-08-04 (stops at 6.8N "
+        "first-contact + monotone force ramp; press-sim 0.6mm nominal / 3.4mm early). "
+        "DEPLOY: override FILM_F0 = field hover baseline + 1.5 (~7)"),
 }
 
 api = HfApi()

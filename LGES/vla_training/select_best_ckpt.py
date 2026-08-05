@@ -64,6 +64,8 @@ def main():
     from lerobot.datasets.lerobot_dataset import LeRobotDataset
     from lerobot.policies.factory import get_policy_class, make_pre_post_processors
     ptype = PreTrainedConfig.from_pretrained(ckpts[-1] / "pretrained_model").type
+    if ptype == "pi05":
+        import train_pi05  # noqa: F401  registers the relative_actions_processor shim
     PolicyCls = get_policy_class(ptype)
     print(f"[best] policy type: {ptype}")
 
