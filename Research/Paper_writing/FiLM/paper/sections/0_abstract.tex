@@ -1,0 +1,23 @@
+% Abstract (~200 words). 0729-pure numbers only (EVIDENCE §3). Rewritten from OUTLINE §4 sketch
+% after Q2 (old sketch referenced the excluded depletion-sweep diagnosis).
+Vision-language-action (VLA) policies increasingly receive physical condition signals---wrist
+wrench, contact, vacuum-seal state---in their observations, yet whether a policy \emph{causally
+uses} them is unmeasured. On a real-robot suction case-picking task whose critical
+transition---stop descending on contact---is observable only through force (single head camera;
+case heights are visually near-indistinguishable), a fine-tuned VLA that receives the full wrench
+presses through contact until a safety abort in every trial. We introduce \emph{counterfactual
+authority probes}: a computed condition vector \chat{} (contact, normal force, seal) injected
+through zero-initialized FiLM with the raw wrench masked, so that \chat{} is the only force
+pathway and the conditioned policy receives \emph{no information the baseline lacks}. Forcing
+\chat{} at inference measures how much the condition actually moves the action. The probes expose
+a \emph{bypass} phenomenon: with the wrench unmasked, conditioning trains to validation loss
+identical to the fourth decimal yet near-zero authority---a difference invisible to standard
+validation.
+A matched quintuple (same data, same initialization, indistinguishable imitation error) shows the
+architecture does not force usage but \emph{determines its form}: raw access yields a template
+response that fades as force exceeds the demonstrations, an ungrounded bottleneck yields none, and
+only the grounded bottleneck brakes monotonically with force---stopping and retreating at
+$12$\,N, converging in all closed-loop press simulations where the alternatives penetrate. On the
+robot, force-decorrelated press-retreat demonstrations plus the grounded bottleneck convert $0/3$
+over-press failures into $5/7$ gentle picks ($2.5$--$4.8$\,N), and the dose-response crossover
+reproduces on-robot. The failure class persists unchanged in a $3.6$B-parameter VLA.

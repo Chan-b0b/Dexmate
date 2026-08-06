@@ -1,0 +1,49 @@
+% §III Task and the Failure (~0.75 page, Fig. 2). 0729-pure per Q2: no June depletion sweep /
+% gate-oracle in body. Failure = naive 0/3 overpress (EVIDENCE §3 rollouts). The policy is
+% phenomenologically described here; mechanism diagnosis deferred to §V (probes).
+% NOTE anonymity: platform/task described generically; no robot brand, no company, no HF repos.
+\section{Task, Setting, and the Failure}
+\label{sec:task}
+
+\textbf{Task and platform.}
+We study suction case picking on a dual-arm mobile manipulator: the arm descends onto a stack of
+rigid cases, must stop when the suction cup meets the top case, hold until vacuum seal is
+confirmed, and lift (Fig.~\ref{fig:setup}). The margin is tight in both directions---too little
+press and the seal fails; a few millimeters too much and contact force climbs past the $15$\,N
+safety limit, since the stack is stiff (${\sim}5$\,N/mm, Sec.~\ref{sec:discussion}). The policy
+controls a 7-D end-effector action (Cartesian pose increments and a suction command) at
+$15$\,Hz, executed in chunks of $5$ actions (${\sim}330$\,ms between observations).
+\todo{verify action-space wording (7-D split) against deployment config}
+
+\textbf{Observations and their asymmetry.}
+The policy observes a single head-mounted camera (RGB and colorized depth; no wrist camera) and a
+15-D state: end-effector position and quaternion, suction command, vacuum-seal bit, and the 6-D
+wrist wrench. The setting is a deliberately clean diagnostic: at head-camera range, case-stack
+heights differing by millimeters---the entire success margin---are visually near-indistinguishable
+(Fig.~\ref{fig:setup}, right), while the wrench and seal bit signal the contact transition
+directly. Every condition the task depends on is \emph{in the state the policy receives}; the
+question is whether the policy binds its behavior to it.
+
+\textbf{Demonstrations.}
+We collect $100$ training episodes ($19{,}445$ frames) and hold out $6$ validation episodes
+($1{,}169$ frames) with a scripted expert designed to \emph{decorrelate} force from its habitual
+correlates: each episode descends with suction on, presses to a randomized force target drawn
+from $[8,15]$\,N, retreats $5$--$10$\,mm from the contact plane, then hovers and lifts
+immediately on seal. Every episode thus demonstrates the counterfactual the task requires:
+force rises $\rightarrow$ stop $\rightarrow$ move back up, \emph{before} any seal event, at a
+force level that varies independently of depth. This is the data-side prescription whose
+rationale we develop in Sec.~\ref{sec:discussion}; here it matters that the baseline and all
+conditioned variants are trained on exactly these episodes.
+
+\textbf{The failure.}
+A SmolVLA policy~\cite{smolvla} fine-tuned on these demonstrations---receiving the full wrench
+and seal bit in its state---fails $3/3$ evaluation trials the same way: it descends, makes
+contact, and keeps pressing until the force limit aborts the run at $15.4$--$18.7$\,N. The
+transition that the demonstrations exhibit in every single episode, driven by the one signal
+that observably announces it, is the transition the policy does not perform. Success rate says
+the policy is bad; it does not say \emph{why}. The policy might ignore force entirely; it might
+respond to force but too weakly; it might respond in a form that collapses precisely when force
+exceeds the demonstrated range. These hypotheses have opposite prescriptions (more data?
+different sensors? different architecture?), and none of them is distinguishable from training
+curves or rollouts. Distinguishing them requires intervening on the signal itself---the
+instrument we build next.

@@ -1,0 +1,153 @@
+% §V Offline Findings (~1.5–1.75 pages, Table I–II, Fig. 4–5). All numbers EVIDENCE §3, §3.5–3.6, §3.8.
+% 0729-pure (Q2): no 0708 channel decomposition, no os10/ladder. Exposure elimination NOT claimed here.
+% Forbidden: "naive is force-blind" (transplant 105%); state-transplant vs condition-forcing
+% never conflated (P1 vs P2 terminology from §IV).
+\section{Experiments}
+\label{sec:offline}
+
+We present the offline probe battery first
+(\ref{sec:offline-bypass}--\ref{sec:offline-pi05}), then the robot validation
+(Sec.~\ref{sec:robot}--\ref{sec:robot-live}). All offline probes run on the six held-out
+validation episodes. Checkpoints are selected by validation loss (\emph{best}); the final
+checkpoint (\emph{last}) is reported where it qualifies the story.
+
+\subsection{Bypass: standard validation cannot see causal use}
+\label{sec:offline-bypass}
+
+Table~\ref{tab:bypass} crosses injection site (prefix/suffix) and wrench masking (on/off) for
+policies trained identically on the same data.
+
+\begin{table}[t]
+\caption{Bypass matrix: validation loss vs.\ causal authority (val-best / last checkpoints).
+Full forcing = P1 all-channel; contact-moment = P1 calibrated onset pattern.}
+\label{tab:bypass}
+\centering
+\begin{tabular}{lccc}
+\toprule
+Policy & Val loss & \multicolumn{2}{c}{Authority (best / last)} \\
+\cmidrule(lr){3-4}
+ & (best) & full forcing & contact-moment \\
+\midrule
+baseline (raw wrench)     & 0.15087 & --- & --- \\
+FiLM prefix, wrench kept  & 0.15075 & 7\,/\,8\% & 3\,/\,4\% \\
+FiLM prefix, wrench masked& \textbf{0.14624} & \textbf{76\,/\,54\%} & 7\,/\,8\% \\
+FiLM suffix, wrench masked& 0.15924 & 60\,/\,42\% & 10\,/\,1\% \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+Three observations. \textbf{(i) Bypass.} With the wrench left in the state, the FiLM-conditioned
+policy trains to a validation loss equal to the baseline's in the \emph{fourth decimal place}
+(0.15075 vs.\ 0.15087) while its condition channels carry $7$--$8\%$ authority: gradient descent
+satisfied the imitation objective through the raw route and left the dedicated conditioning
+pathway causally dead. Nothing in the training signal distinguishes this policy from one that
+uses its conditions. \textbf{(ii) Loss rank anti-correlates with authority rank.} The masked
+prefix model has both the \emph{lowest} loss and the highest authority; the suffix model has the
+\emph{worst} loss yet $60\%$ authority; the unmasked model sits between them in loss with none.
+A practitioner selecting on loss learns nothing about causal use (Fig.~\ref{fig:loss-authority}).
+\textbf{(iii) Selection and site effects.} Validation-loss checkpoint selection also selects for
+authority (best $>$ last in every conditioned model), and prefix injection dominates suffix. The
+bypass result replicates in an independent pair below (Sec.~\ref{sec:offline-quintuple}):
+warm-started variants with and without the mask again differ by $10^{-4}$ in loss and
+categorically in authority.
+
+\subsection{Where authority binds: stable states, not the transient}
+\label{sec:offline-posthoc}
+
+Authority, where it exists, is not uniformly distributed over the condition channels.
+Contact-moment forcing (P1, calibrated onset pattern) yields only $7$--$10\%$ even for the
+best-conditioned model (Table~\ref{tab:bypass}, last column): the 1--2-frame contact
+\emph{transient} is weakly adopted across the board. The state-transplant probe (P2) shows what
+is adopted instead. Transplanting a measured first-contact state into pre-contact descent frames
+moves the \emph{baseline} by $105\%$ of its descent command---the baseline is not force-blind;
+its raw route responds strongly to force-bearing state. But transplanting a \emph{sealed} state
+moves both models far more than the contact state does (on-robot: $147\%$ vs.\ $67\%$ for the
+baseline; Sec.~\ref{sec:robot}), and the strongest single responses everywhere are to the
+stable, sustained signals---seal and sustained press---rather than to contact onset.
+\todo{add contact-z distribution analysis from 0729 dataset (bimodal contact heights) ---
+derivation pending, Fig.~\ref{fig:decomp} placeholder}
+
+The picture: what a policy adopts is decided by the \emph{statistical character} of the signal.
+Stable, persistent conditions (seal state) are adopted essentially for free; a transient that is
+redundant with depth-like cues in ordinary demonstrations is not. This has an operational
+corollary developed in Sec.~\ref{sec:discussion}: on stiff contact, even a policy with
+substantial condition authority cannot succeed by \emph{reactive} gating at the contact
+moment---the successful mechanism is anticipatory behavior plus post-hoc state gating, which is
+exactly what the probes measure as adopted.
+
+\subsection{The matched quintuple: architecture determines the form of force use}
+\label{sec:offline-quintuple}
+
+The section's central experiment holds everything fixed except the conditioning pathway. Starting
+from the \emph{same} trained baseline checkpoint, on the \emph{same} demonstrations, we continue
+training four variants: the baseline itself, FiLM \emph{without} the mask (bypass control), FiLM
+with mask but \emph{shuffled} \chat{} during training (ungrounded control: the bottleneck exists,
+its content is noise), and FiLM with mask and grounded \chat{}. Imitation error on held-out
+episodes is indistinguishable across all five policies ($0.81$--$0.96$\,mm per step): on the data
+manifold, these are the same policy. Under intervention they are three different mechanisms
+(Table~\ref{tab:quintuple}, Fig.~\ref{fig:doseresponse}).
+
+\begin{table*}[t]
+\caption{Matched quintuple: same data, same initialization, indistinguishable imitation---three
+mechanisms. Dose-response = P3 cancellation at 8\,N$\rightarrow$12\,N (\% of own descent).
+Press sim = P4 seal-never: episodes stopped before force limit / max penetration.}
+\label{tab:quintuple}
+\centering
+\begin{tabular}{llcccc}
+\toprule
+Policy & Force access & Dose-response 8$\rightarrow$12\,N & Transplant (P2) & Press sim (P4) & Val err \\
+\midrule
+baseline (best)        & raw wrench            & $+1.41\rightarrow+1.12$\,mm (36$\rightarrow$28\%) $\downarrow$ & $+1.63$ (105\%) & 4--5/6, max 14.9\,mm & 0.84\,mm \\
+baseline (last)        & raw wrench            & $+1.73\rightarrow+2.00$\,mm (57$\rightarrow$65\%) & $+1.69$ (108\%) & 3/6, max 16.0\,mm & 0.71\,mm \\
+FiLM, wrench kept      & raw + dead \chat{}    & $+1.57\rightarrow+1.12$\,mm ($d_{\mathrm{raw}}$ carries all) & $+1.68$ ($d_{\mathrm{FiLM}}{=}0.04$) & 4--5/6, max 11.9\,mm & 0.85\,mm \\
+FiLM, mask, shuffled \chat{} & ungrounded bottleneck & $-0.06\rightarrow-0.11$\,mm ($\approx$0) & $-0.06$ (0\%) & \textbf{0/6, max 431\,mm} & 0.96\,mm \\
+FiLM, mask, grounded (best) & grounded bottleneck & $+1.20\rightarrow\mathbf{+4.40}$\,mm (31$\rightarrow$\textbf{115\%}) $\uparrow$ & $+1.57$ (94\%, all $d_{\mathrm{FiLM}}$) & \textbf{6/6, max 4.5\,mm} & 0.87\,mm \\
+FiLM, mask, grounded (last) & grounded bottleneck & $+0.97\rightarrow+3.44$\,mm $\uparrow$ & $+1.45$ (97\%) & 6/6, max 4.1\,mm & 0.81\,mm \\
+\bottomrule
+\end{tabular}
+\end{table*}
+
+\textbf{Grounding, not capacity, is the active ingredient.} The ungrounded control kills every
+alternative explanation at once: it has the same added parameters, the same continued training,
+the same bottleneck---and zero response at every dose, with the worst closed-loop outcome in the
+study ($431$\,mm penetration). An ungrounded bottleneck is \emph{worse} than raw access: the mask
+removed the raw route and the noise-trained \chat{} replaced it with nothing. Conversely, the
+unmasked control shows that adding the FiLM module without the mask changes nothing: its
+dose-response curve lies on the baseline's ($+1.57\rightarrow+1.12$ vs.\ $+1.41\rightarrow+1.12$;
+identical at $12$\,N), its pathway decomposition puts the response entirely on the raw route, and
+its loss matches the grounded variant's to the fourth decimal ($0.14750$ vs.\ $0.14762$)---the
+bypass finding, replicated with authority now at $94\%$ vs.\ $0$.
+
+\textbf{The form dissociation.} The baseline responds to force---at the demonstrated magnitude.
+As the dose rises past the demonstrations, its response \emph{fades} ($36\%\rightarrow28\%$): a
+template, matched ever more poorly as reality departs from it. The grounded bottleneck's response
+\emph{grows monotonically}, crossing full cancellation into retreat at $12$\,N---where the
+unsaturated channel reads five times its training range. The monotone extrapolation is not
+learned from data (no demonstration presses to these forces); it is inherited from the channel's
+design as a calibrated monotone scalar. Same data, same imitation: raw access binds a template,
+the grounded bottleneck binds a brake.
+
+\textbf{Honest boundaries of the discriminator.} The baseline's \emph{shape} is
+checkpoint-dependent: at $50$k steps its curve rises mildly ($57\%\rightarrow65\%$). The robust
+discriminators are therefore not slope sign alone but (i) slope \emph{magnitude}
+(${\sim}10\times$: $+2.4$--$2.5$\,mm vs.\ $\pm0.3$\,mm over the sweep), (ii) whether the curve
+\emph{crosses} full cancellation (only the grounded models stop and retreat; no baseline
+checkpoint exceeds $65\%$), and (iii) the closed-loop consequence---the late baseline's larger
+open-loop response coexists with a \emph{worse} press-sim outcome ($3/6$, max $16.0$\,mm),
+because a response that saturates below $100\%$ cannot stop a stiff press regardless of its
+size. The grounded form is stable across checkpoints ($6/6$ at both). Finally, the seal-granted
+control variant of P4 localizes the baseline's failure: given a seal event at shallow depth it
+stops normally ($0.5$\,mm over-travel); withhold the seal and it presses through. Its stopping
+is real but bound to the \emph{seal event}; the grounded policy's is bound to \emph{force}.
+
+\subsection{Scale does not change the class}
+\label{sec:offline-pi05}
+
+Fine-tuning $\pi_{0.5}$ ($3.6$B parameters, $8\times$ SmolVLA)~\cite{pi05} on the same
+demonstrations reproduces the baseline signature: strong on-manifold transplant response
+($65$--$97\%$), a dose-response that saturates shallowly (never exceeding $37\%$ cancellation,
+approaching no full stop at any dose), and closed-loop collapse in the seal-never press
+simulation ($0/6$, max penetration $86$\,mm---worse than the smaller model), at equal-or-better
+imitation error ($0.69$--$0.89$\,mm). Neither parameter count nor a different VLA architecture
+converts template responding into force-bound braking; the failure class is a property of the
+objective-plus-data, not of model scale.

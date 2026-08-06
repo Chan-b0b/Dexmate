@@ -1,0 +1,50 @@
+% Discussion & Limitations (~0.5 page). Physics arithmetic (EVIDENCE §4), grounding-is-not-free
+% (pi05-film, EVIDENCE §3.8), operational knobs (drift/re-anchor), limitations.
+% 08-06 사용자 결정: fidelity trap(0727) 삭제 / exposure 무수치 한 줄 포함 확정.
+\section{Discussion and Limitations}
+\label{sec:discussion}
+
+\textbf{Why the prescription must be anticipatory.}
+A first-principles calculation explains both the failure and the fix. The case stack is stiff:
+${\sim}5$\,N/mm of penetration. Stopping below the $15$\,N limit therefore requires a full stop
+within ${\sim}2$\,mm of contact---under $330$\,ms action chunks and the demonstrated descent
+rates, this is arithmetically impossible for \emph{reactive} gating that begins braking at the
+contact transient, no matter how much authority the transient carries. The viable mechanisms are
+anticipatory: approach slowly, press deliberately, retreat. The press-retreat demonstrations
+teach exactly this behavior prior, and the probes confirm the resulting division of labor: the
+successful policy's contact-moment authority is small ($7\%$) while its full-condition authority
+is large ($76\%$)---success comes from an anticipatory behavior prior plus post-hoc state
+gating, not from a reflex. The instrument's value here is not that it found a large number, but
+that it correctly \emph{predicted which mechanism could not work}.
+
+\textbf{Grounding is not free.}
+Transplanting the instrument naively fails, and the failure is diagnostic. Attaching the same
+conditioning to $\pi_{0.5}$ via suffix injection with uncalibrated offsets produces the
+ungrounded-control signature at scale: zero authority at every dose---including with the contact
+channel forced to saturation---and closed-loop penetration \emph{worse} than the raw $\pi_{0.5}$
+baseline ($0/6$, max $94$--$102$\,mm vs.\ $86$\,mm), at unchanged imitation error. The mask
+removes the raw route; if \chat{} fails to ground, what remains is a policy with genuinely no
+force pathway. A bottleneck plus counterfactual data is necessary but not sufficient: injection
+site and calibration must be re-engineered per architecture (consistent with prefix $>$ suffix
+and the calibration sensitivity observed within SmolVLA). \decide{keep this paragraph's
+numeric detail vs.\ compress to two sentences --- page budget}
+
+\textbf{Operational asymmetry.}
+The computed condition creates knobs the baseline lacks. Force-torque baselines drift
+(${\sim}1$\,N within a day, pose-sensitive); the conditioned policy re-anchors its offsets at a
+hover pose each run---a deployment-time correction with no retraining---while the baseline's
+force statistics are frozen in its normalization. The same interface is what makes the policy
+auditable (P1/P5 probes) and intervenable at deployment.
+
+\textbf{Limitations.}
+Single task, single platform, small robot-$n$: the robot results are a case study, and the
+statistical claims live in the offline battery ($n{=}6$ held-out episodes $\times$ dense frames,
+five matched policies, two architectures). The press simulation depends on a linear force model;
+we mitigate with the seal-granted control and the live probes, which bracket the simulated
+mechanism from both sides. Contact-moment (reactive) authority plateaus low in every
+configuration we trained---in development phases, oversampling transition frames also failed to
+move it; distilling an explicit
+descend-until-contact oracle (e.g., via DAgger~\cite{ross2011dagger,chen2020lbc}) is the natural
+next step, as is a negative-control task whose critical condition is \emph{not} observable in
+the state, and replication of the bypass audit on force-fusion architectures whose designs
+assume use~\cite{forcevla,forceflow}.

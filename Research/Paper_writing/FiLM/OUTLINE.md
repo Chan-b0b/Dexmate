@@ -216,7 +216,7 @@ FiLM; (c) causal confusion / shortcut — de Haan'19, Geirhos'20, Shortcut-in-Ge
 | Claim | Evidence | 상태 |
 |---|---|---|
 | 진단: condition-ignoring | depletion sweep + gate-oracle (70/60/0/20/0 → 회복) | ✅ (구 셋업, ~10회/층) — "diagnostic phase"로 구획 서술 |
-| Loss-blindness bypass | 0729 held-out probe: mask0 7–8% vs mask1 54–76% | ✅ **authority 축 0729-pure 완결**; loss 축 서버 수치 회수(책상) |
+| Loss-blindness bypass | mask0 val 0.15075 ≈ naive 0.15087(4째 자리 동일)·권한 7% vs 76%; v2/mask0fn 0.14762/0.14750·권한 94% vs 0 | ✅ **완결 08-06 — loss·authority 양축 0729-pure** (Fig.4 즉시 가능) |
 | Depth shortcut | 채널분해 + 접촉z 밴드 분석 | ✅ 강함 (0708 데이터 — 서술 위치 결정 필요) |
 | Exposure 기각 | os10/os3 negative | ✅ 강함 (과거 라운드) |
 | 반응 권한 plateau | 전 라운드 realistic ≤25%, 0729 7% | ✅ (offline) |
@@ -224,7 +224,7 @@ FiLM; (c) causal confusion / shortcut — de Haan'19, Geirhos'20, Shortcut-in-Ge
 | **형태 결정 (triad + 스윕)** | naive 템플릿 / V1 무반응 / v2 단조 + press-sim | ✅ **완료 08-04~05 (§3.5–3.6) — 신규 클라이맥스** |
 | 실기 검증: naive vs FiLM | 0729 롤아웃 (0/3 vs 5/7) + L1/L3/L5 소N | ⚠️ 소N 케이스 스터디로 스코프 (sweep 취소 — 환경 동결) |
 | On-robot 반사실 (S3) | live probe 3런 (07-30, 08-06×2) — **고도스 crossover 포함** | ✅ **완결 08-06 (§3.7)** |
-| 아키텍처 일반성 | ACT/pi0.5 bypass 재현 | ❌ future work |
+| 아키텍처 일반성 | pi0.5 3.6B: naive 동일 클래스(포화 ≤37%·폐루프 0/6 max 86mm)·모방 동급 | ✅ **확보 08-06 (EVIDENCE §3.8)** — 스케일 반론 차단; film 이식은 실패(예비, 후속 3건) = Discussion 재료 |
 | Negative control (S5) | 삽입 태스크 | ❌ future work |
 
 ## 9. 마감(9/15)까지 잔여 작업 — **전부 책상 작업 (실험 동결 08-06)**
@@ -243,24 +243,20 @@ FiLM; (c) causal confusion / shortcut — de Haan'19, Geirhos'20, Shortcut-in-Ge
 
 - 영어, IEEEtran (Overleaf 권장 — 로컬 LaTeX 미설치), double-anonymous(저자·기관·HF repo명
   익명화 — `Chanho-Lee/*` 노출 금지, 익명 링크 사용).
-- **데이터 정책 (사용자 결정 2026-07-30): 논문 실험은 무조건 0729 데이터로만.**
-  Table I(authority 매트릭스)·로봇 결과·V1 control 모두 0729. 과거 라운드 증거(0708 채널분해·
-  os10 기각·decorrelation ladder)의 본문 포함 방식은 미정(§11 Q2) — 포함 시 별도 셋업임을
-  **정직하게 명시**하고 "diagnostic development phase"로 구획, 숨기지 않고 혼동도 없게.
+- **데이터 정책 (07-30 + 08-06 Q2 확정): 본문 증거 = 0729-only 순수.** 과거 라운드
+  (0708 채널분해·os10·ladder·6월 구셋업 sweep) 수치는 본문에서 제외 — 진단·사후바인딩·
+  바이모달 분석은 전부 0729 증거로 재근거(§11 참조). §III/V-B/V-C는 집필 시 이에 맞춰
+  재구성 (V-B → 0729 state-swap 분해, V-C(exposure) → 본문 드랍).
 - 수치 인용은 `EVIDENCE.md` 경유 (probe 원문 경로 포함).
 - 인용 계획(~25편)은 research-analyst 보고서 §4 — ForceFlow(2605.11048)·CGP(2603.05687)·
   2507.22380 신규 추가 필수.
 
-## 11. Open questions (사용자 확인 필요)
+## 11. Open questions — **전부 해소 (08-06)**
 
-확정된 것 (2026-07-30): 데이터 0729-only · 중간층 2–4 보간 평가 진행 · vision-info 미미함 강조.
-
-1. 프레이밍 승인: 진단 중심 "Same Loss, No Cause" (추천) vs method 중심?
-2. **과거 라운드 증거의 사용 범위**: (a) 구 셋업 진단 sweep(70/60/0/20/0)과 0708 채널분해·
-   os10 기각·ladder를 "개발 단계 진단"으로 본문 요약 포함 (추천 — 논문 논리 사슬에 필요)
-   vs (b) 완전 제외하고 0729 내 실험으로 재구성 (채널분해 probe를 0729 ckpt로 재실행,
-   진단은 이번 sweep의 naive 층별 실패로 대체).
-3. sweep 체크포인트: val-best(probe 권한 우위 76%) vs refs/main(실기 5/6) — 첫 층에서 양쪽
-   2~3런씩 확인 후 pin?
-4. 원격 GPU 서버(0729 loss 수치, V1 학습) 접근 시점?
-5. ICRA 직행 vs RA-L(+ICRA option)?
+확정: 데이터 0729-only(07-30) · 프레이밍 = 진단 "Same Loss, No Cause" + 형태 결정(08-04~05
+토론으로 확정) · **Q2 = (b) 0729-only 순수 (08-06 사용자 확정)** — 본문은 0729 증거만:
+진단은 0729 로봇 0/3 + press-sim + 포화 곡선으로, 사후-바인딩은 state-swap 분해
+(st_sealed ≫ st_fc, 오프라인+라이브)로, 접촉 z 바이모달은 0729 parquet 재도출로 대체.
+os10/ladder는 본문 제외(exposure 소거는 무수치 한 줄 or 삭제 — 집필 시).
+sweep 관련(Q3)은 실험 동결로 무효. loss 회수(Q4) 완료. venue = ICRA 2027 직행(9/15),
+RA-L 백업 유지.

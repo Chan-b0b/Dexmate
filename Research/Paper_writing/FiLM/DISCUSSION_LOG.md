@@ -191,5 +191,49 @@ EVIDENCE.md §3.5에 정리 (원문 경로 병기).
   c-hat 권한 0(Δ−0.04mm) + 분해 dRaw=전부/dFiLM=0 + 도스-곡선이 naive와 일치
   (+1.57→+1.12) → bypass 4번째 재현, "모듈만 붙이면 무변화" 정량화.
 - [x] fromnaive **last(20k) ramp**: +0.97→+3.44 단조 유지 → 형태의 ckpt 안정성.
-- [ ] pi05_naive_0729 오프라인 probe (업로드 완료 대기; 러너·policy-agnostic 수정
-  준비됨) → 아키텍처 일반성 §8 행 복원 후보.
+- [x] pi05_naive_0729 probe **완료 (08-06 서버, EVIDENCE §3.8)** — naive 동일 클래스
+  (포화 ≤37%, 폐루프 0/6 max 86mm), 스케일 반론 차단. pi05-film은 서버에서 진행 중
+  (예비: 완전 무권한 = 접지 이식 실패 후보).
+- [x] 0729 loss 회수 **완료 (08-06, `vla/0729_training_results.csv`)** — bypass 쌍
+  loss 소수 4째 자리 동일(0.15075/0.15087; fromnaive 쌍 0.14750/0.14762), loss-권한
+  순위 역상관(suffix 최악 loss·60% 권한). Table I 양축 완성.
+
+## 2026-08-06 (저녁) — 집필 개시: `paper/` v0 전섹션 드래프트
+
+사용자 지시 "집필 들어가주세요" → `Research/Paper_writing/FiLM/paper/`에 IEEEtran
+스켈레톤 + 전 섹션(Abstract~Conclusion) v0 완성. 로컬 LaTeX 없음 — Overleaf 업로드용.
+상태·결정·수치출처맵·페이지예산은 `paper/NOTES.md`가 단일 출처 (이 로그엔 요점만):
+
+- **구조 (사용자 지시 반영)**: §V = **Experiments 단일 우산** (A bypass / B binding /
+  C matched quintuple / D pi0.5 scale / E robot picks / F live counterfactuals) —
+  구 "Offline Findings"/"Robot Experiments" 2섹션을 통합. 총 7섹션.
+- **프로브 용어 확정** (§IV, EVIDENCE 혼용금지 해결): P1 condition forcing(합성 c-hat) /
+  P2 state transplant(state-swap) / P3 dose-response sweep(fcscale) / P4 press
+  simulation / P5 live counterfactual. authority = 하강 명령 상쇄율(%).
+- **quintuple 본문 명명**: baseline / "FiLM, wrench kept" / "FiLM, mask, shuffled ĉ" /
+  "FiLM, mask, grounded" — V1/v2/mask0fn 코드명 본문 미사용.
+- 캘리브레이션 2세대(구/재캘) 정직 각주로 처리, pi05 이식 실패와 연결.
+- Q2 반영: 본문 0729-pure. exposure는 Discussion 무수치 한 줄 후보(\decide 마커).
+- **사용자 회신 4건 반영 (08-06)**: ① 타이틀에 "loss" 단어 금지·loss 축 디강조 →
+  워킹 타이틀 "Access Is Not Use: Auditing Causal Bypass of Force in Behavior-Cloned
+  Vision-Language-Action Policies", §V-A 헤딩도 loss 문구 제거. ② Fig.1 티저 설계는
+  텍스트 마무리 후 논의(보류). ③ fidelity trap(0727 일화) **삭제** — 0729-only 순수성을
+  Discussion 일화까지 확장. ④ exposure 무수치 한 줄 **포함 확정** (Limitations).
+
+## 2026-08-06 (저녁) — Q2 확정: 본문 증거 0729-only 순수
+
+**사용자 결정: 과거 라운드 증거(0708 채널분해·os10 기각·ladder·6월 구셋업 진단 sweep)
+본문 제외.** (권고는 포함(a)이었으나 순수(b) 선택 — 함의와 대체 전략:)
+- **진단(claim 1) 재근거**: 6월 sweep+oracle 대신 **0729 로봇 naive 0/3 overpress +
+  press-sim 붕괴(max 86mm까지) + 얕은 포화 곡선(≤37%, 100% 미달)** — 실패 방향이
+  under-reach→overpress로 바뀌지만 기제(depth/습관 게이팅, force 무시)는 동일 서술.
+- **shortcut/사후 바인딩(claim 3) 재근거**: 0708 채널분해 대신 **0729 state-swap
+  분해** — naive st_sealed(147%/+4.32) ≫ st_firstcontact(67%) 오프라인·라이브 양쪽 +
+  접촉 z 바이모달 분석은 0729 parquet에서 재도출(로컬 가능).
+- **exposure 기각(os10/os3) 상실**: 0729 내 대체 실험 없음 → 본문에서 access/exposure
+  소거 사슬 중 exposure 링크는 **주장 강도 하향** (Discussion에서 무수치 한 줄
+  "development-phase에서 기각 관찰" 또는 완전 삭제 — 집필 시 결정). decorrelation
+  처방의 인과 주장도 "0729 데이터 설계 근거" 수준으로 완화 (cross-round 비교라서).
+- **살아남는 뼈대는 전부 0729-pure**: Table I(loss+authority), 사중 대조(§V-F),
+  힘-스케일 스윕, press-sim, live probe 시리즈, pi0.5 일반성 — 클라이맥스 교체(08-06)
+  덕에 논문 무게중심이 이미 0729 증거에 있어 손실 최소.

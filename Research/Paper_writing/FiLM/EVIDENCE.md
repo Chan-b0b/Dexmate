@@ -90,9 +90,24 @@ realistic c1=[0.6, 0.42, 0].
 | prefix_mask0 best / last | **7% / 8% WEAK** | 3% / 4% |
 | suffix_mask1 best / last | 60% PASS / 42% | 10% / 1% |
 
+### train/val loss (`vla/0729_training_results.csv`, 서버 회수 08-06) — Table I loss 축 완결
+
+| run | train loss | **val loss** | best step | val probe std 권한 |
+|---|---|---|---|---|
+| naive | 0.0520 | 0.15087 | 10k | — |
+| prefix_mask0 | 0.0540 | **0.15075** | 15k | **7–8%** |
+| prefix_mask1 | 0.0590 | **0.14624** | 5k | **54–76%** |
+| suffix_mask1 | 0.0540 | 0.15924 | 5k | 42–60% |
+
+판독: ① **mask0 val loss = naive와 소수 4째 자리 동일** (0.15075 vs 0.15087) — 권한 0의
+bypass 모델이 loss로는 완전 무구분. ② mask1은 오히려 **최저 val loss**인데 권한 76% —
+loss 3% 차이가 권한 10× 차이를 신호하지 못함. ③ **loss 순위와 권한 순위가 역상관**:
+suffix_mask1이 val loss 최악(0.1592)인데 권한 60%, mask0은 loss 양호한데 권한 7%.
+→ Fig.4 산점도(loss vs authority) 무상관의 정량 근거.
+
 핵심 판독:
 1. **Bypass가 0729 데이터만으로 완결 재현** — mask0 7~8% vs mask1 54~76% (동일 데이터·동일
-   아키텍처·held-out 측정). Table I을 0729-pure로 구성 가능 (loss 수치만 서버 회수 필요).
+   아키텍처·held-out 측정). Table I은 0729-pure로 **완성** (loss 축 회수 완료, 위 표).
 2. **prefix > suffix 재확인** (best 76 vs 60).
 3. **val-best가 last보다 authority 높음** (76 vs 54 / 60 vs 42) — val-loss 선택이 authority도
    함께 고름. 체크포인트 선택 문단의 보너스 발견.
@@ -180,7 +195,8 @@ mask0fn·fn_last는 08-06 로컬 추가 — 전 행 HF main=val-best, fn last만
 
 | 모델 (force 접근) | 8N→12N 응답 | pc_fc | press-sim fzdelta (seal-never) | val err |
 |---|---|---|---|---|
-| naive (raw 6-d) | +1.41→+1.12 (템플릿, 감소) | +1.63 (105%) | 4–5/6, max 14.9mm | 0.84mm |
+| naive best@10k (raw 6-d) | +1.41→+1.12 (감소) | +1.63 (105%) | 4–5/6, max 14.9mm | 0.84mm |
+| naive last@50k | +1.73→+2.00 (완만 상승, 57→65%) | +1.69 (108%) | **3/6, max 16.0mm** | 0.71mm |
 | **mask0-fromnaive (raw+무력 c-hat)** | +1.57→+1.12 (**dRaw가 전부**, 템플릿) | +1.68 (dRaw +1.67 / dFiLM +0.04) | 4–5/6, max 11.9mm | 0.85mm |
 | **V1 (병목, 비접지 c-hat)** | **−0.06→−0.11 (0)** | −0.06 (0%) | **0/6, mean 51–167mm, max 431mm** | 0.96mm |
 | fromnaive v2 best (병목, 접지) | +1.20→+4.40 (단조) | +1.57 (94%, 전부 dFiLM) | 6/6, max 4.5mm | 0.87mm |
@@ -201,9 +217,19 @@ mask0fn·fn_last는 08-06 로컬 추가 — 전 행 HF main=val-best, fn last만
    곡선이 naive와 사실상 일치** (+1.57→+1.12 vs +1.41→+1.12; 12N 동값) — FiLM 모듈을
    "붙이기만" 하면(마스크 없이) 아무것도 변하지 않음을 정량으로. naive-init·recal·
    fmag 채널 포함 조건에서도 우회 재현 = 가장 강한 버전.
+   **loss 완결 (08-06 회수, `vla/0729_training_results.csv`)**: v2 val 0.14762 vs
+   mask0fn 0.14750 — **소수 4째 자리 동일**, 권한 94% vs 0. 0708의 "0.101 vs 0.099"가
+   fromnaive 세팅에서 재재현. V1 val 0.17081(+16%) — 셔플 노이즈로 약간 높음(정직
+   표기), 단 loss 차(+16%)와 권한 차(94%→0, 범주적)는 규모가 다름.
 6. **형태의 체크포인트 안정성**: fromnaive last(20k)도 단조 유지 (+0.97→+3.44) —
    best@2.5k와 같은 형태, 크기만 소폭 감소. 단조 브레이크는 특정 체크포인트의
    우연이 아니라 학습 전 구간에서 유지되는 성질.
+7. **⚠ naive의 형태는 체크포인트 의존 (08-06, 서술 주의)**: best@10k는 감소(36→28%),
+   last@50k는 완만 상승(57→65%) — "naive=항상 감소 템플릿"으로 일반화 금지. 견고한
+   판별축은 ① **기울기 크기** (v2 Δ+2.4~2.5mm vs naive Δ−0.3~+0.3mm, ~10×),
+   ② **100% 상쇄선 통과 여부** (v2만 12N에서 하강 완전 상쇄+후퇴; naive는 어느 ckpt도
+   65% 이하), ③ **폐루프 결과** (v2 6/6·max 4mm vs naive-last 3/6·max 16.0mm —
+   오픈루프 반응이 커져도 폐루프는 오히려 악화 = "반응 크기 ≠ 안전"의 실측).
 
 ### 3.7 Live probe 시리즈 — 온로봇 반사실, fromnaive vs naive (08-04 / 08-06 ×2)
 
@@ -227,6 +253,44 @@ film은 c-hat 강제 + 같은 swap. 로봇 이동 직전 마지막 실기 데이
   같은 물리 반사실을 받음 (08-06 수정, `swap_drift` JSON 기록 — 미보정이면 film이
   드리프트만큼 저도스). ② suction=0 오프-매니폴드 등 라이브 전이 손실로 film
   절대치는 과소평가 가능(각주 후보). ③ 소N(3포즈) — 고도스는 표적 보충 측정으로 서술.
+
+### 3.8 pi0.5 라운드 — 아키텍처 일반성 (서버 probe 08-06, `vla/probes/0729_*pi05*`)
+
+**pi05_naive_0729** (lerobot/pi05_base 3.6B fine-tune, bs8 50k; best@10k/last@50k):
+
+| ckpt | pc_fc | ramp8→12 (of own descent) | press-sim fzdelta seal-never | val err |
+|---|---|---|---|---|
+| best@10k | +1.46 (65%) | +0.69→+0.97 (17→25%) | **0/6, mean 39.6–66.2, max 85.6mm** | 0.89mm |
+| last@50k | +1.86 (97%) | +0.79→+1.02 (29→37%) | 1/6·0/6, max 72.6mm | 0.69mm |
+
+판독 — **SmolVLA naive와 동일 클래스, 스케일 무관**: ① 온매니폴드 템플릿 반응 존재
+(65–97%), ② 얕은 포화 곡선 — 어떤 지점에서도 100% 상쇄선 근처도 못 감(≤37%),
+③ 폐루프 힘-램프 붕괴 — SmolVLA naive(3–5/6, max 16mm)보다 오히려 심함(사실상 0/6,
+max 86mm), ④ 모방 정확도 동급(0.69–0.89mm). → bypass/shortcut/형태 문제는
+0.45B→3.6B 스케일업과 아키텍처 교체(SmolVLA→pi0.5)에 불변 — **"더 큰 모델이 해결"
+반론 차단**. §8 아키텍처 일반성 행 복원.
+
+**pi05_film — 접지 이식 실패 확정 (08-06 서버, film_contact_pi05 라우팅 probe)**:
+`pi05_film_frombase_0729` / `pi05_film_onnaive_0729` (suffix 전용, 구캘리브레이션
+cond=contact,fz,seal mask1 FZ_OFF=2.1):
+
+| | pc_fc | ramp8→12 | press-sim (seal-never) | val err |
+|---|---|---|---|---|
+| filmfb best | +0.05 | +0.04→+0.06 | **0/6, mean 71–80, max 94.6mm** | 0.89mm |
+| filmon best | −0.02 | −0.02→−0.03 | **0/6, mean 73–89, max 102.3mm** | 0.91mm |
+| (last, 부분) | +0.01~+0.10 | 동일 0 | — | — |
+
+1. **전 도스 완전 무권한 — 풀도스 포함**: ramp12의 swap c-hat = **[contact 1.0(포화),
+   fz 0.86, seal 0]**인데도 dFiLM ≈ 0 → "약함"이 아니라 **권한 0** (풀도스 강제 후속
+   불필요해짐). 배선 검증: FiLM 키 전부 로드 + c-hat 실이동 확인.
+2. **V1 시그니처가 pi0.5에서 재현**: 비접지 병목 = raw 접근보다 나쁨 — press-sim
+   침투가 pi05 naive(off1 mean 39.6mm)의 2배(filmon 89.4mm). mask1이 raw 경로를
+   지웠는데 c-hat이 죽어 있으니 진짜 force-blind.
+3. **모방 동급** (0.89–0.91mm) — 매니폴드 위 무구분, 개입에서만 드러남 (일관).
+4. 해석: suffix 주입 + 구캘리브레이션이 pi0.5 flow-expert에서 접지 실패 →
+   **"병목+반사실 데이터만으론 부족; 주입점·캘리브레이션은 아키텍처별 재설계 필요"**
+   (SmolVLA의 suffix<prefix·재캘리브레이션 필수와 일관) — Discussion "접지는 공짜가
+   아니다" 문단 확정 재료. 잔여: last ramp12 2건(형식적, 진행 중).
 
 ## 4. 0727 실패 분석 (Discussion 재료 — fidelity trap)
 
@@ -261,8 +325,8 @@ film은 c-hat 강제 + 같은 swap. 로봇 이동 직전 마지막 실기 데이
 재구성 — mask0가 이미 학습돼 있어 loss-blindness 주장 성립 가능. 채널분해·realistic probe도
 0729 체크포인트에서 재실행 필요.
 
-1. 원격 GPU 서버: 0729 4모델 train/val **loss 수치** (probe는 2026-07-30 회수 완료 — §3 참조),
-   prefix_mask0 체크포인트 로컬 확보. (+ 필요 시 0729 체크포인트 채널분해 decomp probe.)
+1. ~~0729 4모델 train/val loss~~ **회수 완료 (08-06, `vla/0729_training_results.csv`** —
+   fromnaive 계열 3종 포함 7모델; §3 loss 표·§3.6 판독 5 반영**)**.
 2. 0729 롤아웃 리비전 확정 (val-best vs refs/main) — 남은 runs: refs/main 추정 6, val-best 1(실패).
 3. 로봇: depletion sweep n≥10/층 (naive/FiLM/oracle), 중간층 2–4 보간.
 4. ~~V1 decorrelated control~~ **완료 (08-05, §3.6)** — 예측 적중(스윕 평평·0/6 sim).

@@ -1,0 +1,53 @@
+% ICRA 2027 submission — working title "Access Is Not Use" (08-06 사용자: 타이틀에 "loss" 미사용,
+% loss 축은 본문에서도 디강조 — see NOTES.md)
+% Compile on Overleaf (no local LaTeX). IEEEtran conference, 8 pages incl. references, double-anonymous.
+% All numbers trace to Research/Paper_writing/FiLM/EVIDENCE.md (section refs in % comments).
+\documentclass[conference]{IEEEtran}
+\IEEEoverridecommandlockouts
+
+\usepackage{cite}
+\usepackage{amsmath,amssymb,amsfonts}
+\usepackage{graphicx}
+\usepackage{booktabs}
+\usepackage{multirow}
+\usepackage{xcolor}
+\usepackage[hidelinks]{hyperref}
+
+% --- draft macros (strip before submission) ---
+\newcommand{\todo}[1]{\textcolor{red}{[TODO: #1]}}
+\newcommand{\decide}[1]{\textcolor{blue}{[DECISION: #1]}}
+% --- notation ---
+\newcommand{\chat}{\ensuremath{\hat{c}}}
+\newcommand{\Fmag}{\ensuremath{\lVert F\rVert}}
+
+\begin{document}
+
+\title{Access Is Not Use: Auditing Causal Bypass of Force\\in Behavior-Cloned Vision-Language-Action Policies}
+
+% Double-anonymous: no author block content until camera-ready.
+\author{\IEEEauthorblockN{Anonymous Authors}\\
+\IEEEauthorblockA{Paper ID: XXXX}}
+
+\maketitle
+
+\begin{abstract}
+\input{sections/0_abstract}
+\end{abstract}
+
+\begin{IEEEkeywords}
+imitation learning, vision-language-action models, force control, causal confusion, contact-rich manipulation
+\end{IEEEkeywords}
+
+\input{sections/1_intro}
+\input{sections/2_related}
+\input{sections/3_task}
+\input{sections/4_method}
+\input{sections/5_offline}
+\input{sections/6_robot}
+\input{sections/7_discussion}
+\input{sections/8_conclusion}
+
+\bibliographystyle{IEEEtran}
+\bibliography{refs}
+
+\end{document}
