@@ -55,10 +55,45 @@ def _forced_cond(self, state):
 
 film_contact._condition_from_state = _forced_cond
 
+# pi0.5 computes c-hat through its OWN module-level function — film_contact_pi05
+# ._cond_from_state, called from the policy-level _set_cond closure — so patching
+# film_contact alone leaves the pi05 path reading REAL c-hat and every forced cell below
+# silently becomes a no-op. Install the same override there. (Closures resolve globals at
+# call time, so rebinding the module attribute is enough.)
+import film_contact_pi05 as fcp  # noqa: E402
+
+_orig_cond_pi05 = fcp._cond_from_state
+
+
+def _forced_cond_pi05(model, state_norm):
+    if _FORCE["c"] is None:
+        return _orig_cond_pi05(model, state_norm)
+    return _FORCE["c"].to(state_norm.device).expand(state_norm.shape[0], -1).clone()
+
+
+fcp._cond_from_state = _forced_cond_pi05
+
 
 def c_from_raw(model, raw_state: torch.Tensor) -> torch.Tensor:
     """c-hat (1, cond_dim) from a RAW (un-normalized) state vector, via the model's own
-    stats buffers + the original condition fn — exactly what embed_prefix would compute."""
+    stats buffers + the original condition fn — exactly what the FiLM path would compute.
+
+    The two architectures normalize differently, so this has to branch: SmolVLA z-scores the
+    wrench with _wrench_mean/_wrench_std, while pi0.5 quantile-normalizes the whole state to
+    [-1,1] with _film_q01/_film_q99. Using the mean/std path on a pi05 model raises
+    AttributeError; using it after registering those buffers would silently mis-normalize."""
+    if hasattr(model, "_film_q01"):                      # pi0.5: invert the quantile map
+        q01, q99 = model._film_q01, model._film_q99
+        n = raw_state.shape[-1]
+        span = (q99[:n] - q01[:n]).clamp_min(1e-6)
+        s = torch.zeros(1, n, device=q01.device)
+        raw = raw_state.to(q01.device)
+        # only the dims c-hat reads need to decode back to `raw`; the others stay at the
+        # quantile midpoint, which _cond_from_state never looks at
+        for i in list(range(W_LO, W_HI)) + [SEAL_IDX]:
+            s[0, i] = 2.0 * (raw[i] - q01[i]) / span[i] - 1.0
+        with torch.no_grad():
+            return _orig_cond_pi05(model, s).cpu()
     dev = model._wrench_mean.device
     s = torch.zeros(1, raw_state.shape[-1], device=dev)
     s[0, W_LO:W_HI] = (raw_state[W_LO:W_HI].to(dev) - model._wrench_mean) / model._wrench_std
@@ -90,6 +125,11 @@ def main():
                     help="raw |F| (N) below which a frame counts as pre-contact/descent")
     ap.add_argument("--naive", action="store_true",
                     help="vanilla checkpoint: no FiLM patch, state-swap cells only")
+    ap.add_argument("--film-pi05", action="store_true",
+                    help="the checkpoint is a pi0.5 FiLM run: patch via film_contact_pi05 "
+                         "(suffix-only, quantile-normalized state) instead of film_contact. "
+                         "Its numbers are NOT comparable to the SmolVLA recal runs (prefix, "
+                         "4 channels) — read them only as sign/shape reproduction.")
     ap.add_argument("--swap", choices=("both", "wrench", "seal", "onset", "firstcontact",
                                        "fcscale", "bias"),
                     default="both",
@@ -116,28 +156,50 @@ def main():
     args = ap.parse_args()
 
     naive = args.naive
+    if naive and args.film_pi05:
+        ap.error("--naive and --film-pi05 are mutually exclusive")
     if not naive:
         cond = tuple(c.strip() for c in
                      os.environ.get("FILM_COND", "contact").split(",") if c.strip())
         mask_force = os.environ.get("FILM_MASK_FORCE", "0") not in ("0", "false", "False")
         inject = os.environ.get("FILM_INJECT", "suffix")
-        print(f"[probe] FiLM cond={cond} inject={inject} mask_force={mask_force}  "
-              f"ckpt={args.checkpoint}")
         stats_root = args.stats_root or args.dataset_root
-        wm, ws = film_contact.load_wrench_stats(stats_root)
-        sm, ss = film_contact.load_seal_stats(stats_root)
-        dm, dsd = film_contact.load_dfmag_stats(stats_root)
-        film_contact.apply(
-            "v2", wm, ws, seal_mean=sm, seal_std=ss, cond=cond,
-            contact_F0=float(os.environ.get("FILM_F0", "6")),
-            contact_tau=float(os.environ.get("FILM_TAU", "4")),
-            fz_tau=float(os.environ.get("FILM_FZ_TAU", "5")),
-            fz_off=float(os.environ.get("FILM_FZ_OFF", "2.6")),
-            mask_force=mask_force, inject=inject,
-            dfmag_mean=dm, dfmag_std=dsd,
-            dfmag_tau=float(os.environ.get("FILM_DFMAG_TAU", "5")),
-            fmag_off=float(os.environ.get("FILM_FMAG_OFF", "5.1")),
-            fmag_tau=float(os.environ.get("FILM_FMAG_TAU", "5")))
+        if args.film_pi05:
+            # pi0.5 has no state token, so there is no prefix analogue — inject is always
+            # suffix here regardless of FILM_INJECT, and apply() takes quantiles, not
+            # wrench/seal/dfmag mean-std pairs.
+            print(f"[probe] FiLM-pi0.5 cond={cond} inject=suffix (only) "
+                  f"mask_force={mask_force}  ckpt={args.checkpoint}")
+            if inject != "suffix":
+                print(f"[probe] NOTE: FILM_INJECT={inject} ignored — pi0.5 is suffix-only")
+            q01, q99 = fcp.load_state_quantiles(stats_root)
+            fcp.apply(
+                "v2", q01, q99, cond=cond,
+                contact_F0=float(os.environ.get("FILM_F0", "6")),
+                contact_tau=float(os.environ.get("FILM_TAU", "4")),
+                fz_tau=float(os.environ.get("FILM_FZ_TAU", "5")),
+                fz_off=float(os.environ.get("FILM_FZ_OFF", "2.6")),
+                fmag_off=float(os.environ.get("FILM_FMAG_OFF", "5.1")),
+                fmag_tau=float(os.environ.get("FILM_FMAG_TAU", "5")),
+                dfmag_tau=float(os.environ.get("FILM_DFMAG_TAU", "5")),
+                mask_force=mask_force)
+        else:
+            print(f"[probe] FiLM cond={cond} inject={inject} mask_force={mask_force}  "
+                  f"ckpt={args.checkpoint}")
+            wm, ws = film_contact.load_wrench_stats(stats_root)
+            sm, ss = film_contact.load_seal_stats(stats_root)
+            dm, dsd = film_contact.load_dfmag_stats(stats_root)
+            film_contact.apply(
+                "v2", wm, ws, seal_mean=sm, seal_std=ss, cond=cond,
+                contact_F0=float(os.environ.get("FILM_F0", "6")),
+                contact_tau=float(os.environ.get("FILM_TAU", "4")),
+                fz_tau=float(os.environ.get("FILM_FZ_TAU", "5")),
+                fz_off=float(os.environ.get("FILM_FZ_OFF", "2.6")),
+                mask_force=mask_force, inject=inject,
+                dfmag_mean=dm, dfmag_std=dsd,
+                dfmag_tau=float(os.environ.get("FILM_DFMAG_TAU", "5")),
+                fmag_off=float(os.environ.get("FILM_FMAG_OFF", "5.1")),
+                fmag_tau=float(os.environ.get("FILM_FMAG_TAU", "5")))
     else:
         print(f"[probe] NAIVE checkpoint (no FiLM)  ckpt={args.checkpoint}")
 

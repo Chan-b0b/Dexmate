@@ -43,6 +43,9 @@ def main():
                     default=VLA_DIR / "datasets/lges_case_pick_0729_val")
     ap.add_argument("--repo-id", default="Chanho-Lee/lges_case_pick_0729_val")
     ap.add_argument("--naive", action="store_true")
+    ap.add_argument("--film-pi05", action="store_true",
+                    help="pi0.5 FiLM checkpoint: patch via film_contact_pi05 (suffix-only, "
+                         "quantile-normalized state) instead of film_contact")
     ap.add_argument("--stiffness", type=float, default=1.0,
                     help="contact stiffness k (N per mm of penetration)")
     ap.add_argument("--f-base", type=float, default=6.8,
@@ -66,27 +69,46 @@ def main():
                     help="[fzdelta] fz jump (N) at first touch (measured ~3.65-2.0)")
     args = ap.parse_args()
 
+    if args.naive and args.film_pi05:
+        ap.error("--naive and --film-pi05 are mutually exclusive")
     if not args.naive:
         cond = tuple(c.strip() for c in
                      os.environ.get("FILM_COND", "contact").split(",") if c.strip())
         mask_force = os.environ.get("FILM_MASK_FORCE", "0") not in ("0", "false", "False")
         inject = os.environ.get("FILM_INJECT", "suffix")
-        print(f"[sim] FiLM cond={cond} inject={inject} mask_force={mask_force}  "
-              f"ckpt={args.checkpoint}")
-        wm, ws = film_contact.load_wrench_stats(args.dataset_root)
-        sm, ss = film_contact.load_seal_stats(args.dataset_root)
-        dm, dsd = film_contact.load_dfmag_stats(args.dataset_root)
-        film_contact.apply(
-            "v2", wm, ws, seal_mean=sm, seal_std=ss, cond=cond,
-            contact_F0=float(os.environ.get("FILM_F0", "6")),
-            contact_tau=float(os.environ.get("FILM_TAU", "4")),
-            fz_tau=float(os.environ.get("FILM_FZ_TAU", "5")),
-            fz_off=float(os.environ.get("FILM_FZ_OFF", "2.6")),
-            mask_force=mask_force, inject=inject,
-            dfmag_mean=dm, dfmag_std=dsd,
-            dfmag_tau=float(os.environ.get("FILM_DFMAG_TAU", "5")),
-            fmag_off=float(os.environ.get("FILM_FMAG_OFF", "5.1")),
-            fmag_tau=float(os.environ.get("FILM_FMAG_TAU", "5")))
+        if args.film_pi05:
+            # suffix-only architecture; apply() takes quantile buffers, not mean/std pairs
+            import film_contact_pi05 as fcp
+            print(f"[sim] FiLM-pi0.5 cond={cond} inject=suffix (only) "
+                  f"mask_force={mask_force}  ckpt={args.checkpoint}")
+            q01, q99 = fcp.load_state_quantiles(args.dataset_root)
+            fcp.apply(
+                "v2", q01, q99, cond=cond,
+                contact_F0=float(os.environ.get("FILM_F0", "6")),
+                contact_tau=float(os.environ.get("FILM_TAU", "4")),
+                fz_tau=float(os.environ.get("FILM_FZ_TAU", "5")),
+                fz_off=float(os.environ.get("FILM_FZ_OFF", "2.6")),
+                fmag_off=float(os.environ.get("FILM_FMAG_OFF", "5.1")),
+                fmag_tau=float(os.environ.get("FILM_FMAG_TAU", "5")),
+                dfmag_tau=float(os.environ.get("FILM_DFMAG_TAU", "5")),
+                mask_force=mask_force)
+        else:
+            print(f"[sim] FiLM cond={cond} inject={inject} mask_force={mask_force}  "
+                  f"ckpt={args.checkpoint}")
+            wm, ws = film_contact.load_wrench_stats(args.dataset_root)
+            sm, ss = film_contact.load_seal_stats(args.dataset_root)
+            dm, dsd = film_contact.load_dfmag_stats(args.dataset_root)
+            film_contact.apply(
+                "v2", wm, ws, seal_mean=sm, seal_std=ss, cond=cond,
+                contact_F0=float(os.environ.get("FILM_F0", "6")),
+                contact_tau=float(os.environ.get("FILM_TAU", "4")),
+                fz_tau=float(os.environ.get("FILM_FZ_TAU", "5")),
+                fz_off=float(os.environ.get("FILM_FZ_OFF", "2.6")),
+                mask_force=mask_force, inject=inject,
+                dfmag_mean=dm, dfmag_std=dsd,
+                dfmag_tau=float(os.environ.get("FILM_DFMAG_TAU", "5")),
+                fmag_off=float(os.environ.get("FILM_FMAG_OFF", "5.1")),
+                fmag_tau=float(os.environ.get("FILM_FMAG_TAU", "5")))
     else:
         print(f"[sim] NAIVE checkpoint  ckpt={args.checkpoint}")
     print(f"[sim] stiffness={args.stiffness}N/mm  f_base={args.f_base}N  "

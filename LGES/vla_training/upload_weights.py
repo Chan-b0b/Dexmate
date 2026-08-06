@@ -1,7 +1,18 @@
 #!/usr/bin/env python3
-"""Upload each run's last pretrained_model to HF hub as Chanho-Lee/<run_name>,
+"""Upload each run's pretrained_model to HF hub as Chanho-Lee/<run_name>,
 with a small model card recording the training setting. Usage:
-  python upload_weights.py <run_name> [<run_name> ...]
+  python upload_weights.py <run_name> [<run_name> ...]              # val-best -> main
+  python upload_weights.py --with-last <run_name> ...               # + last -> 'last' branch
+  python upload_weights.py --last-only <run_name> ...               # only the 'last' branch
+
+Branch convention (one repo per run, two revisions):
+  main   val-best checkpoint (2026-07-30 selection policy) — the deploy pick
+  last   final-step checkpoint
+Load a specific one with the `revision` argument, which PreTrainedPolicy.from_pretrained
+forwards to the hub:
+  PI05Policy.from_pretrained("Chanho-Lee/pi05_naive_0729", revision="last")
+This is why `last` is a branch and not a subfolder or a <run>_last repo: from_pretrained
+takes `revision` but has no `subfolder` argument.
 """
 import sys
 from pathlib import Path
@@ -71,27 +82,78 @@ META = {
         "run (raw wrench left in the state, so the policy can read force directly and FiLM "
         "stays inert), RECAL calib F0=5.5 tau=1 fmag=(|F|-5.5)/1 fz=(fz-3.0)/0.7, "
         "warm-start from smolvla_naive_0729 best@10k, 20k steps, val-best"),
+    # 0729 pi0.5 round (B300 box, 2026-08-05/06). film_contact_pi05 injects at SUFFIX only
+    # (action-token embeddings at the expert input, all layers) — there is no prefix variant.
+    "pi05_naive_0729":            ("Chanho-Lee/lges_case_pick_0729",
+        "pi0.5 (lerobot/pi05_base) finetune, bs8 grad-ckpt, 50k, val-best@10k (val 0.0313; "
+        "rises monotonically to 0.0404 at 50k — 10k is the earliest eval, so the optimum "
+        "may be earlier)"),
+    "pi05_film_frombase_0729":    ("Chanho-Lee/lges_case_pick_0729",
+        "pi0.5 FiLM v2 from lerobot/pi05_base, cond=contact,fz,seal inject=suffix "
+        "mask_force=1 FZ_OFF=2.1, bs8 grad-ckpt, 50k, val-best@10k (val 0.0611)"),
+    "pi05_film_onnaive_0729":     ("Chanho-Lee/lges_case_pick_0729",
+        "pi0.5 FiLM v2 warm-started from pi05_naive_0729 best@10k, cond=contact,fz,seal "
+        "inject=suffix mask_force=1 FZ_OFF=2.1, bs8 grad-ckpt, 50k, val-best@10k"),
 }
 
 api = HfApi()
-for run in sys.argv[1:]:
+FLAGS = {a for a in sys.argv[1:] if a.startswith("--")}
+RUNS = [a for a in sys.argv[1:] if not a.startswith("--")]
+if FLAGS - {"--with-last", "--last-only"}:
+    sys.exit(f"unknown flag(s): {' '.join(sorted(FLAGS - {'--with-last', '--last-only'}))}")
+
+
+def family(run):
+    """Card wording per model family — the 0729 round is no longer SmolVLA-only."""
+    if run.startswith("pi05"):
+        return "pi0.5", "lerobot/pi05_base"
+    if run.startswith("xvla"):
+        return "X-VLA", "2toINF/X-VLA-Pt"
+    if run.startswith("act"):
+        return "ACT", None                      # from scratch
+    return "SmolVLA", "lerobot/smolvla_base"
+
+
+def push(run, which, branch):
+    """which: 'best'|'last' checkpoint dir; branch: 'main'|'last' revision to push it to."""
+    repo = f"Chanho-Lee/{run}"
     ck = VLA / "outputs" / run / "checkpoints"
-    which = "best" if (ck / "best").exists() else "last"   # val-best if selected (2026-07-30 policy)
     src = ck / which / "pretrained_model"
     if not src.is_dir():
-        print(f"[upload] SKIP {run}: {src} not found"); continue
-    print(f"[upload] {run}: using '{which}' checkpoint ({(ck / which).resolve().name})")
+        print(f"[upload] SKIP {repo}@{branch}: {src} not found", flush=True); return
+    step = (ck / which).resolve().name
+    model, base = family(run)
     ds, setting = META.get(run, ("?", "?"))
-    repo = f"Chanho-Lee/{run}"
+    print(f"[upload] {repo}@{branch}: '{which}' checkpoint ({step})", flush=True)
     api.create_repo(repo, repo_type="model", exist_ok=True)
-    card = (f"# {run}\n\nSmolVLA (lerobot 0.5.1) checkpoint for the LGES case_pick demo.\n\n"
-            f"- setting: {setting}\n- dataset: [{ds}](https://huggingface.co/datasets/{ds})\n"
-            f"- base: [lerobot/smolvla_base](https://huggingface.co/lerobot/smolvla_base)\n\n"
-            "FiLM checkpoints must be loaded with `film_contact.apply()` using the SAME "
-            "cond/inject/mask_force as in the setting line (see LGES/vla_training).\n")
+    if branch != "main":
+        api.create_branch(repo, branch=branch, repo_type="model", exist_ok=True)
+    card = (f"# {run}\n\n{model} (lerobot 0.5.1) checkpoint for the LGES "
+            f"case_pick demo.\n\n"
+            f"- setting: {setting}\n"
+            f"- checkpoint: {step} ({'val-best' if which == 'best' else 'final step'})\n"
+            f"- dataset: [{ds}](https://huggingface.co/datasets/{ds})\n"
+            + (f"- base: [{base}](https://huggingface.co/{base})\n" if base
+               else "- base: trained from scratch\n")
+            + "\nFiLM checkpoints must be loaded with `film_contact.apply()` (SmolVLA) or "
+              "`film_contact_pi05.apply()` (pi0.5) using the SAME cond/inject/mask_force as "
+              "in the setting line (see LGES/vla_training).\n")
     api.upload_folder(folder_path=str(src), repo_id=repo, repo_type="model",
-                      commit_message=f"upload {run} ({setting})")
+                      revision=branch, commit_message=f"upload {run} {which}@{step}")
     api.upload_file(path_or_fileobj=card.encode(), path_in_repo="README.md",
-                    repo_id=repo, repo_type="model", commit_message="model card")
-    print(f"[upload] OK {repo}")
+                    repo_id=repo, repo_type="model", revision=branch,
+                    commit_message="model card")
+    print(f"[upload] OK {repo}@{branch}", flush=True)
+
+
+for run in RUNS:
+    ck = VLA / "outputs" / run / "checkpoints"
+    has_best = (ck / "best").exists()   # val-best if selected (2026-07-30 policy)
+    if "--last-only" not in FLAGS:
+        push(run, "best" if has_best else "last", "main")
+    if FLAGS & {"--with-last", "--last-only"} and has_best:
+        if (ck / "best").resolve() == (ck / "last").resolve():
+            print(f"[upload] {run}: best == last, skipping the 'last' branch", flush=True)
+        else:
+            push(run, "last", "last")
 print("[upload] done")
