@@ -27,4 +27,8 @@ tensorboard        # tb_log.py parses train.log into scalars
 loguru             # probe_*.py, inspect_*.py
 tyro               # CLI convention in this repo
 pandas>=2.2,<3     # pandas 3 changes default string dtype / CoW; not validated here
-hf-transfer        # fast hub downloads (HF_HUB_ENABLE_HF_TRANSFER=1)
+# hf-transfer is INERT with huggingface-hub 1.x — it dropped hf_transfer in favour of Xet,
+# and HF_HUB_ENABLE_HF_TRANSFER now only prints a deprecation warning. Use
+# HF_XET_HIGH_PERFORMANCE=1 instead (big difference on multi-GB up/downloads). Kept in the
+# lock only to avoid rechurning a verified resolution; drop it at the next regeneration.
+hf-transfer

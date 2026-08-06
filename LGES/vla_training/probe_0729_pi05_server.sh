@@ -7,6 +7,7 @@
 #   (probe_state_authority/probe_press_sim/eval_offline load via factory + the
 #   train_pi05 preprocessor shim; guarded import works on lerobot 0.5.1 AND newer).
 # Usage: ./probe_0729_pi05_server.sh   (GPU=<n> to override, default 7)
+#        CKPTS=best GPU=4 ./probe_0729_pi05_server.sh   # one checkpoint per GPU, in parallel
 # NOTE: pi05 FiLM runs (film_frombase/film_onnaive) are NOT covered — probing them
 # needs film_contact_pi05 routing in the probes (different apply signature) plus
 # their training env; naive is the generality claim.
@@ -24,7 +25,9 @@ RUN="$DIR/outputs/pi05_naive_0729"
 [[ -d "$RV/meta" && -d "$RUN/checkpoints" ]] || { echo "[pi05] inputs missing" >&2; exit 1; }
 mkdir -p "$DIR/probes"
 
-for ck in best last; do
+# CKPTS lets the two checkpoints run as separate one-GPU jobs in parallel
+# (GPU=4 CKPTS=best ... & GPU=6 CKPTS=last ...); default keeps the sequential behaviour.
+for ck in ${CKPTS:-best last}; do
   CK="$RUN/checkpoints/$ck"
   [[ -e "$CK" ]] || { echo "[pi05] skip $ck (missing)"; continue; }
   state() { # <outfile> <extra...>

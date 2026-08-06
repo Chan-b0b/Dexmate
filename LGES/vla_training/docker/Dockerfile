@@ -61,7 +61,7 @@ RUN python3.12 -m venv ${VENV} && \
 
 ENV PATH=${VENV}/bin:${PATH} \
     HF_HOME=${DATA_ROOT}/hf_cache \
-    HF_HUB_ENABLE_HF_TRANSFER=1 \
+    HF_XET_HIGH_PERFORMANCE=1 \
     WANDB_DIR=${DATA_ROOT}/wandb \
     TRITON_CACHE_DIR=${DATA_ROOT}/cache/triton \
     TORCHINDUCTOR_CACHE_DIR=${DATA_ROOT}/cache/inductor \
