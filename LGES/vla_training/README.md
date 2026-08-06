@@ -22,6 +22,45 @@ Known platform constraints (Jetson Thor, aarch64):
 - Don't reinstall torch/torchvision in this venv; PyPI aarch64 wheels
   don't cover Thor's GPU.
 
+### x86 training host (8× B300)
+
+`./setup_venv.sh` builds `/home/maverick/vla_venv` from
+[requirements.lock.txt](requirements.lock.txt) — CUDA 13 wheels, Python 3.12,
+torch 2.10.0 / torchvision 0.25.0 / torchcodec 0.10.0, all `+cu130`. That triple is
+the one that satisfies lerobot 0.5.1's own pins *and* has Blackwell support; see
+[requirements.in](requirements.in) for the reasoning behind each pin. The script also
+creates the data root and repoints `datasets|outputs|logs` if they dangle.
+
+Unlike the Jetson venv, torchcodec works here, so video-mode datasets are possible
+(the existing image-mode datasets load fine either way).
+
+**Storage — everything big lives on `/data001` (7 TB NVMe, 6.4 TB free), nothing on `/`:**
+
+| path | what |
+|---|---|
+| `/data001/maverick/vla_training/{datasets,outputs,logs}` | the three symlinks in this directory point here |
+| `/data001/maverick/hf_cache` | HF hub cache — base checkpoints + downloaded datasets, reached via `~/.cache/huggingface` (which the scripts export as `HF_HOME`) |
+| `/home/maverick/vla_venv` | the venv itself (~6 GB of wheels, no data) |
+
+The old `/data/home/maverick_data` root from `move_to_data.sh` does not exist on this
+box and cannot be created (no root), which is why the symlinks were repointed.
+
+**`pip install` fails outside the venv** — this box has no system-wide pip
+(`/usr/bin/python3: No module named pip`, nothing named `pip` on `PATH`), and no root to
+install one. Use the venv's, which works and reaches PyPI fine:
+
+```bash
+source /home/maverick/vla_venv/bin/activate    # then plain `pip install ...` works
+/home/maverick/vla_venv/bin/pip install <pkg>  # or without activating
+~/.local/bin/uv pip install --python /home/maverick/vla_venv/bin/python <pkg>   # faster
+```
+
+For anything that should survive a venv rebuild, add it to `requirements.in` and
+regenerate the lock (command in that file's header) rather than only installing it.
+
+There is also an optional container in [docker/](docker/) built from the same lock file
+— unnecessary if you use the venv, kept for portability.
+
 ## Pipeline
 
 ```
@@ -58,7 +97,17 @@ output datasets.
 ./train_smolvla.sh                      # defaults: bs 32, 20k steps
 ./train_smolvla.sh --steps=40000        # any lerobot-train override
 RUN_NAME=myrun ./train_smolvla.sh       # name the output dir
+HF_DATASET_REPO=Chanho-Lee/lges_case_pick_0729 RUN_NAME=myrun ./train_smolvla.sh
 ```
+
+The wrapper's default `HF_DATASET_REPO` (`chanho-lee/lges_suction`) has **no `v3.0` tag**
+on the hub, and lerobot resolves a dataset by codebase-version tag — so it cannot be
+loaded, and the failure surfaces as a misleading
+`TypeError: HfHubHTTPError.__init__() missing 1 required keyword-only argument: 'response'`
+(lerobot 0.5.1 raises `RevisionNotFoundError` without the kwarg huggingface-hub 1.x
+requires). Pass a tagged repo — `Chanho-Lee/lges_case_pick_0729{,_val}` and
+`Chanho-Lee/lges_case_pick_0721_0727` are tagged — or tag the dataset:
+`HfApi().create_tag(repo_id, tag="v3.0", repo_type="dataset")`.
 
 The wrapper maps our single `head` camera onto the pretrained model's
 `camera1` slot via `--rename_map` (the base checkpoint expects

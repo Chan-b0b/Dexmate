@@ -1,0 +1,30 @@
+# Intent file for requirements.lock.txt. Edit this, then regenerate the lock:
+#
+#   uv pip compile docker/requirements.in --python-version 3.12 \
+#     --python-platform x86_64-unknown-linux-gnu \
+#     --extra-index-url https://download.pytorch.org/whl/cu130 \
+#     --index-strategy unsafe-best-match --no-header -o docker/requirements.lock.txt
+#
+# Every wrapper in this directory (train_pi05.py's processor shim, train_xvla.py's
+# florence_config patch, film_contact.py) is written against lerobot 0.5.1 — do not
+# bump it casually. The version triple below is the one that satisfies 0.5.1's own
+# pins exactly (torch<2.11, torchvision<0.26, torchcodec<0.11) while still having
+# CUDA 13 / Blackwell wheels, so pip never has to be argued with.
+lerobot[transformers-dep,scipy-dep]==0.5.1
+
+# cu130 wheels ship sm_100 cubins, which is what NVIDIA's own NGC PyTorch images
+# target for B300 (TORCH_CUDA_ARCH_LIST=... 10.0 12.0+PTX) — sm_103 devices run
+# sm_100 code. Driver 580 (CUDA 13.0) satisfies these.
+torch==2.10.0+cu130
+torchvision==0.25.0+cu130
+torchcodec==0.10.0+cu130
+
+# transformers' SmolVLM processor hard-requires this and neither lerobot nor
+# transformers declares it — SmolVLAPolicy.from_pretrained raises ImportError without it.
+num2words
+
+tensorboard        # tb_log.py parses train.log into scalars
+loguru             # probe_*.py, inspect_*.py
+tyro               # CLI convention in this repo
+pandas>=2.2,<3     # pandas 3 changes default string dtype / CoW; not validated here
+hf-transfer        # fast hub downloads (HF_HUB_ENABLE_HF_TRANSFER=1)

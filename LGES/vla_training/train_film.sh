@@ -10,7 +10,10 @@
 # Don't train while the robot demo is running — they share the GPU.
 set -euo pipefail
 
-VENV="${VENV:-/home/dexmate/vla_venv}"
+# An explicit VENV wins; otherwise take whichever per-host venv exists — the x86
+# training box (setup_venv.sh) or the Jetson. Same rule in train_smolvla.sh.
+VENV="${VENV:-$([[ -x /home/maverick/vla_venv/bin/python ]] \
+  && echo /home/maverick/vla_venv || echo /home/dexmate/vla_venv)}"
 DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 VARIANT="${FILM_VARIANT:-v2}"
 INIT="${INIT_CKPT:-$DIR/outputs/smolvla_20260624_081946/checkpoints/last/pretrained_model}"
@@ -40,7 +43,7 @@ FILM_VARIANT="$VARIANT" "$VENV/bin/python" "$DIR/train_film.py" \
   --steps=20000 \
   --save_freq=2000 \
   --log_freq=50 \
-  --num_workers=32 \
+  --num_workers="${NUM_WORKERS:-32}" \
   --output_dir="$OUT" \
   --job_name="$RUN" \
   "$@" 2>&1 | tee "$LOG"

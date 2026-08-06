@@ -14,7 +14,10 @@
 # Don't train while the robot demo is running — they share the GPU.
 set -euo pipefail
 
-VENV="${VENV:-/home/dexmate/vla_venv}"
+# An explicit VENV wins; otherwise take whichever per-host venv exists — the x86
+# training box (setup_venv.sh) or the Jetson. Same rule in train_film.sh.
+VENV="${VENV:-$([[ -x /home/maverick/vla_venv/bin/python ]] \
+  && echo /home/maverick/vla_venv || echo /home/dexmate/vla_venv)}"
 DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
 # Pull our own --resume flag out of the args forwarded to lerobot-train.

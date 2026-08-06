@@ -1,5 +1,8 @@
 # Remote Training Setup (H200)
 
+> For the current 8× B300 box, use `./setup_venv.sh` instead — the cu121 wheels below
+> predate Blackwell. See the "x86 training host" section of [README.md](README.md).
+
 ## First-time Setup
 
 ### 1. Clone the repository

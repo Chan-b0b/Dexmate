@@ -1,7 +1,7 @@
 `torch_dtype` is deprecated! Use `dtype` instead!
 [probe] FiLM cond=('contact', 'fmag', 'fz', 'seal') inject=prefix mask_force=False  ckpt=/home/maverick/Dexmate/LGES/vla_training/outputs/smolvla_film_0729_prefix_mask0_recal_fromnaive/checkpoints/last
 Loading  HuggingFaceTB/SmolVLM2-500M-Video-Instruct weights ...
-Loading weights:   0%|          | 0/489 [00:00<?, ?it/s]Loading weights:  35%|███▌      | 172/489 [00:00<00:00, 1710.93it/s]Loading weights: 100%|██████████| 489/489 [00:00<00:00, 2841.86it/s]
+Loading weights:   0%|          | 0/489 [00:00<?, ?it/s]Loading weights:  47%|████▋     | 230/489 [00:00<00:00, 2287.97it/s]Loading weights: 100%|██████████| 489/489 [00:00<00:00, 2552.26it/s]
 Reducing the number of VLM layers to 16 ...
 Loading weights from local directory
   episodes: [0, 1, 2, 3, 4, 5]
@@ -16,52 +16,52 @@ Loading weights from local directory
 
    frame    ee_z   |F|N |  expert  dz(own) dz(swap)    dzRAW   dzFiLM |    dTot    dRaw   dFiLM
   ---------------------------------------------------------------------------------------------
-     131   0.777    5.3 |   -1.0m    -1.6m     0.1m     0.2m    -1.6m |    1.7m    1.7m    0.0m
+     131   0.777    5.3 |   -1.0m    -1.6m     0.1m     0.2m    -1.6m |    1.7m    1.7m   -0.0m
      133   0.774    4.9 |   -1.5m    -1.6m     0.1m     0.1m    -1.6m |    1.7m    1.7m   -0.0m
-     135   0.772    5.1 |   -1.8m    -1.6m     0.1m     0.1m    -1.6m |    1.6m    1.7m   -0.0m
-     137   0.768    4.9 |   -1.1m    -1.7m     0.1m     0.1m    -1.7m |    1.8m    1.8m   -0.0m
-     139   0.765    6.5 |   -1.4m    -1.6m     0.1m     0.1m    -1.6m |    1.7m    1.7m   -0.0m
+     135   0.772    5.1 |   -1.8m    -1.5m     0.1m     0.2m    -1.5m |    1.7m    1.7m   -0.0m
+     137   0.768    4.9 |   -1.1m    -1.7m     0.2m     0.2m    -1.7m |    1.8m    1.8m   -0.1m
+     139   0.765    6.5 |   -1.4m    -1.6m     0.2m     0.1m    -1.6m |    1.7m    1.7m   -0.0m
      349   0.780    5.2 |   -1.8m    -1.5m     0.2m     0.2m    -1.5m |    1.7m    1.7m   -0.0m
-     351   0.777    4.6 |   -1.3m    -1.6m     0.2m     0.2m    -1.5m |    1.7m    1.8m    0.0m
-     353   0.774    4.7 |   -1.1m    -1.5m     0.2m     0.2m    -1.5m |    1.7m    1.7m   -0.0m
-     355   0.771    4.9 |   -2.0m    -1.4m     0.2m     0.2m    -1.4m |    1.6m    1.6m   -0.1m
-     357   0.768    5.3 |   -1.5m    -1.5m     0.2m     0.2m    -1.5m |    1.7m    1.7m   -0.0m
-     564   0.777    5.0 |   -1.9m    -1.5m     0.2m     0.2m    -1.5m |    1.8m    1.8m   -0.0m
-     566   0.774    4.6 |   -1.4m    -1.6m     0.2m     0.2m    -1.6m |    1.8m    1.8m   -0.0m
+     351   0.777    4.6 |   -1.3m    -1.5m     0.2m     0.2m    -1.5m |    1.7m    1.7m   -0.0m
+     353   0.774    4.7 |   -1.1m    -1.4m     0.2m     0.2m    -1.4m |    1.6m    1.6m   -0.0m
+     355   0.771    4.9 |   -2.0m    -1.4m     0.2m     0.2m    -1.4m |    1.7m    1.7m   -0.0m
+     357   0.768    5.3 |   -1.5m    -1.4m     0.2m     0.2m    -1.5m |    1.6m    1.7m   -0.0m
+     564   0.777    5.0 |   -1.9m    -1.5m     0.3m     0.3m    -1.5m |    1.8m    1.8m   -0.0m
+     566   0.774    4.6 |   -1.4m    -1.5m     0.2m     0.2m    -1.6m |    1.8m    1.8m   -0.0m
      568   0.771    4.9 |   -1.5m    -1.5m     0.3m     0.3m    -1.5m |    1.8m    1.8m   -0.0m
-     570   0.768    4.9 |   -1.5m    -1.6m     0.2m     0.3m    -1.7m |    1.8m    1.9m   -0.1m
+     570   0.768    4.9 |   -1.5m    -1.6m     0.3m     0.3m    -1.6m |    1.8m    1.9m   -0.1m
      572   0.765    6.7 |   -1.4m    -1.3m     0.3m     1.0m    -1.3m |    1.6m    2.3m   -0.0m
      739   0.833    5.0 |   -1.4m    -1.4m    -0.3m    -0.4m    -1.4m |    1.1m    1.0m   -0.0m
-     741   0.830    4.8 |   -1.4m    -1.4m    -0.2m    -0.4m    -1.4m |    1.2m    1.1m    0.0m
-     743   0.827    5.1 |   -1.6m    -1.5m    -0.2m    -0.3m    -1.5m |    1.3m    1.2m    0.0m
-     745   0.824    5.0 |   -1.6m    -1.4m    -0.1m    -0.2m    -1.4m |    1.3m    1.2m    0.0m
-     747   0.821    5.3 |   -1.4m    -1.4m    -0.1m    -0.3m    -1.5m |    1.3m    1.1m   -0.1m
-     915   0.832    5.2 |   -1.5m    -1.6m    -0.0m    -0.0m    -1.6m |    1.5m    1.6m    0.0m
-     917   0.829    5.1 |   -1.6m    -1.6m    -0.0m     0.0m    -1.6m |    1.6m    1.6m    0.0m
+     741   0.830    4.8 |   -1.4m    -1.4m    -0.2m    -0.3m    -1.4m |    1.2m    1.1m    0.0m
+     743   0.827    5.1 |   -1.6m    -1.4m    -0.1m    -0.2m    -1.4m |    1.3m    1.2m    0.0m
+     745   0.824    5.0 |   -1.6m    -1.4m    -0.1m    -0.2m    -1.3m |    1.3m    1.2m    0.0m
+     747   0.821    5.3 |   -1.4m    -1.4m    -0.1m    -0.3m    -1.4m |    1.3m    1.1m   -0.1m
+     915   0.832    5.2 |   -1.5m    -1.5m     0.0m     0.0m    -1.5m |    1.5m    1.5m    0.0m
+     917   0.829    5.1 |   -1.6m    -1.6m     0.0m     0.0m    -1.6m |    1.6m    1.6m    0.0m
      919   0.825    5.3 |   -1.4m    -1.6m     0.0m     0.0m    -1.6m |    1.6m    1.6m    0.0m
      921   0.822    5.4 |   -1.5m    -1.6m     0.0m     0.0m    -1.6m |    1.6m    1.6m    0.0m
      923   0.820    6.4 |   -1.3m    -1.4m     0.0m    -0.0m    -1.5m |    1.4m    1.4m   -0.1m
-    1087   0.832    5.4 |   -1.5m    -1.5m     0.3m     0.2m    -1.5m |    1.8m    1.8m    0.0m
-    1089   0.829    5.3 |   -1.6m    -1.6m     0.3m     0.3m    -1.6m |    1.9m    1.8m    0.0m
+    1087   0.832    5.4 |   -1.5m    -1.5m     0.3m     0.3m    -1.5m |    1.8m    1.7m    0.0m
+    1089   0.829    5.3 |   -1.6m    -1.6m     0.3m     0.3m    -1.6m |    1.8m    1.8m    0.0m
     1091   0.825    5.1 |   -1.5m    -1.6m     0.3m     0.3m    -1.6m |    1.9m    1.9m   -0.0m
-    1093   0.822    4.9 |   -1.4m    -1.6m     0.3m     0.3m    -1.6m |    1.8m    1.8m   -0.0m
-    1095   0.820    6.2 |   -1.3m    -1.4m     0.3m     0.5m    -1.4m |    1.7m    1.8m   -0.0m
+    1093   0.822    4.9 |   -1.4m    -1.6m     0.3m     0.3m    -1.6m |    1.8m    1.9m   -0.0m
+    1095   0.820    6.2 |   -1.3m    -1.4m     0.3m     0.5m    -1.4m |    1.6m    1.9m   -0.0m
   ---------------------------------------------------------------------------------------------
 
   decomposition over 60 descent frames (d* = dz(cell) - dz(own,own)):
-    ALL frames                  : n= 60  dz(own)= -1.51mm  dTotal= +1.63mm  dRaw= +1.65mm  dFiLM= -0.01mm  interact= -0.01mm
-    approach/hover dz(own)>=-3mm: n= 60  dz(own)= -1.51mm  dTotal= +1.63mm  dRaw= +1.65mm  dFiLM= -0.01mm  interact= -0.01mm
+    ALL frames                  : n= 60  dz(own)= -1.49mm  dTotal= +1.62mm  dRaw= +1.65mm  dFiLM= -0.01mm  interact= -0.01mm
+    approach/hover dz(own)>=-3mm: n= 60  dz(own)= -1.49mm  dTotal= +1.62mm  dRaw= +1.65mm  dFiLM= -0.01mm  interact= -0.01mm
 
   time-to-contact split (pooled over 6 episode(s), per-episode first-contact detection):
-    <2s before contact (late)   : n= 60  dz(own)= -1.51mm  dTotal= +1.63mm  dRaw= +1.65mm  dFiLM= -0.01mm  interact= -0.01mm
+    <2s before contact (late)   : n= 60  dz(own)= -1.49mm  dTotal= +1.62mm  dRaw= +1.65mm  dFiLM= -0.01mm  interact= -0.01mm
 
   per-episode split (ABSOLUTE dz, mm/step):
-    ep0 (contact z=0.763): n= 10  dz(own)= -1.59  dz(swap)= +0.11  d= +1.70  (FiLM  -0.02)
-    ep1 (contact z=0.765): n= 10  dz(own)= -1.48  dz(swap)= +0.20  d= +1.68  (FiLM  -0.01)
-    ep2 (contact z=0.762): n= 10  dz(own)= -1.52  dz(swap)= +0.26  d= +1.78  (FiLM  -0.01)
-    ep3 (contact z=0.818): n= 10  dz(own)= -1.42  dz(swap)= -0.15  d= +1.26  (FiLM  -0.01)
-    ep4 (contact z=0.817): n= 10  dz(own)= -1.54  dz(swap)= +0.01  d= +1.55  (FiLM  -0.00)
-    ep5 (contact z=0.817): n= 10  dz(own)= -1.50  dz(swap)= +0.29  d= +1.79  (FiLM  -0.01)
+    ep0 (contact z=0.763): n= 10  dz(own)= -1.57  dz(swap)= +0.13  d= +1.70  (FiLM  -0.02)
+    ep1 (contact z=0.765): n= 10  dz(own)= -1.46  dz(swap)= +0.22  d= +1.68  (FiLM  -0.02)
+    ep2 (contact z=0.762): n= 10  dz(own)= -1.51  dz(swap)= +0.27  d= +1.78  (FiLM  -0.01)
+    ep3 (contact z=0.818): n= 10  dz(own)= -1.38  dz(swap)= -0.13  d= +1.26  (FiLM  -0.01)
+    ep4 (contact z=0.817): n= 10  dz(own)= -1.52  dz(swap)= +0.02  d= +1.55  (FiLM  -0.00)
+    ep5 (contact z=0.817): n= 10  dz(own)= -1.49  dz(swap)= +0.29  d= +1.78  (FiLM  -0.01)
 
 ── verdict ─────────────────────────────────────────────────────────
   INCONCLUSIVE: no committed-descent frames in this episode.

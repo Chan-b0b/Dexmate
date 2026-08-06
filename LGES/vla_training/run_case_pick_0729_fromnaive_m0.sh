@@ -9,7 +9,9 @@ set -uo pipefail
 DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 export VENV=/home/maverick/vla_venv
 PY="$VENV/bin/python"
-export CUDA_VISIBLE_DEVICES=7
+# GPU 7 by default (the 0721/0727 box); override with GPU=<n> — on the B300 box 7 holds
+# another user's job, so this round runs on 4 once the v1 control releases it.
+export CUDA_VISIBLE_DEVICES="${GPU:-7}"
 export HF_HOME="$HOME/.cache/huggingface"
 unset HF_DATASETS_CACHE TRANSFORMERS_CACHE || true
 

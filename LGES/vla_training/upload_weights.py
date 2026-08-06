@@ -59,6 +59,18 @@ META = {
         "20k steps, val-best@2500. Offline deploy pick 2026-08-04 (stops at 6.8N "
         "first-contact + monotone force ramp; press-sim 0.6mm nominal / 3.4mm early). "
         "DEPLOY: override FILM_F0 = field hover baseline + 1.5 (~7)"),
+    "smolvla_film_0729_prefix_mask1_recal_fromnaive_v1": ("Chanho-Lee/lges_case_pick_0729",
+        "FiLM V1 = DECORRELATED CONTROL for the fromnaive run (c-hat shuffled across the "
+        "batch at train time: same capacity and mechanism as v2, grounding removed), "
+        "cond=contact,fmag,fz,seal prefix mask1, RECAL calib F0=5.5 tau=1 "
+        "fmag=(|F|-5.5)/1 fz=(fz-3.0)/0.7, warm-start from smolvla_naive_0729 best@10k, "
+        "20k steps, val-best@5000 (val loss 0.1715; monotone rise after, same overfitting "
+        "shape as the rest of the 0729 round)"),
+    "smolvla_film_0729_prefix_mask0_recal_fromnaive": ("Chanho-Lee/lges_case_pick_0729",
+        "FiLM v2 cond=contact,fmag,fz,seal prefix mask0 — NEGATIVE CONTROL for the fromnaive "
+        "run (raw wrench left in the state, so the policy can read force directly and FiLM "
+        "stays inert), RECAL calib F0=5.5 tau=1 fmag=(|F|-5.5)/1 fz=(fz-3.0)/0.7, "
+        "warm-start from smolvla_naive_0729 best@10k, 20k steps, val-best"),
 }
 
 api = HfApi()

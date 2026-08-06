@@ -1,3 +1,7 @@
+# Superseded on the B300 box by requirements.lock.txt (+ requirements.in), which
+# setup_venv.sh installs — the pins there are resolved and verified for CUDA 13.
+# This loose list is kept for the older H200 flow in REMOTE_SETUP.md.
+
 # Core ML framework (install torch separately for your hardware)
 lerobot>=0.5.1
 

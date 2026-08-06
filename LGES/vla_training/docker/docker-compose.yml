@@ -1,0 +1,40 @@
+# docker compose -f LGES/vla_training/docker/docker-compose.yml ...   (see README.md)
+name: vla-training
+
+services:
+  vla:
+    build:
+      context: ..                 # so requirements.lock.txt (shared with setup_venv.sh) is in scope
+      dockerfile: docker/Dockerfile
+      args:
+        UID: "${UID:-1007}"
+        GID: "${GID:-1007}"
+    image: dexmate-vla:lerobot0.5.1
+    container_name: vla-train
+    hostname: vla-train
+
+    gpus: all
+    # Dataloaders run with --num_workers=32; torch's shared-memory tensor passing
+    # needs more /dev/shm than docker's 64 MB default. memlock/stack for NCCL.
+    ipc: host
+    ulimits:
+      memlock: -1
+      stack: 67108864
+
+    volumes:
+      # The repo must land on the same absolute path the scripts assume.
+      - ../../..:/home/maverick/Dexmate
+      # datasets / outputs / logs / hf_cache. vla_training's datasets|outputs|logs
+      # symlinks point into this volume, so it is what makes them resolve.
+      - ${HOST_DATA_ROOT:-/data001/maverick}:/data001/maverick
+
+    working_dir: /home/maverick/Dexmate/LGES/vla_training
+    env_file:
+      - path: .env
+        required: false
+    ports:
+      - "${TENSORBOARD_PORT:-6006}:6006"
+
+    stdin_open: true
+    tty: true
+    command: ["bash"]
