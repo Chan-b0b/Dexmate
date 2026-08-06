@@ -2,10 +2,11 @@
 
 작성 2026-07-30. 오케스트레이터 종합 (증거 인벤토리 → `EVIDENCE.md`).
 
-> **⚠ 수치 상태 (사용자 지시 07-30): 실험 캠페인 진행 중 — 본 문서의 모든 결과값은 예비값
-> (placeholder)이다.** 서사·구조·실험 설계가 확정 대상이고, 숫자는 sweep·V1 control·중간층
-> 결과가 나오면 일괄 교체한다. 초안 작성도 수치 비의존 섹션(Intro/Related/Method/probe
-> 방법론)부터 진행.
+> **⚠ 증거 동결 (2026-08-06, 로봇 이동으로 환경 변경 — 사용자 확정)**: 실기 추가 실험
+> 불가. 클라이맥스를 로봇 sweep(취소)에서 **기제 삼중 대조(naive/V1/v2 × 힘-스케일 스윕
+> × 폐루프 sim, EVIDENCE §3.5–3.7)** 로 교체 — 완전 확보된 증거로 주장을 닫는 재구성.
+> 로봇 결과는 소N 케이스 스터디 + 온로봇 반사실(고도스 crossover 포함)로 스코프.
+> 수치 인용은 EVIDENCE.md 경유. 잔여 작업은 §9 (전부 책상 작업).
 
 **Target venue**: ICRA 2027 — 마감 **2026-09-15** (11:59 PST, PaperPlaza), **8쪽 (참고문헌 포함)**,
 **double-anonymous**. Backup: RA-L (+ICRA 2027 presentation option, 이관 마감 2026-12-31) —
@@ -19,6 +20,12 @@
 > training loss cannot detect this, and neither architectural access nor exposure fixes it —
 > only demonstrations that **decorrelate** the contact condition from its habitual correlates
 > restore causal authority, offline and on the robot.
+>
+> **(08-04~06 확장, 사용자 확정)**: 그리고 아키텍처는 사용을 강제하지 못하지만 **사용의
+> 형태를 결정한다** — 동일 데이터·초기화·loss에서 raw 접근은 힘이 시연을 초과하면 소멸하는
+> 템플릿 반응(naive), 비접지 병목은 무반응(V1), 접지 병목만 힘에 비례해 커지는 브레이크
+> (v2, 12N에서 정지+후퇴; 폐루프 sim 6/6 vs 0/6; 온로봇 crossover 재현)를 낳는다.
+> = "Imitation pins down the trajectory, not the mechanism."
 
 프레이밍: **진단 + 프로브 방법론 + 데이터 처방** 논문. Method(FiLM)는 성능 방법이 아니라
 **계측기(instrument)** 로 포지셔닝. "force helps"류(ForceVLA/ForceFlow/PhaForce…)는 2026년
@@ -147,6 +154,14 @@ FiLM; (c) causal confusion / shortcut — de Haan'19, Geirhos'20, Shortcut-in-Ge
   ⚠ ladder는 과거 라운드 수치 — 0729-only 정책 하에서 본문 포함 방식(개발 히스토리 vs 제외)
   사용자 결정 필요. → 물리 산술과 함께 "반응 경로는 닫혀 있다, anticipation이 필요하다"로
   §VI 연결.
+- **V-F 기제 삼중 대조 (신규 클라이맥스, EVIDENCE §3.5–3.6)**: 동일 데이터·동일 naive-init·
+  동일 용량·동급 val err(0.81–0.96mm)의 세 정책을 힘-스케일 스윕(8/10/12N)과 폐루프
+  press-sim(seal-never)으로 개입 —
+  naive(raw): +1.41→+1.12 템플릿 감소, 4–5/6·max 14.9mm /
+  **V1(비접지 병목): −0.06→−0.11 무반응, 0/6·max 431mm** /
+  **v2(접지 병목): +1.20→+4.40 단조, 6/6·max 8.5mm**.
+  → usage는 데이터가(press-retreat), form은 설계가(접지 병목) 결정. 용량 반론 차단(V1),
+  bypass 반론 차단(mask0), "naive는 force-blind" 서사 금지(state-swap 105%, 토론 5·6).
 
 ### VI. Robot Experiments (~1.0쪽, Fig. 6–7, Table II)
 - **V1 control (S2)**: V2 > V1 ≈ V0 [TO RUN — GPU]. "grounding이 활성 성분" 입증.
@@ -154,19 +169,17 @@ FiLM; (c) causal confusion / shortcut — de Haan'19, Geirhos'20, Shortcut-in-Ge
   → naive 0/3 overpress vs FiLM prefix **5/7** 성공(무효 3런 정리 후; refs/main 기준 5/6,
   val-best 1런 실패 — 리비전 pin 필요), 성공런 접촉력 2.5–4.8 N (<15 N 한계 대비 여유),
   suffix 1/3 (prefix>suffix 실기 재확인). [n 확대 TO COLLECT]
-- **중간층(2–4) 보간 — 논문의 클라이맥스 실험** [사용자 계획 확정, TO COLLECT]:
-  학습은 층1·5(양극단)만, 평가는 층2–4 포함 전층. **depth cue는 OOD·force cue는 in-dist가
-  되는 유일한 세팅** — 두 cue를 로봇에서 행동적으로 분리(dissociate)하는 실험.
-  설계 체크리스트: ① 층·모델당 n≥10, ② 체크포인트 리비전 사전 pin(스냅샷 경로 고정),
-  ③ log-dir 규약 `case_pick_<layer>` (`lift_condition_probe.py --by-height` 재사용),
-  ④ force-limit 15·nas 5 전 조건 고정, ⑤ 지표: seal% + peak contact N + time-to-seal +
-  under-reach gap + overpress율, ⑥ 층 인덱스와 함께 실제 접촉 z(m) 보고 + 학습 접촉-z
-  분포(바이모달) 대비 도식. 사전 등록식 예측: naive는 층 의존 실패(습관 깊이와 표면의
-  상대 위치에 따라 over-press/under-reach), FiLM은 층 불변 성공 + graded 접촉력.
-- **Depletion sweep** = 위 실험의 전층 버전 (naive vs FiLM vs 여유 시 gate-oracle), seal%+CI.
-- **Live authority probe (S3)**: frozen-pose 온로봇 반사실 — contact +0.73 / sealed +2.09 /
-  fz+6N +2.18 mm/f (전부 올바른 부호), no_contact 0. probe↔실기 거동 상관 제시.
-- (여유 시) 타 아키텍처 1종(ACT or pi0.5)에서 bypass 재현 → 일반성.
+- ~~중간층(2–4) 보간 sweep n≥10~~ **[취소 — 08-06 로봇 이동, 환경 동결]**: future work로
+  이동. 대신 7월 L1/L3/L5 소N 런들을 **n 명시 케이스 스터디**로 Table II에 포함 (리비전
+  주석 필수 — §9). 6월 구셋업 진단 sweep(~10/층, oracle 회복)이 층-일반화 motivation을
+  담당 (§III).
+- **Live authority probe (S3) — 3런 시리즈 (EVIDENCE §3.7)**: ① 0729 pm1 (07-30):
+  contact +0.73 / sealed +2.09 / fz+6N +2.18 mm/f (부호 전부 정상). ② fromnaive 공정-도스
+  (08-06, 10포즈): film c-hat 도스-반응 단조(hover +0.29→sealed +1.41); 중간 도스에선
+  naive ≥ film — 오프라인 곡선 같은 구간과 정합(토론 6 방어 재료). ③ **고도스 (08-06,
+  fz+6/9/12N): crossover 온로봇 재현** — film +1.19→+4.59→**+8.56**(가속·후퇴 진입) vs
+  naive +1.34→+3.18→+4.18(한계반응 붕괴). V-F의 기울기 대비가 실기 관측 위에서 성립.
+- (드랍) 타 아키텍처 bypass 재현 — 시간상 future work.
 
 ### VII. Discussion & Limitations (~0.5쪽)
 - **Fidelity trap (스파이스)**: 구모델의 early-lift "결함"이 우발적 overpress 보호막이었고,
@@ -202,30 +215,29 @@ FiLM; (c) causal confusion / shortcut — de Haan'19, Geirhos'20, Shortcut-in-Ge
 
 | Claim | Evidence | 상태 |
 |---|---|---|
-| 진단: condition-ignoring | depletion sweep + gate-oracle (70/60/0/20/0 → 회복) | ✅ (구 셋업, ~10회/층) — 0729-only 정책에 포함 여부 확인 필요 |
-| Loss-blindness bypass | 0729 held-out probe: mask0 7–8% vs mask1 54–76% | ✅ **authority 축 0729-pure 완결**; loss 축 서버 수치 대기 |
+| 진단: condition-ignoring | depletion sweep + gate-oracle (70/60/0/20/0 → 회복) | ✅ (구 셋업, ~10회/층) — "diagnostic phase"로 구획 서술 |
+| Loss-blindness bypass | 0729 held-out probe: mask0 7–8% vs mask1 54–76% | ✅ **authority 축 0729-pure 완결**; loss 축 서버 수치 회수(책상) |
 | Depth shortcut | 채널분해 + 접촉z 밴드 분석 | ✅ 강함 (0708 데이터 — 서술 위치 결정 필요) |
 | Exposure 기각 | os10/os3 negative | ✅ 강함 (과거 라운드) |
 | 반응 권한 plateau | 전 라운드 realistic ≤25%, 0729 7% | ✅ (offline) |
-| **Grounding이 활성성분 (V1 control, S2)** | V2>V1≈V0 | ❌ **TO RUN (GPU ~0.5일, 최우선)** |
-| 실기 검증: naive vs FiLM | 0729 롤아웃 (0/3 vs 5/7) | ⚠️ 소N — **sweep n≥10 TO COLLECT** |
-| 층 일반화 (보간) | 중간층 2–4 테스트 (depth OOD × force in-dist 분리) | 🔜 사용자 계획 확정 (로봇) |
-| On-robot 반사실 (S3) | live probe 07-30 15:14 | ✅ 확보 |
-| 아키텍처 일반성 | ACT/pi0.5 bypass 재현 | ❌ 선택 (가치 높음) |
-| Negative control (S5) | 삽입 태스크 | ❌ 드랍 후보 (future work) |
+| **Grounding이 활성성분 (V1)** | 스윕 평평(−0.06→−0.11)·sim 0/6·err 동급 | ✅ **완료 08-05 (EVIDENCE §3.6)** |
+| **형태 결정 (triad + 스윕)** | naive 템플릿 / V1 무반응 / v2 단조 + press-sim | ✅ **완료 08-04~05 (§3.5–3.6) — 신규 클라이맥스** |
+| 실기 검증: naive vs FiLM | 0729 롤아웃 (0/3 vs 5/7) + L1/L3/L5 소N | ⚠️ 소N 케이스 스터디로 스코프 (sweep 취소 — 환경 동결) |
+| On-robot 반사실 (S3) | live probe 3런 (07-30, 08-06×2) — **고도스 crossover 포함** | ✅ **완결 08-06 (§3.7)** |
+| 아키텍처 일반성 | ACT/pi0.5 bypass 재현 | ❌ future work |
+| Negative control (S5) | 삽입 태스크 | ❌ future work |
 
-## 9. 마감(9/15)까지 필수 실험 — 우선순위
+## 9. 마감(9/15)까지 잔여 작업 — **전부 책상 작업 (실험 동결 08-06)**
 
-1. **[GPU, ~0.5일] S2 V1 decorrelated control (0729 데이터로)** — 없으면 "그냥 FiLM capacity"
-   공격에 무방비. 최우선.
-2. [정리, sweep 전 필수] **체크포인트 리비전 pin** — 남은 롤아웃 중 val-best(7119b99) 1런만
-   실패. sweep은 스냅샷 경로 고정으로 리비전 명시 후 진행 (probe상 best가 authority 우위
-   76 vs 54 — best 사용 권장하되 실기 확인).
-3. **[로봇, 반나절~1일] 전층 depletion sweep n≥10/층 (중간층 2–4 보간 포함)** — 사용자 계획
-   확정. naive vs FiLM(0729 prefix) (+여유 시 gate-oracle). 설계 체크리스트는 §VI 참조.
-4. **[0-compute] Fig.4/5 데이터 정리** — probes/*.txt → 산점도·막대. 서버에서 0729 4모델
-   train/val **loss 수치만** 회수 (probe는 회수 완료).
-5. **[GPU+로봇, 여유 시] ACT or pi0.5 bypass 재현 1종** — 일반성 방어 급상승.
+1. ~~V1 control~~ **완료 (08-05)**. ~~로봇 sweep~~ **취소 (환경 동결)** — future work 문단으로.
+2. **[서버 접속만] 0729 loss 수치 회수** — Fig.4(loss vs authority 산점도)의 loss 축.
+   + V1 main 브랜치 = best/last 확인, V1/live probe 결과물 커밋.
+3. **[로그 분석] 7월 롤아웃 리비전 pin 정리** — refs/main vs val-best 구분 주석, Table II의
+   n·리비전 정직 표기.
+4. **[0-compute] Fig.4/5/신규 스윕 Fig 데이터 정리** — probes/*.txt → 산점도·막대;
+   신규: 힘-스케일 스윕 3곡선(naive/V1/v2, 오프라인) + 라이브 crossover 3점 오버레이.
+5. **[집필] IEEEtran 스켈레톤 + Intro/Method 드래프팅 즉시 시작** — 수치 확정 상태이므로
+   전 섹션 병행 가능. 실험일지 §6.10 기록(아카이브용)은 후순위.
 
 ## 10. Writing conventions
 

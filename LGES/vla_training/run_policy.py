@@ -359,7 +359,18 @@ def load_policy(checkpoint: Path, film: bool = False):
         # lges_suction (pre-0708) no longer exists on this machine. dfmag checkpoints
         # (cond incl. 'dfmag', state 16) need a *_dF dataset, e.g.
         # FILM_DATASET=lges_case_pick_0708_dF.
-        ds = VLA_DIR / "datasets" / os.environ.get("FILM_DATASET", "lges_case_pick_0708")
+        # FILM_DATASET: absolute path, or a bare dataset name. Bare names resolve
+        # against datasets/ (server layout; on the robot that symlink points to the
+        # server volume and is BROKEN) and fall back to the local stats mirrors.
+        name = os.environ.get("FILM_DATASET", "lges_case_pick_0708")
+        cands = ([Path(name)] if Path(name).is_absolute() else
+                 [VLA_DIR / d / name
+                  for d in ("datasets", "local_film_stats", "datasets_local")])
+        ds = next((c for c in cands if (c / "meta" / "stats.json").exists()), None)
+        if ds is None:
+            raise FileNotFoundError(
+                f"FiLM stats (meta/stats.json) not found for FILM_DATASET={name!r}; "
+                "tried: " + ", ".join(str(c) for c in cands))
         wm, ws = film_contact.load_wrench_stats(ds)
         sm, ss = film_contact.load_seal_stats(ds)
         dm, dsd = film_contact.load_dfmag_stats(ds)
@@ -369,7 +380,8 @@ def load_policy(checkpoint: Path, film: bool = False):
                            dfmag_mean=dm, dfmag_std=dsd, dfmag_tau=dfmag_tau, fz_off=fz_off,
                            fmag_off=fmag_off, fmag_tau=fmag_tau)
         print(f"[run_policy] FiLM ENABLED (cond={cond} inject={inject} mask_force={mask_force} "
-              f"F0={f0:.0f} tau={tau:.0f} fz_tau={fz_tau:.0f} fz_off={fz_off:g} dfmag_tau={dfmag_tau:.0f})")
+              f"F0={f0:g} tau={tau:g} fz_tau={fz_tau:g} fz_off={fz_off:g} "
+              f"fmag={fmag_off:g}/{fmag_tau:g} dfmag_tau={dfmag_tau:g} stats={ds})")
 
     policy = get_policy_class(cfg.type).from_pretrained(model_dir, config=cfg)
     policy.eval()
@@ -567,6 +579,72 @@ def _baseline_force(mover, n: int = 5) -> float:
     """Mean raw force over n reads — the payload-aware reference for the force
     guard. Re-taken at each task start so a held payload doesn't bias it."""
     return float(np.mean([_force_mag(mover) for _ in range(n)]))
+
+
+# 0729-train episode-start force anchors: medians over the first 1s of the 100
+# train episodes (datasets_local/lges_case_pick_0729), arm static at view park,
+# tool empty — the same situation as the task-start measurement below (view-park
+# and hover read the same force: the tool points down throughout). The FiLM
+# offsets are anchored to that session's F/T bias, which drifts day-to-day AND
+# intra-day (7/30 rollout logs: +0.4N morning -> +1.1N afternoon vs these
+# anchors) — with the recal taus (1 / 0.7) that is most of a c-hat unit.
+FILM_BASELINE_ANCHOR_FMAG = 4.59   # |F| (N)
+FILM_BASELINE_ANCHOR_FZ = 1.96     # fz (N)
+FILM_BASELINE_WARN_N = 1.5
+
+
+def _film_auto_baseline(mover, policy, entry_sealed: bool,
+                        seconds: float = 2.0, hz: float = 50.0):
+    """Re-anchor the FiLM offset buffers to the wrench measured NOW (arm static
+    at the task-start pose, before the policy loop): each offset becomes
+    train-time value + (measured median - train anchor), which reproduces the
+    train-time c-hat at hover regardless of F/T bias drift.
+
+    The train-time offsets are stashed from the buffers on the FIRST call, so
+    FILM_F0/FILM_FMAG_OFF/FILM_FZ_OFF must hold the TRAINING values when
+    --film-auto-baseline is used (no pre-corrected env file on top).
+    Anomalies (entry sealed = payload in the measurement, drift beyond
+    FILM_BASELINE_WARN_N) are warned + recorded but the correction is still
+    applied (2026-08-04 decision). Returns a dict for the rollout log, or None
+    if there is no wrench sensor / no FiLM offset buffer."""
+    model = getattr(policy, "model", policy)
+    bufs = [b for b in ("_contact_F0", "_fmag_off", "_fz_off")
+            if getattr(model, b, None) is not None]
+    ws = getattr(mover._arm, "wrench_sensor", None)
+    if not bufs or ws is None:
+        return None
+    if not hasattr(model, "_film_train_offsets"):
+        model._film_train_offsets = {b: float(getattr(model, b)) for b in bufs}
+    rows = []
+    t_end = time.time() + seconds
+    while time.time() < t_end:
+        rows.append(np.asarray(ws.get_state()["wrench"], float)[:6])
+        time.sleep(1.0 / hz)
+    f = np.asarray(rows)
+    fmag_med = float(np.median(np.linalg.norm(f[:, :3], axis=1)))
+    fz_med = float(np.median(f[:, 2]))
+    wrench_med = np.median(f, axis=0)
+    d_fmag = fmag_med - FILM_BASELINE_ANCHOR_FMAG
+    d_fz = fz_med - FILM_BASELINE_ANCHOR_FZ
+    drift = {"_contact_F0": d_fmag, "_fmag_off": d_fmag, "_fz_off": d_fz}
+    anomalies = []
+    if entry_sealed:
+        anomalies.append("entry sealed — payload included in the measurement")
+    if max(abs(drift[b]) for b in bufs) > FILM_BASELINE_WARN_N:
+        anomalies.append(f"drift beyond {FILM_BASELINE_WARN_N}N — check payload/suction/contact")
+    applied = {}
+    for b in bufs:
+        val = model._film_train_offsets[b] + drift[b]
+        getattr(model, b).fill_(val)
+        applied[b.lstrip("_")] = round(val, 2)
+    print(f"[film-baseline] |F| {fmag_med:.2f}N ({d_fmag:+.2f} vs train) "
+          f"fz {fz_med:.2f}N ({d_fz:+.2f}) -> {applied} (n={len(f)})")
+    for a in anomalies:
+        print(f"[film-baseline] WARNING: {a}; correction applied anyway")
+    return {"fmag_med_n": round(fmag_med, 2), "fz_med_n": round(fz_med, 2),
+            "drift_fmag_n": round(d_fmag, 2), "drift_fz_n": round(d_fz, 2),
+            "wrench_med": [round(float(v), 3) for v in wrench_med],
+            "applied": applied, "anomalies": anomalies}
 
 
 def _retreat_to_hover(mover, cap_z: float | None = None, by: float = 0.12):
@@ -838,7 +916,8 @@ def run_live(checkpoint: Path, tasks: list[str], *, commit: bool,
              n_action_steps: int | None = None, loop: bool = False,
              descend_until_contact: bool = False, contact_n: float = 3.0,
              descend_floor: float = 0.74, descend_rate: float = 0.0005,
-             film: bool = False, layers: int | None = None):
+             film: bool = False, layers: int | None = None,
+             film_auto_baseline: bool = False):
     """Run suction sub-task(s) at ~15 Hz on the ik_demo stack.
 
     commit=False -> DRY-RUN (prints, commands nothing).
@@ -980,6 +1059,8 @@ def run_live(checkpoint: Path, tasks: list[str], *, commit: bool,
                     policy.reset()  # clear the action-chunk queue between sub-tasks
                     baseline_f = _baseline_force(mover)
                     entry_sealed = bool(seal.is_sealed()) if seal else False
+                    film_base = (_film_auto_baseline(mover, policy, entry_sealed)
+                                 if film_auto_baseline else None)
                     print(f"\n=== task {ti+1}/{len(tasks)}: {task} ({kind}) | \"{instruction}\"\n"
                           f"    baseline {baseline_f:.1f}N"
                           f"{' | entry sealed' if entry_sealed else ''} ===")
@@ -987,7 +1068,9 @@ def run_live(checkpoint: Path, tasks: list[str], *, commit: bool,
                     if log is not None:
                         log.open_task(ti, task, instruction,
                                       extra={**det_extra,
-                                             "baseline_force_n": round(baseline_f, 2)})
+                                             "baseline_force_n": round(baseline_f, 2),
+                                             **({"film_baseline": film_base}
+                                                if film_base else {})})
                     task_done = None
                     has_sealed = entry_sealed   # pick: latch the grasp
                     has_released = False        # place: latch the release
@@ -1226,6 +1309,12 @@ def main():
                     help="load a FiLM contact-conditioned checkpoint (V1/V2 from train_film.sh): "
                          "patches the model so c-hat is computed live. Use with "
                          "--checkpoint outputs/film_v2/checkpoints/last and matching FILM_* envs.")
+    ap.add_argument("--film-auto-baseline", action="store_true",
+                    help="with --film: at each task start (arm static, pre-policy) measure the "
+                         "hover wrench ~2s and re-anchor F0/FMAG_OFF/FZ_OFF for F/T bias drift "
+                         "(offset = train value + measured - train anchor). FILM_* envs must "
+                         "hold the TRAINING values. Measurement + applied values go into "
+                         "meta.json (film_baseline).")
     ap.add_argument("--descend-until-contact", action="store_true",
                     help="diagnostic gate: during a pick, override the z-delta to keep the EE "
                          "descending until contact/seal (tests whether forcing condition-use "
@@ -1240,6 +1329,8 @@ def main():
                     help="min downward z step (m/tick) the contact-gate enforces (default 0.006)")
     args = ap.parse_args()
 
+    if args.film_auto_baseline and not args.film:
+        ap.error("--film-auto-baseline needs --film")
     if args.revision:
         if args.checkpoint is None or args.checkpoint.exists():
             ap.error("--revision needs --checkpoint <hub repo id> (not a local path)")
@@ -1261,7 +1352,8 @@ def main():
              n_action_steps=args.n_action_steps, loop=args.loop,
              descend_until_contact=args.descend_until_contact, contact_n=args.contact_n,
              descend_floor=args.descend_floor, descend_rate=args.descend_rate,
-             film=args.film, layers=args.layers)
+             film=args.film, layers=args.layers,
+             film_auto_baseline=args.film_auto_baseline)
 
 
 if __name__ == "__main__":

@@ -77,9 +77,14 @@ def _obb_long_axis_deg(w: float, h: float, r_rad: float) -> float:
 
 
 def detect_case_bev(rgb: np.ndarray, q_torso, q_head, layers_remaining: int = 1,
-                    weights: str | None = None) -> CaseBEV:
-    """Warp to BEV on the current top-face plane, run YOLO-OBB, map to base."""
-    plane_z = bev.top_face_z(layers_remaining)
+                    weights: str | None = None,
+                    plane_z: float | None = None) -> CaseBEV:
+    """Warp to BEV on the current top-face plane, run YOLO-OBB, map to base.
+    ``plane_z`` overrides the model plane (ik_demo passes a measured-contact
+    anchor: the model drifts from the real stack as layers accumulate, and a
+    wrong plane biases the detected XY along the camera ray)."""
+    if plane_z is None:
+        plane_z = bev.top_face_z(layers_remaining)
     mapper = bev.build_mapper(q_torso, q_head, plane_z)
     bev_img = mapper.warp(rgb)
 

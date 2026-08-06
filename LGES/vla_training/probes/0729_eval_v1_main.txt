@@ -1,0 +1,23 @@
+[transformers] `torch_dtype` is deprecated! Use `dtype` instead!
+[transformers] Model config: pad_token_id must be `None` or an integer within the vocabulary (between 0 and 31999), got 128002. This may result in unexpected behavior.
+checkpoint: /home/dexmate/LGES/Dexmate/LGES/vla_training/local_ckpts/v1_main
+[eval] FiLM ENABLED (cond=('contact', 'fmag', 'fz', 'seal') inject=prefix mask_force=True F0=6 tau=1 fz_tau=1 fz_off=3 fmag=5.5/1 stats=/home/dexmate/LGES/Dexmate/LGES/vla_training/datasets_local/lges_case_pick_0729_val)
+Loading  HuggingFaceTB/SmolVLM2-500M-Video-Instruct weights ...
+Loading weights:   0%|          | 0/489 [00:00<?, ?it/s]Loading weights:  89%|████████▉ | 437/489 [00:00<00:00, 4361.56it/s]Loading weights: 100%|██████████| 489/489 [00:00<00:00, 4484.06it/s]
+Reducing the number of VLM layers to 16 ...
+Loading weights from local directory
+val: 6 episodes, 1169 frames
+
+task                                        pos(mm)  rot(mrad)  suction
+pick up the case with the suction cup          0.96       1.71    99.7%
+------------------------------------------------------------------------
+OVERALL mean |err| per step                    0.96       1.71    99.7%
+
+per-dimension mean |err|:
+  dx       0.00066
+  dy       0.00069
+  dz       0.00153
+  drx      0.00129
+  dry      0.00204
+  drz      0.00180
+  suction  0.01460

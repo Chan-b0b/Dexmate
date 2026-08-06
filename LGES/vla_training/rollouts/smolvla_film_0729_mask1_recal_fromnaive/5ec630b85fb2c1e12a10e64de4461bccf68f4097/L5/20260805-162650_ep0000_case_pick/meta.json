@@ -1,0 +1,35 @@
+{
+  "phase": "case_pick",
+  "instruction": "pick up the case with the suction cup",
+  "action_space": "ee_delta+suction",
+  "ee_rotation": "quat_wxyz, base_link",
+  "source": "run_policy.py rollout",
+  "checkpoint": "/home/dexmate/.cache/huggingface/hub/models--Chanho-Lee--smolvla_film_0729_prefix_mask1_recal_fromnaive/snapshots/5ec630b85fb2c1e12a10e64de4461bccf68f4097",
+  "frames": 201,
+  "success": false,
+  "peak_force_n": 26.75,
+  "peak_force_frame": 200,
+  "peak_contact_n": 21.71,
+  "layers_remaining": 5,
+  "detected_center_xyzyaw": [
+    0.9844688924153646,
+    -0.04171229044596353,
+    0.8109999999999999,
+    -0.05835944686356039
+  ],
+  "top_face_z": 0.635,
+  "detect_conf": 0.9635888934135437,
+  "baseline_force_n": 5.04,
+  "film_baseline": {
+    "fmag_med_n": 5.07,
+    "fz_med_n": 2.47,
+    "drift_fmag_n": 0.48,
+    "drift_fz_n": 0.51,
+    "applied": {
+      "contact_F0": 7.08,
+      "fmag_off": 7.08,
+      "fz_off": 3.51
+    },
+    "anomalies": []
+  }
+}

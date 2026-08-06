@@ -1,0 +1,26 @@
+[transformers] `torch_dtype` is deprecated! Use `dtype` instead!
+[transformers] Model config: pad_token_id must be `None` or an integer within the vocabulary (between 0 and 31999), got 128002. This may result in unexpected behavior.
+[sim] FiLM cond=('contact', 'fmag', 'fz', 'seal') inject=prefix mask_force=False  ckpt=/home/dexmate/LGES/Dexmate/LGES/vla_training/local_ckpts/mask0fn_main
+[sim] stiffness=1.0N/mm  f_base=6.8N  seal_depth=nevermm  max_steps=40  start_offset=30  force_model=fzdelta
+Loading  HuggingFaceTB/SmolVLM2-500M-Video-Instruct weights ...
+Loading weights:   0%|          | 0/489 [00:00<?, ?it/s]Loading weights:  78%|███████▊  | 381/489 [00:00<00:00, 3783.98it/s]Loading weights: 100%|██████████| 489/489 [00:00<00:00, 4256.33it/s]
+Reducing the number of VLM layers to 16 ...
+Loading weights from local directory
+[sim] contact direction=[0.19 0.82 0.53]  torque=[ 0.02 -0.48 -0.46]
+  ep0 (z=0.763): STOP    steps=21 depth=  1.0mm  |F|end= 6.4N  sealed=False
+        first steps [|F|/dz(mm)]: 5.8N/-0.4  6.1N/-0.2  6.2N/-0.1  6.2N/-0.1  6.3N/-0.1  6.3N/-0.0  6.3N/-0.0  6.3N/-0.0
+  ep1 (z=0.765): timeout steps=40 depth=  7.6mm  |F|end=12.3N  sealed=False
+        first steps [|F|/dz(mm)]: 6.0N/-0.5  6.4N/-0.4  6.6N/-0.2  6.8N/-0.2  7.0N/-0.2  7.2N/-0.2  7.3N/-0.2  7.5N/-0.3
+  ep2 (z=0.762): STOP    steps=13 depth=  1.4mm  |F|end= 6.8N  sealed=False
+        first steps [|F|/dz(mm)]: 5.8N/-0.9  6.4N/-0.2  6.6N/-0.1  6.6N/-0.1  6.7N/-0.0  6.7N/-0.0  6.8N/-0.0  6.8N/-0.0
+  ep3 (z=0.818): STOP    steps= 5 depth=  8.9mm  |F|end=13.1N  sealed=False
+        first steps [|F|/dz(mm)]: 5.5N/-3.5  8.3N/-2.8  10.8N/-2.5  13.1N/+0.1  13.1N/+0.1
+  ep4 (z=0.817): timeout steps=40 depth=  7.7mm  |F|end=12.3N  sealed=False
+        first steps [|F|/dz(mm)]: 6.1N/-2.9  8.1N/-0.5  8.5N/-0.4  8.9N/-0.3  9.2N/-0.3  9.4N/-0.3  9.7N/-0.2  9.9N/-0.2
+  ep5 (z=0.817): STOP    steps=35 depth=  5.7mm  |F|end=10.3N  sealed=False
+        first steps [|F|/dz(mm)]: 6.0N/-3.8  8.7N/-0.3  9.0N/-0.3  9.2N/-0.2  9.4N/-0.2  9.5N/-0.1  9.7N/-0.1  9.8N/-0.1
+
+── summary ─────────────────────────────────────────────────────────
+  stopped 4/6 episodes   penetration depth mean=5.4mm  max=8.9mm
+    z~0.763: stopped 2/3  depth mean=3.3mm
+    z~0.817: stopped 2/3  depth mean=7.4mm

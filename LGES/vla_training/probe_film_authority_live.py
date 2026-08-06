@@ -1,10 +1,28 @@
 #!/usr/bin/env python3
 """Live FiLM counterfactual authority probe.
 
-Moves the suction arm through safe, non-contact clearances above a detected case.
-At each pose it freezes one real RGB/depth/state observation and runs the policy
-with real, no-contact, contact, and sealed FiLM conditions. Predicted actions are
-logged only and are NEVER sent to the robot.
+Moves the suction arm through clearances above a detected case (negative
+clearances DO press the cup into the case). At each pose it freezes one real
+RGB/depth/state observation and predicts under counterfactuals. Predicted
+actions are logged only and are NEVER sent to the robot.
+
+Two counterfactual families:
+  c-hat forcing (FiLM model only) — full COHERENT anchor vectors (hover /
+    preseal / sealed, all channels incl. fmag forced together so contact=1
+    never pairs with a hover-level fmag) + per-channel fz +-N sweeps.
+  RAW-state swaps (run on BOTH models) — fz +-N / measured first-contact /
+    sealed wrench written into the state itself: the naive baseline has no
+    c-hat, so the state IS its counterfactual; for the FiLM model the same
+    swap produces a coherent c-hat via the real computation path. This is the
+    live replication of probe_state_authority.py.
+
+--baseline-checkpoint <naive ckpt> runs the vanilla baseline on the SAME
+frozen observations for a film-vs-naive comparison (…_vs_naive.png).
+
+Before the clearance sweep the arm holds the pre-descent hover pose and
+re-anchors the FiLM offsets against the live wrench (--baseline-hover; same
+mechanism as run_policy --film-auto-baseline) — FILM_* envs must therefore be
+the TRAINING values, never a pre-corrected env file.
 """
 
 from __future__ import annotations
@@ -48,25 +66,68 @@ film_contact._condition_from_state = _condition_override
 @dataclass
 class Args:
     checkpoint: Path | None = None
+    baseline_checkpoint: Path | None = None  # vanilla (naive) ckpt, same frozen obs
     output_dir: Path = VLA_DIR / "live_film_probes"
     layers: int | None = None
     clearances: tuple[float, ...] | None = None
     fz_deltas_n: tuple[float, ...] | None = None
+    # self-anchor height (m above contact): before the clearance sweep, hold the
+    # PRE-DESCENT HOVER pose and re-anchor the FiLM offsets there (the 08-04 run
+    # showed env-file offsets measured at another pose mis-anchor c-hat by ~0.7 N).
+    # Train stats at this pose (|F| 4.62 / fz 2.04) match _film_auto_baseline's
+    # ep-start anchors within 0.1 N. 0 disables.
+    baseline_hover: float = 0.30
     seed: int = 0
     go: bool = False
 
 
-def _forced_pattern(real_c: list[float], cond_names: list[str], *,
-                    contact: float | None = None,
-                    seal: float | None = None,
-                    fz: float | None = None) -> list[float]:
-    out = list(real_c)
-    if contact is not None and "contact" in cond_names:
-        out[cond_names.index("contact")] = contact
-    if fz is not None and "fz" in cond_names:
-        out[cond_names.index("fz")] = fz
-    if seal is not None and "seal" in cond_names:
-        out[cond_names.index("seal")] = seal
+# state layout (ObsBuilder): pos3 quat4 suction(7) seal(8) wrench fx..tz(9:15)
+SEAL_IDX, WRENCH_LO, WRENCH_HI, FZ_IDX = 8, 9, 15, 11
+# Measured 0729-val medians for the raw-state swaps (probe_state_authority.py
+# conventions: first-contact = fz>3.0N trigger, 18 frames; sealed = 38 frames):
+FC_WRENCH = (1.32, 5.63, 3.65, 0.02, -0.48, -0.46)       # |F| = 6.8 N
+SEALED_WRENCH = (0.47, 5.15, 4.98, -0.09, -0.49, -0.50)  # |F| = 7.2 N
+# Train pre-descent hover wrench median (0729 train, 98 eps) — reference for
+# shifting the ABSOLUTE swap vectors onto today's F/T bias: without the shift,
+# a drift-re-anchored FiLM model reads the swap at (training dose - drift)
+# while the naive baseline gets the exact training template -> asymmetric
+# comparison (the 08-06 run measured exactly this).
+TRAIN_HOVER_WRENCH = (0.80, 3.99, 2.04, 0.15, -0.59, -0.36)  # |F| = 4.55 N
+# Measured 0729-train c-hat anchors (RECAL calibration: F0/fmag 5.5/1, fz 3.0/0.7).
+# A scenario forces the FULL vector so channels never contradict each other;
+# channels without an anchor entry (e.g. dfmag) keep their real value.
+# NOTE: values are calibration-specific — older 3-channel generations used
+# different offsets; re-derive before probing non-recal checkpoints.
+CHAT_ANCHORS = {
+    "hover":   {"contact": 0.0, "fz": -1.43, "fmag": -0.9, "seal": 0.0},
+    "preseal": {"contact": 0.4, "fz": 0.86,  "fmag": 0.4,  "seal": 0.0},
+    "sealed":  {"contact": 1.0, "fz": 2.29,  "fmag": 1.2,  "seal": 1.0},
+}
+
+
+def _forced_anchor(real_c: list[float], cond_names: list[str], anchor: dict) -> list[float]:
+    return [float(anchor.get(name, real_c[i])) for i, name in enumerate(cond_names)]
+
+
+def _state_variants(state: np.ndarray, fz_deltas_n,
+                    drift6: np.ndarray | None = None) -> dict[str, np.ndarray]:
+    """RAW-state counterfactuals, applied identically to both models.
+    drift6 = live hover wrench median - TRAIN_HOVER_WRENCH: the absolute
+    fc/sealed swap vectors are shifted onto today's bias so both models get
+    the same PHYSICAL counterfactual (fz+-N deltas are relative already)."""
+    d = np.zeros(6) if drift6 is None else np.asarray(drift6, dtype=float)
+    out = {}
+    for dn in fz_deltas_n:
+        s = state.copy()
+        s[FZ_IDX] += float(dn)
+        out[f"st_fz{dn:+g}N"] = s
+    s = state.copy()
+    s[WRENCH_LO:WRENCH_HI] = np.asarray(FC_WRENCH) + d
+    out["st_firstcontact"] = s
+    s = state.copy()
+    s[WRENCH_LO:WRENCH_HI] = np.asarray(SEALED_WRENCH) + d
+    s[SEAL_IDX] = 1.0
+    out["st_sealed"] = s
     return out
 
 
@@ -86,7 +147,8 @@ def _capture(bot, mover, seal, ob):
     return state, rgb, depth_m, wrench6
 
 
-def _predict(policy, pre, post, ob, state, rgb, depth_m, instruction, forced_c, seed):
+def _predict(policy, pre, post, ob, state, rgb, depth_m, instruction, forced_c, seed,
+             expect_film: bool = True):
     global _FORCE_C
     _FORCE_C = forced_c
     policy.reset()
@@ -94,7 +156,7 @@ def _predict(policy, pre, post, ob, state, rgb, depth_m, instruction, forced_c, 
     pred = rp.predict(policy, pre, post, state, ob.image(rgb), instruction,
                       ob.depth_image(depth_m))
     diag = rp._film_diagnostics(policy)
-    if diag is None:
+    if diag is None and expect_film:
         raise RuntimeError("FiLM diagnostics unavailable after prediction")
     return pred, diag
 
@@ -238,6 +300,48 @@ def _plot_pose(pose: dict, out: Path, action_space: str = "delta"):
     plt.close(fig)
 
 
+def _plot_compare(result: dict, out: Path):
+    """film vs naive on the SAME frozen observations — dz ONLY (2026-08-04):
+    real-scenario dz across clearances + per-scenario dz shift vs real."""
+    import matplotlib
+    matplotlib.use("Agg")
+    import matplotlib.pyplot as plt
+
+    poses = [p for p in result["poses"] if p.get("baseline_scenarios")]
+    if not poses:
+        return
+    cl = [p["clearance_m"] * 100 for p in poses]
+    shared = [n for n in poses[0]["baseline_scenarios"] if n != "real"]
+    models = (("film", "scenarios", "tab:blue"), ("naive", "baseline_scenarios", "tab:orange"))
+
+    fig, axes = plt.subplots(2, 1, figsize=(12, 9), constrained_layout=True)
+    for label, key, color in models:
+        axes[0].plot(cl, [p[key]["real"]["dpos_m"][2] * 1000 for p in poses],
+                     marker="o", label=label, color=color)
+    axes[0].axhline(0, color="black", linewidth=0.7)
+    axes[0].set_xlabel("clearance (cm)  [negative = pressing]")
+    axes[0].set_ylabel("predicted dz, real obs (mm)")
+    axes[0].invert_xaxis()
+    axes[0].legend()
+    axes[0].grid(alpha=0.25)
+
+    x = np.arange(len(shared))
+    width = 0.38
+    for off, (label, key, color) in zip((-width / 2, width / 2), models):
+        ddz = [np.mean([(p[key][n]["dpos_m"][2] - p[key]["real"]["dpos_m"][2]) * 1000
+                        for p in poses]) for n in shared]
+        axes[1].bar(x + off, ddz, width, label=label, color=color)
+    axes[1].axhline(0, color="black", linewidth=0.7)
+    axes[1].set_xticks(x, shared, rotation=25, ha="right")
+    axes[1].set_ylabel("mean delta dz vs real (mm)")
+    axes[1].grid(axis="y", alpha=0.25)
+    axes[1].legend()
+    fig.suptitle(f"film vs naive, dz on identical frozen observations "
+                 f"({len(poses)} poses, raw-state counterfactuals)")
+    fig.savefig(out, dpi=160)
+    plt.close(fig)
+
+
 def _preflight(mover, targets, rpy, reach_tol):
     seed = np.asarray(mover._arm.get_joint_pos(), dtype=float)
     rows = []
@@ -288,6 +392,19 @@ def main():
     suction_idx = 7 if abs_action else 6
     instruction = rp.TASKS["case_pick"]["instruction"]
 
+    base = None
+    if args.baseline_checkpoint:
+        # Loaded AFTER the film policy, i.e. under the patched VLAFlowMatching —
+        # _film_cond=None opts this instance out of c-hat + force-masking so it
+        # behaves exactly like a vanilla checkpoint (guard in film_contact).
+        bpolicy, bpre, bpost = rp.load_policy(args.baseline_checkpoint, film=False)
+        bpolicy.config.n_action_steps = 1
+        if hasattr(bpolicy.model, "_film_cond"):
+            bpolicy.model._film_cond = None
+        b_abs = int(bpolicy.config.action_feature.shape[0]) == 8
+        base = (bpolicy, bpre, bpost, b_abs, 7 if b_abs else 6)
+        logger.info("baseline (vanilla) loaded: {}", args.baseline_checkpoint)
+
     robot_configs = get_robot_config()
     robot_configs.enable_sensor("head_camera")
     robot_configs.sensors["head_camera"].transport = "zenoh"
@@ -318,6 +435,9 @@ def main():
             rpy = tuple(float(v) for v in pick_pose[3:6])
             contact_ee_z = float(det.top_face_z) + float(ikcfg.SUCTION_LENGTH_M)
             targets = [("transport", (x, y, float(ikcfg.SAFE_TRANSPORT_Z)))]
+            if args.baseline_hover:
+                targets += [("baseline_hover",
+                             (x, y, contact_ee_z + float(args.baseline_hover)))]
             targets += [(f"clearance_{c:.3f}", (x, y, contact_ee_z + c))
                         for c in clearances]
             checks = _preflight(mover, targets, rpy, float(ikcfg.REACH_TOL_M))
@@ -339,8 +459,32 @@ def main():
             if mover.move_ee(targets[0][1], rpy, quiet=True) is None:
                 raise RuntimeError("transport approach failed")
 
+            film_baseline = None
+            if args.baseline_hover:
+                # re-anchor F0/FMAG_OFF/FZ_OFF at the pre-descent hover, right next
+                # to the region being probed — FILM_* envs must hold TRAIN values
+                # (no pre-corrected env file; _film_auto_baseline stashes them).
+                hover = (x, y, contact_ee_z + float(args.baseline_hover))
+                if mover.move_ee(hover, rpy, quiet=True) is None:
+                    logger.warning("baseline hover move failed — offsets stay at env values")
+                else:
+                    time.sleep(float(ikcfg.VLA_FILM_PROBE_SETTLE_S))
+                    entry_sealed = bool(seal.is_sealed()) if seal is not None else False
+                    film_baseline = rp._film_auto_baseline(mover, policy, entry_sealed)
+
+            swap_drift = None
+            if film_baseline and film_baseline.get("wrench_med"):
+                swap_drift = (np.asarray(film_baseline["wrench_med"], dtype=float)
+                              - np.asarray(TRAIN_HOVER_WRENCH, dtype=float))
+                print(f"  swap drift (live hover - train hover): {np.round(swap_drift, 2)}")
+
             result = {
+                "film_baseline": film_baseline,
+                "swap_drift": ([round(float(v), 3) for v in swap_drift]
+                               if swap_drift is not None else None),
                 "checkpoint": str(checkpoint),
+                "baseline_checkpoint": (str(args.baseline_checkpoint)
+                                        if args.baseline_checkpoint else None),
                 "created_at": time.strftime("%Y-%m-%dT%H:%M:%S"),
                 "detected_center_xyzyaw": [float(v) for v in center],
                 "top_face_z": float(det.top_face_z),
@@ -350,6 +494,9 @@ def main():
                 "fz_deltas_n": [float(v) for v in fz_deltas_n],
                 "fz_tau": (float(policy.model._fz_tau)
                            if hasattr(policy.model, "_fz_tau") else None),
+                "chat_anchors": CHAT_ANCHORS,
+                "fc_wrench": list(FC_WRENCH),
+                "sealed_wrench": list(SEALED_WRENCH),
                 "poses": [],
             }
 
@@ -367,19 +514,18 @@ def main():
                                                 instruction, None, args.seed)
                 cond_names = real_diag["cond_names"]
                 real_c = real_diag["c_hat"]
-                patterns = {
-                    "real": None,
-                    "no_contact": _forced_pattern(real_c, cond_names, contact=0.0, seal=0.0),
-                    "contact": _forced_pattern(real_c, cond_names, contact=1.0, seal=0.0),
-                    "sealed": _forced_pattern(real_c, cond_names, contact=1.0, seal=1.0),
-                }
+                # c-hat forcing (film only): full coherent anchor vectors
+                patterns = {"real": None}
+                for name, anchor in CHAT_ANCHORS.items():
+                    patterns[name] = _forced_anchor(real_c, cond_names, anchor)
                 if "fz" in cond_names:
                     fz_i = cond_names.index("fz")
                     fz_tau = float(policy.model._fz_tau)
                     for delta_n in fz_deltas_n:
-                        label = f"fz_{delta_n:+g}N"
-                        patterns[label] = _forced_pattern(
-                            real_c, cond_names, fz=real_c[fz_i] + float(delta_n) / fz_tau)
+                        forced = list(real_c)
+                        forced[fz_i] = real_c[fz_i] + float(delta_n) / fz_tau
+                        patterns[f"fz_{delta_n:+g}N"] = forced
+                svars = _state_variants(state, fz_deltas_n, drift6=swap_drift)
                 scenarios = {}
                 for name, forced_c in patterns.items():
                     if name == "real":
@@ -390,9 +536,32 @@ def main():
                     row = _action_summary(pred, state, abs_action, suction_idx)
                     row["film"] = diag
                     scenarios[name] = row
-                    print(f"  {name:>10}: c={np.round(diag['c_hat'], 3)} "
+                    print(f"  {name:>16}: c={np.round(diag['c_hat'], 3)} "
                           f"dz={row['dpos_m'][2]*1000:+.2f}mm suction={row['suction']:.3f} "
                           f"gamma_rms={diag['gamma']['rms']:.4f} beta_rms={diag['beta']['rms']:.4f}")
+                # raw-state swaps (film): coherent c-hat via the real path
+                for name, s2 in svars.items():
+                    pred, diag = _predict(policy, pre, post, ob, s2, rgb, depth_m,
+                                          instruction, None, args.seed)
+                    row = _action_summary(pred, s2, abs_action, suction_idx)
+                    row["film"] = diag
+                    scenarios[name] = row
+                    print(f"  {name:>16}: c={np.round(diag['c_hat'], 3)} "
+                          f"dz={row['dpos_m'][2]*1000:+.2f}mm suction={row['suction']:.3f}")
+
+                baseline_scenarios = None
+                if base is not None:
+                    bpolicy, bpre, bpost, b_abs, b_sidx = base
+                    baseline_scenarios = {}
+                    for name, s2 in {"real": state, **svars}.items():
+                        pred, diag = _predict(bpolicy, bpre, bpost, ob, s2, rgb, depth_m,
+                                              instruction, None, args.seed,
+                                              expect_film=False)
+                        row = _action_summary(pred, s2, b_abs, b_sidx)
+                        row["film"] = diag  # None: vanilla baseline has no c-hat
+                        baseline_scenarios[name] = row
+                        print(f"  [naive] {name:>16}: dz={row['dpos_m'][2]*1000:+.2f}mm "
+                              f"suction={row['suction']:.3f}")
 
                 result["poses"].append({
                     "clearance_m": clearance,
@@ -401,6 +570,7 @@ def main():
                     "wrench": [float(v) for v in wrench6],
                     "real_c_hat": real_c,
                     "scenarios": scenarios,
+                    "baseline_scenarios": baseline_scenarios,
                 })
         finally:
             global _FORCE_C
@@ -433,6 +603,10 @@ def main():
         _plot_pose(pose, pose_path, action_space=result.get("action_space", "delta"))
         pose_pngs.append(pose_path)
     print(f"\nresult: {json_path}\nsummary: {png_path}")
+    if result.get("baseline_checkpoint"):
+        cmp_path = save_dir / f"{stem}_vs_naive.png"
+        _plot_compare(result, cmp_path)
+        print(f"compare: {cmp_path}")
     for pose_path in pose_pngs:
         print(f"pose:    {pose_path}")
 
@@ -440,11 +614,14 @@ def main():
 if __name__ == "__main__":
     main()
 """
-FILM_COND=contact,fz,seal FILM_INJECT=prefix FILM_MASK_FORCE=1 \
-FILM_F0=6 FILM_TAU=4 FILM_FZ_TAU=-2.6 \
-FILM_DATASET=lges_case_pick_0721 \
+# 0729 recal round (film vs naive on the same frozen observations):
+FILM_COND=contact,fmag,fz,seal FILM_INJECT=prefix FILM_MASK_FORCE=1 \
+FILM_F0=5.5 FILM_TAU=1 FILM_FMAG_OFF=5.5 FILM_FMAG_TAU=1 \
+FILM_FZ_OFF=3.0 FILM_FZ_TAU=0.7 \
+FILM_DATASET=lges_case_pick_0729 \
 python probe_film_authority_live.py --go \
-  --clearances 0.05 0.04 0.03 0.02 0.01 0.00 -0.01 -0.02 -0.03 -0.04\
-  --checkpoint Chanho-Lee/smolvla_film_0721_prefix_mask1 \
+  --clearances 0.05 0.04 0.03 0.02 0.01 0.00 -0.01 -0.02 -0.03 -0.04 \
+  --checkpoint Chanho-Lee/smolvla_film_0729_prefix_mask1_recal_fromnaive \
+  --baseline-checkpoint Chanho-Lee/smolvla_naive_0729 \
   --fz-deltas-n -6 -3 3 6
 """

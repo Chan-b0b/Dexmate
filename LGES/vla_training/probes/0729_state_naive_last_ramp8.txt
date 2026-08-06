@@ -1,0 +1,5 @@
+[transformers] `torch_dtype` is deprecated! Use `dtype` instead!
+[transformers] Model config: pad_token_id must be `None` or an integer within the vocabulary (between 0 and 31999), got 128002. This may result in unexpected behavior.
+[probe] NAIVE checkpoint (no FiLM)  ckpt=/home/dexmate/LGES/Dexmate/LGES/vla_training/local_ckpts/naive_last
+Loading  HuggingFaceTB/SmolVLM2-500M-Video-Instruct weights ...
+Loading weights:   0%|          | 0/489 [00:00<?, ?it/s]Loading weights:  72%|███████▏  | 351/489 [00:00<00:00, 3495.42it/s]Loading weights: 100%|██████████| 489/489 [00:00<00:00, 3985.48it/s]

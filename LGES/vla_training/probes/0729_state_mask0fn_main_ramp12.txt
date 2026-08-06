@@ -1,0 +1,72 @@
+[transformers] `torch_dtype` is deprecated! Use `dtype` instead!
+[transformers] Model config: pad_token_id must be `None` or an integer within the vocabulary (between 0 and 31999), got 128002. This may result in unexpected behavior.
+[probe] FiLM cond=('contact', 'fmag', 'fz', 'seal') inject=prefix mask_force=False  ckpt=/home/dexmate/LGES/Dexmate/LGES/vla_training/local_ckpts/mask0fn_main
+Loading  HuggingFaceTB/SmolVLM2-500M-Video-Instruct weights ...
+Loading weights:   0%|          | 0/489 [00:00<?, ?it/s]Loading weights:  89%|████████▉ | 435/489 [00:00<00:00, 4346.84it/s]Loading weights: 100%|██████████| 489/489 [00:00<00:00, 4519.60it/s]
+Reducing the number of VLM layers to 16 ...
+Loading weights from local directory
+  episodes: [0, 1, 2, 3, 4, 5]
+  swap wrench (median over 18 FIRST-CONTACT frames, fz>3.0N trigger, all episodes): [ 2.32  9.88  6.4   0.02 -0.48 -0.46]  |F|=12.0N  seal stays 0  [--swap fcscale]
+  c-hat: own(example)=[[ 0.    -1.029 -0.471  0.   ]]  swap=[[1.    4.856 6.5   0.   ]]  (channels ('contact', 'fmag', 'fz', 'seal'))
+  ep0: "pick up the case with the suction cup"  frames 0..218  descent=143  first-contact@+141  seal@+180
+  ep1: "pick up the case with the suction cup"  frames 218..438  descent=144  first-contact@+141  seal@+181
+  ep2: "pick up the case with the suction cup"  frames 438..649  descent=135  first-contact@+136  seal@+179
+  ep3: "pick up the case with the suction cup"  frames 649..821  descent=102  first-contact@+100  seal@+140
+  ep4: "pick up the case with the suction cup"  frames 821..996  descent=108  first-contact@+104  seal@+142
+  ep5: "pick up the case with the suction cup"  frames 996..1169  descent=107  first-contact@+101  seal@+140
+
+   frame    ee_z   |F|N |  expert  dz(own) dz(swap)    dzRAW   dzFiLM |    dTot    dRaw   dFiLM
+  ---------------------------------------------------------------------------------------------
+       0   1.098    5.0 |    0.2m    -1.5m    -0.3m    -0.2m    -1.1m |    1.2m    1.3m    0.3m
+      29   1.083    5.5 |   -9.6m    -9.0m    -5.7m    -6.1m    -8.7m |    3.2m    2.9m    0.2m
+      58   0.932    5.3 |   -7.6m   -12.4m    -9.3m    -9.5m   -12.5m |    3.1m    2.9m   -0.1m
+      87   0.843    4.8 |   -1.6m    -1.7m    -0.5m    -0.4m    -1.5m |    1.2m    1.2m    0.2m
+     116   0.799    4.9 |   -1.5m    -1.5m    -0.2m    -0.2m    -1.2m |    1.3m    1.4m    0.3m
+     220   1.067    5.0 |    1.4m    -1.1m    -0.4m    -0.3m    -0.7m |    0.7m    0.8m    0.5m
+     250   1.078    5.2 |   -9.0m    -9.1m    -5.1m    -5.5m    -8.3m |    4.0m    3.6m    0.8m
+     279   0.927    5.3 |   -7.8m   -12.1m    -7.4m    -7.8m   -12.5m |    4.7m    4.3m   -0.4m
+     309   0.840    5.2 |   -2.1m    -1.5m    -0.5m    -0.5m    -1.3m |    1.0m    1.0m    0.2m
+     338   0.796    5.2 |   -1.0m    -1.6m    -0.2m    -0.2m    -1.3m |    1.4m    1.4m    0.3m
+     441   1.070    5.2 |    4.9m     0.5m    -2.5m    -1.8m     0.3m |   -2.9m   -2.3m   -0.2m
+     472   1.063    5.2 |    0.0m    -2.7m    -5.6m    -5.5m    -3.2m |   -2.9m   -2.8m   -0.5m
+     501   0.861    5.4 |   -1.7m    -3.8m    -0.2m    -0.2m    -5.3m |    3.5m    3.6m   -1.6m
+     530   0.828    5.3 |   -1.4m    -1.5m    -0.6m    -0.4m    -1.2m |    0.9m    1.1m    0.3m
+     559   0.784    5.0 |   -1.6m    -1.7m    -0.2m    -0.1m    -1.6m |    1.5m    1.6m    0.1m
+     662   1.144    4.7 |   -5.1m    -6.3m    -1.3m    -1.3m    -5.6m |    4.9m    5.0m    0.7m
+     691   1.035    5.3 |   -7.2m   -10.2m    -8.2m    -7.9m    -8.0m |    2.0m    2.3m    2.2m
+     720   0.860    4.6 |   -3.2m    -3.6m    -2.2m    -1.8m    -6.9m |    1.4m    1.8m   -3.3m
+     803   0.922    5.9 |    7.5m     1.3m    -5.5m    -5.9m     1.0m |   -6.8m   -7.2m   -0.3m
+     848   1.098    5.1 |   -8.4m    -9.5m    -6.0m    -6.5m    -9.2m |    3.5m    3.0m    0.3m
+     877   0.952    4.7 |   -9.8m   -13.3m    -7.8m    -8.1m   -13.1m |    5.5m    5.2m    0.2m
+     907   0.844    5.1 |   -1.5m    -1.7m    -0.4m    -0.4m    -1.4m |    1.3m    1.3m    0.3m
+    1002   1.096    4.4 |   12.7m     8.5m     3.2m     4.0m     8.0m |   -5.3m   -4.5m   -0.5m
+    1031   1.060    5.3 |    0.0m    -3.5m    -5.4m    -4.7m    -2.8m |   -2.0m   -1.3m    0.7m
+    1060   0.860    5.4 |   -0.7m    -3.5m    -0.4m    -0.4m    -4.8m |    3.1m    3.2m   -1.2m
+    1090   0.827    5.2 |   -1.6m    -1.6m    -0.3m    -0.3m    -1.5m |    1.3m    1.4m    0.2m
+  ---------------------------------------------------------------------------------------------
+
+  decomposition over 739 descent frames (d* = dz(cell) - dz(own,own)):
+    ALL frames                  : n=739  dz(own)= -3.77mm  dTotal= +1.12mm  dRaw= +1.15mm  dFiLM= +0.12mm  interact= -0.15mm
+    approach/hover dz(own)>=-3mm: n=419  dz(own)= -0.56mm  dTotal= +0.52mm  dRaw= +0.60mm  dFiLM= +0.05mm  interact= -0.13mm
+    COMMITTED desc dz(own)< -3mm: n=320  dz(own)= -7.97mm  dTotal= +1.90mm  dRaw= +1.88mm  dFiLM= +0.21mm  interact= -0.19mm
+
+  time-to-contact split (pooled over 6 episode(s), per-episode first-contact detection):
+    >=4s before contact (early) : n=366  dz(own)= -4.63mm  dTotal= +0.58mm  dRaw= +0.64mm  dFiLM= +0.24mm  interact= -0.29mm
+    2-4s before contact         : n=178  dz(own)= -5.00mm  dTotal= +2.06mm  dRaw= +2.08mm  dFiLM= -0.09mm  interact= +0.07mm
+    <2s before contact (late)   : n=164  dz(own)= -1.58mm  dTotal= +1.31mm  dRaw= +1.36mm  dFiLM= +0.16mm  interact= -0.21mm
+    after contact (press phase) : n= 31  dz(own)= +1.89mm  dTotal= +1.00mm  dRaw= +0.76mm  dFiLM= -0.32mm  interact= +0.56mm
+
+  per-episode split (ABSOLUTE dz, mm/step):
+    ep0 (contact z=0.763): n=143  dz(own)= -3.36  dz(swap)= -2.06  d= +1.31  (FiLM  -0.02)
+    ep1 (contact z=0.765): n=144  dz(own)= -3.40  dz(swap)= -2.15  d= +1.24  (FiLM  +0.11)
+    ep2 (contact z=0.762): n=135  dz(own)= -3.78  dz(swap)= -2.78  d= +1.00  (FiLM  +0.16)
+    ep3 (contact z=0.818): n=102  dz(own)= -4.32  dz(swap)= -3.96  d= +0.36  (FiLM  +0.08)
+    ep4 (contact z=0.817): n=108  dz(own)= -3.93  dz(swap)= -2.42  d= +1.52  (FiLM  +0.26)
+    ep5 (contact z=0.817): n=107  dz(own)= -4.09  dz(swap)= -2.94  d= +1.15  (FiLM  +0.15)
+
+── verdict ─────────────────────────────────────────────────────────
+  committed descent, cancellation of dz(own)=-8.0mm:
+    TOTAL (state+c swap) :   +24%
+    RAW path only        :   +24%   (state swap, c pinned to own)
+    FiLM path only       :    +3%   (c swap, state kept own)
+  -> the RAW state path carries the contact response; FiLM is redundant here.

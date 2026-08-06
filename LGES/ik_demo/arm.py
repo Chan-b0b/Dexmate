@@ -32,7 +32,7 @@ from loguru import logger
 from pink import solve_ik
 from pink.limits import ConfigurationLimit, VelocityLimit
 from pink.tasks import FrameTask, PostureTask
-from ruckig import InputParameter, Ruckig, Trajectory
+from ruckig import InputParameter, Result, Ruckig, Trajectory
 from scipy.spatial.transform import Rotation
 
 try:
@@ -142,10 +142,22 @@ class ArmMover:
         self._q_hi = self._model.upperPositionLimit.copy()
         self._v_max = self._model.velocityLimit.copy()
 
+        # IK-side joint-range margin: solve/validate inside JOINT_RANGE_FRAC of
+        # each joint's URDF range (centered) so solutions keep off the hard
+        # stops. IK-side only — URDF and dexcontrol's hardware clamps untouched.
+        finite = np.isfinite(self._q_lo) & np.isfinite(self._q_hi)
+        mid = 0.5 * (self._q_lo + self._q_hi)
+        half = 0.5 * (self._q_hi - self._q_lo) * float(cfg.JOINT_RANGE_FRAC)
+        self._q_lo = np.where(finite, mid - half, self._q_lo)
+        self._q_hi = np.where(finite, mid + half, self._q_hi)
+        self._model.lowerPositionLimit = np.asarray(self._q_lo, dtype=float)
+        self._model.upperPositionLimit = np.asarray(self._q_hi, dtype=float)
+
         # IK-side-only tightening (this class's model/config_limit_gain only —
         # URDF and dexcontrol's hardware command clamping are untouched): keep
         # L_arm_j4 (elbow) from swinging above -0.5 rad, well inside its URDF
-        # range of [-3.071, 0.244].
+        # range of [-3.071, 0.244] (and inside the 95% band [-2.988, +0.161],
+        # so this stays the binding constraint for j4).
         if self._side == "left":
             j4_idx = self._model.idx_qs[self._model.getJointId("L_arm_j4")]
             self._q_hi[j4_idx] = min(float(self._q_hi[j4_idx]), -0.5)
@@ -257,12 +269,15 @@ class ArmMover:
         Rotation.from_matrix does an SVD that raises LinAlgError on non-finite
         input, which would crash the caller's streamed loop outright instead
         of just failing to converge. On that, retry from the SAME seed with
-        escalating LM damping rather than giving up immediately: retrying from
-        a *different* seed (e.g. home) is NOT safe here, since a live per-tick
-        caller (move_ee_vertical, the suction descent loops) computes its
-        velocity feedforward as (new_q - prev_q)/dt — landing on an unrelated
-        branch from a different seed would command a large, sudden jump. Only
-        after every damping level still diverges is it reported unreachable
+        escalating LM damping rather than giving up immediately; if every
+        damping level diverges, run the ladder once more from a NEARBY seed
+        (_retry_seed: the live measured joints, or the seed nudged 1 mrad).
+        Nearby is the key: a far seed (e.g. home) is NOT safe here, since a
+        live per-tick caller (move_ee_vertical, the suction descent loops)
+        computes its velocity feedforward as (new_q - prev_q)/dt — landing on
+        an unrelated branch would command a large, sudden jump, while a nearby
+        seed stays on the same branch yet can escape a numeric blow-up. Only
+        after the reseed retry also diverges is it reported unreachable
         (pos_err_m=inf trips every caller's existing REACH_TOL_M check) so it
         halts gracefully like any other unreachable target.
         """
@@ -271,40 +286,59 @@ class ArmMover:
         self._ee_task.set_target(target)
         orig_damping = self._ee_task.lm_damping
         try:
-            for damping in (orig_damping, orig_damping * 1e3, orig_damping * 1e6):
-                self._ee_task.lm_damping = damping
-                configuration = self._configuration(seed)
-                if min_motion:
-                    self._posture_task.set_target(configuration.q.copy())
-                else:
-                    self._posture_task.set_target(self._posture_mid)
-                tasks = [self._ee_task, self._posture_task]
-                converged = False
-                for _ in range(cfg.IK_MAX_ITERS):
-                    v = solve_ik(configuration, tasks, cfg.IK_DT, solver=self._solver, limits=self._limits)
-                    configuration.update(pin.integrate(self._model, configuration.q, v * cfg.IK_DT))
-                    if np.linalg.norm(self._ee_task.compute_error(configuration)) < cfg.IK_CONVERGENCE_THRESHOLD:
-                        converged = True
-                        break
-                arm_q = self._arm_q_from_full(configuration.q)
-                if np.all(np.isfinite(arm_q)):
-                    if damping != orig_damping:
-                        logger.warning("[arm] IK diverged at damping={:.1e} — recovered at damping={:.1e}",
-                                        orig_damping, damping)
-                    fk_pos, _ = self.fk(arm_q)
-                    return PoseSolution(
-                        q=arm_q,
-                        converged=converged,
-                        pos_err_m=float(np.linalg.norm(fk_pos - np.asarray(pos, dtype=float))),
-                        in_collision=self.in_collision(arm_q),
-                        in_limits=self.in_limits(arm_q),
-                    )
+            for attempt in range(2):
+                s = seed if attempt == 0 else self._retry_seed(seed)
+                if attempt:
+                    logger.warning("[arm] IK diverged from the given seed at every damping — "
+                                    "retrying once from a nearby seed")
+                for damping in (orig_damping, orig_damping * 1e3, orig_damping * 1e6):
+                    self._ee_task.lm_damping = damping
+                    configuration = self._configuration(s)
+                    if min_motion:
+                        self._posture_task.set_target(configuration.q.copy())
+                    else:
+                        self._posture_task.set_target(self._posture_mid)
+                    tasks = [self._ee_task, self._posture_task]
+                    converged = False
+                    for _ in range(cfg.IK_MAX_ITERS):
+                        v = solve_ik(configuration, tasks, cfg.IK_DT, solver=self._solver, limits=self._limits)
+                        configuration.update(pin.integrate(self._model, configuration.q, v * cfg.IK_DT))
+                        if np.linalg.norm(self._ee_task.compute_error(configuration)) < cfg.IK_CONVERGENCE_THRESHOLD:
+                            converged = True
+                            break
+                    arm_q = self._arm_q_from_full(configuration.q)
+                    if np.all(np.isfinite(arm_q)):
+                        if damping != orig_damping or attempt:
+                            logger.warning("[arm] IK diverged — recovered at damping={:.1e}{}",
+                                            damping, " on the reseed retry" if attempt else "")
+                        fk_pos, _ = self.fk(arm_q)
+                        return PoseSolution(
+                            q=arm_q,
+                            converged=converged,
+                            pos_err_m=float(np.linalg.norm(fk_pos - np.asarray(pos, dtype=float))),
+                            in_collision=self.in_collision(arm_q),
+                            in_limits=self.in_limits(arm_q),
+                        )
             logger.warning("[arm] IK diverged to a non-finite configuration even after damping "
-                            "retries — treating as unreachable")
+                            "retries and a reseed retry — treating as unreachable")
             return PoseSolution(q=seed, converged=False, pos_err_m=float("inf"),
                                  in_collision=True, in_limits=False)
         finally:
             self._ee_task.lm_damping = orig_damping
+
+    def _retry_seed(self, seed: np.ndarray) -> np.ndarray:
+        """A second IK seed near a failed one: the live measured joints when
+        they differ from the seed (per-tick streams seed from the COMMANDED q;
+        the measured q lags it by tracking error — close enough to stay on the
+        same branch, different enough to escape a numeric blow-up), else the
+        seed nudged by 1 mrad."""
+        try:
+            live = self._live_arm_q()
+            if np.all(np.isfinite(live)) and not np.allclose(live, seed, atol=1e-6):
+                return live
+        except Exception:  # noqa: BLE001 — no live robot (offline solve)
+            pass
+        return seed + 1e-3
 
     def _posture_mid_arm(self) -> np.ndarray:
         return np.array([self._posture_mid[self._model.idx_qs[j]] for j in self._arm_joint_ids])
@@ -387,6 +421,105 @@ class ArmMover:
             pos, vel, _acc = traj.at_time(min(i * dt, traj.duration))
             self._arm.set_joint_pos_vel(np.asarray(pos), np.asarray(vel))
             time.sleep(dt)
+
+    def _plan_seg(self, q0, v0, q1, v1) -> "Trajectory | None":
+        """One jerk-limited segment with explicit boundary velocities (Ruckig).
+        None if Ruckig rejects the boundary conditions (only possible with
+        nonzero velocities — the caller falls back to zero-velocity junctions)."""
+        inp = InputParameter(_ARM_DOF)
+        inp.current_position = list(map(float, q0))
+        inp.current_velocity = list(map(float, v0))
+        inp.current_acceleration = [0.0] * _ARM_DOF
+        inp.target_position = list(map(float, q1))
+        inp.target_velocity = list(map(float, v1))
+        inp.target_acceleration = [0.0] * _ARM_DOF
+        inp.max_velocity = list(map(float, self._ruckig_vmax))
+        inp.max_acceleration = list(map(float, self._ruckig_amax))
+        inp.max_jerk = list(map(float, self._ruckig_jmax))
+        traj = Trajectory(_ARM_DOF)
+        if self._otg.calculate(inp, traj) not in (Result.Working, Result.Finished):
+            return None
+        return traj
+
+    def move_joints_through(self, qs, stops=(), at_waypoint=None) -> None:
+        """Stream ONE continuous trajectory through the joint waypoints `qs` —
+        the multi-waypoint form of move_joints, without the full stop at every
+        waypoint that chained move_joints calls produce.
+
+        Junctions are crossed at cfg.JOINT_BLEND_FRAC of vmax on the joints
+        that keep direction across the junction (direction-reversing joints
+        cross at 0), scaled down for hops shorter than
+        JOINT_BLEND_FULL_DIST_RAD. Zero-velocity (full-stop) waypoints: the
+        last one, indices in `stops`, and indices with an `at_waypoint`
+        callback — the stream pauses to run the callback, and pausing the
+        command stream mid-flight would step the velocity.
+
+        Blending rounds corners off the waypoint-to-waypoint path, so every
+        blended segment is sampled and collision-checked BEFORE any motion;
+        a segment that fails to plan or collides drops its junction
+        velocities to zero (the old stop-at-waypoint behavior) and is
+        re-checked. A segment that collides even unblended executes anyway —
+        move_joints never path-checked, and inventing a new failure mode
+        here would strand sequences that ran fine before."""
+        qs = [np.asarray(q, dtype=float) for q in qs]
+        at_waypoint = at_waypoint or {}
+        stops = set(stops) | set(at_waypoint)
+        q_live = self._live_arm_q()
+        n = len(qs)
+        alpha = float(cfg.JOINT_BLEND_FRAC)
+        full = max(float(cfg.JOINT_BLEND_FULL_DIST_RAD), 1e-6)
+        vs: list[np.ndarray] = []
+        for k in range(n):
+            if k == n - 1 or k in stops or alpha <= 0.0:
+                vs.append(np.zeros(_ARM_DOF))
+                continue
+            d_in = qs[k] - (qs[k - 1] if k else q_live)
+            d_out = qs[k + 1] - qs[k]
+            keep = ((np.sign(d_in) == np.sign(d_out))
+                    & (np.abs(d_in) > 1e-6) & (np.abs(d_out) > 1e-6))
+            scale = np.minimum(1.0, np.minimum(np.abs(d_in), np.abs(d_out)) / full)
+            vs.append(np.where(keep, alpha * self._ruckig_vmax * np.sign(d_out) * scale, 0.0))
+        # plan + pre-flight: zeroing a junction changes BOTH adjacent segments,
+        # so a fallback at segment k re-plans k-1 too
+        trajs: list = [None] * n
+        chk_dt = 0.05
+        k = 0
+        while k < n:
+            v0 = vs[k - 1] if k else np.zeros(_ARM_DOF)
+            q0 = qs[k - 1] if k else q_live
+            traj = self._plan_seg(q0, v0, qs[k], vs[k])
+            blended = bool(np.any(v0)) or bool(np.any(vs[k]))
+            bad = traj is None
+            if not bad and blended:
+                for t in np.arange(chk_dt, traj.duration, chk_dt):
+                    if self.in_collision(np.asarray(traj.at_time(t)[0])):
+                        bad = True
+                        break
+            if bad and blended:
+                logger.warning("[arm] blended segment {} {} — falling back to a "
+                               "full stop at its junctions", k,
+                               "infeasible" if traj is None else "clips a collision")
+                vs[k] = np.zeros(_ARM_DOF)
+                if k and np.any(vs[k - 1]):
+                    vs[k - 1] = np.zeros(_ARM_DOF)
+                    k -= 1
+                continue
+            if traj is None:
+                raise RuntimeError(f"joint segment {k} unplannable at zero boundary velocity")
+            trajs[k] = traj
+            k += 1
+        dt = 1.0 / float(cfg.CONTROL_HZ)
+        logger.info("[arm] move_joints_through: {} waypoints, {:.2f}s total",
+                    n, sum(t.duration for t in trajs))
+        for k, traj in enumerate(trajs):
+            m = max(1, int(np.ceil(traj.duration / dt)))
+            for i in range(1, m + 1):
+                pos, vel, _acc = traj.at_time(min(i * dt, traj.duration))
+                self._arm.set_joint_pos_vel(np.asarray(pos), np.asarray(vel))
+                time.sleep(dt)
+            cb = at_waypoint.get(k)
+            if cb is not None:
+                cb()
 
     def move_ee(self, pos, rpy, quiet: bool = True) -> np.ndarray | None:
         """Move the EE frame to an absolute base_link pose (solve IK from the live

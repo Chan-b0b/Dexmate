@@ -45,6 +45,10 @@ IK_LM_DAMPING: float = 1e-6
 # THRESHOLD (used for cache validation) isn't met. Poses near the reach ceiling
 # leave a few mm residual that's harmless for approach/descent.
 REACH_TOL_M: float = 0.01
+# IK-side joint-range margin: solve/validate inside this fraction of each
+# joint's URDF position range (centered), keeping solutions off the hard
+# stops on every joint. URDF and dexcontrol's hardware clamps are untouched.
+JOINT_RANGE_FRAC: float = 0.95
 
 # ---------------------------------------------------------------------------
 # Arm with the suction end-effector
@@ -77,6 +81,15 @@ CONTROL_HZ: float = 200.0          # motion streaming rate (set_joint_pos_vel)
 MAX_JOINT_VEL: float = 1.5          # rad/s
 MAX_JOINT_ACCEL: float = 5.0        # rad/s^2
 MAX_JOINT_JERK: float = 30.0        # rad/s^3
+
+# Waypoint blending (move_joints_through: multi-waypoint sequences, e.g. the
+# right-arm divert place). Junctions are crossed at this fraction of vmax on
+# the joints that keep direction across the junction (direction-reversing
+# joints cross at 0), so the arm doesn't fully stop at every taught waypoint.
+# The full fraction applies only when both adjacent hops move the joint at
+# least BLEND_FULL_DIST — shorter hops scale down to avoid overshoot.
+JOINT_BLEND_FRAC: float = 0.3           # 0 = stop at every waypoint (old behavior)
+JOINT_BLEND_FULL_DIST_RAD: float = 0.2  # per-joint hop size for the full fraction
 
 # Cartesian (move_ee: sensing legs), linear.
 MAX_EE_LINEAR_VEL: float = 0.25     # m/s
@@ -214,7 +227,7 @@ BLOW_OFF_ID: int = 5089
 TARE_SAMPLES: int = 20                      # wrench baseline samples (no contact)
 DESCENT_APPROACH_SPEED_M_S: float = 0.20    # fast free-air descent (cup-tip)
 DESCENT_CREEP_SPEED_M_S: float = 0.03       # slow creep in the contact zone
-DESCENT_RAMP_S: float = 0.3                 # ease descent speed in from 0 (no jerk
+DESCENT_RAMP_S: float = 0.2                 # ease descent speed in from 0 (no jerk
                                             # from the rest->descend handoff)
 DESCENT_CREEP_BLEND_M: float = 0.03         # decelerate fast->creep smoothly over this
                                             # band ABOVE creep_z (no velocity step at
@@ -223,7 +236,7 @@ DESCENT_CREEP_GAP_M: float = 0.05           # creep starts this far above expect
 DESCENT_MAX_M: float = 0.40                 # safety: max descent distance
 FORCE_CONTACT_THRESHOLD_N: float = 10.0      # |vertical force| -> contact
 FORCE_HARD_LIMIT_N: float = 20.0            # pick abort (empty cup)
-FORCE_HARD_LIMIT_PLACE_N: float = 15.0      # place abort (battery in cup). Must sit
+FORCE_HARD_LIMIT_PLACE_N: float = 20.0      # place abort (battery in cup). Must sit
                                             # well above FORCE_CONTACT_THRESHOLD so a
                                             # normal seating contact registers as
                                             # contact (seat+release), not a hard abort.
@@ -231,6 +244,24 @@ VACUUM_SEAL_TIMEOUT_S: float = 8.0          # DI0 takes ~3-4s to latch
 SEAL_PRELIFT_M: float = 0.00               # relieve contact press before suction on
 RELEASE_PRELIFT_M: float = 0.014            # lift before the blow-off release
 PLACE_Z_BUFFER_M: float = 0.10              # accept a seat within this of the taught z
+PLACE_MISSEAT_TOL_M: float = 0.005          # place contact this far ABOVE the expected
+                                            # seat z = rim-landing (misseat): hold, don't
+                                            # release. Only applied when the expectation
+                                            # is a measured-contact anchor (ZTracker) —
+                                            # the model plane drifts too much (0804 L5).
+                                            # A proper seat drops 5-15mm past the rim
+                                            # (measured 2026-08-05), so 5mm splits rim
+                                            # vs seat while riding out anchor noise.
+# A battery column with NO anchor of its own borrows a first-place expectation
+# (0805 L1 battery_2 seated on a divider +18.9mm high, unchecked — a column's
+# first contact used to be trusted blindly). Preference order + tolerance:
+PLACE_MISSEAT_TOL_SIBLING_M: float = 0.008  # from the OTHER battery's anchor — seats
+                                            # are symmetric (2.9mm spread seen 0805)
+BATTERY_OVER_CASE_MAX_M: float = 0.02       # from the CASE's place anchor — the case
+                                            # grab face IS the battery compartment, so a
+                                            # battery seat is at most one battery
+                                            # thickness above the case seat (< 2cm;
+                                            # +12.3mm measured 0805)
 CASE_PICK_RELEASE_WAIT_S: float = 2.0       # wait after release before returning home
 
 # ---------------------------------------------------------------------------
@@ -246,9 +277,14 @@ NUM_LAYERS: int = 5
 # stepped by this constant, so a single misaligned seat can't corrupt later layers'
 # predictions (it's flagged instead — see TaskOrchestrator._record_z).
 LAYER_PITCH_M: float = 0.0138
+
 # A measured seat deviating from the predicted z by more than this fraction of the
 # pitch is logged as a probable misalignment.
 LAYER_MISALIGN_FRAC: float = 0.5
+# Per-run CSV of the ZTracker events (contact z vs predicted, warp-plane
+# measured vs model, misseat/force_limit failures) — the layer-by-layer error
+# data separated from the run log. None disables.
+ZTRACK_LOG_DIR: str | None = "/home/dexmate/LGES/Dexmate/LGES/ik_demo/ztrack_logs"
 RETRY_FAILED_PHASE: bool = True     # retry a failed pick/place instead of aborting
 MAX_PHASE_ATTEMPTS: int = 3         # attempts per move before giving up
 PHASE_RETRY_DELAY_S: float = 2.0    # pause before a retry (also lets config edits land)
@@ -290,19 +326,19 @@ TARGET_BARCODES: list[str] = ["UDCG7B0289", "UDCG7B0291"]
 
 # Barcode-gated battery pick: scan during the fast (suction-off) descent down to
 # creep_z. If read there -> suction ON, creep to contact, seal. If NOT read ->
-# sweep x/y AT creep_z (no lift, no tilt), bounded to the battery's side of the
-# case center, re-scanning each waypoint; read -> grab; exhausted -> grab anyway
-# (no divert). Sweep is a raster in the case-local frame: y held fixed while x
-# sweeps its full far-to-close range (a deliberate wide excursion, not
-# jittering); only once a full x sweep comes up empty does y nudge by one
-# step and the x sweep runs again — repeat out to BCR_SEARCH_MAX_Y_M.
-BCR_SCAN_DWELL_S: float = 0.4            # dwell at a scan waypoint to gather reads
+# sweep AT the raised plane (no tilt), bounded to the battery's side of the
+# case center; read -> grab; exhausted -> grab anyway (no divert). The barcode
+# sits CENTERED in case-local x, so the sweep is Y-FIRST: one CONTINUOUS
+# case-local y pass at dx=0 (scanner polled every control tick, reads happen
+# in motion — no waypoint dwells), then, only if empty, x offsets nearest
+# first (+/-X_STEP, +/-2*X_STEP ... to MAX_X), each rerunning the y pass
+# (direction alternating, so there's no wasted return leg).
 BCR_SWEEP_LIFT_M: float = 0.1           # raise the sweep plane this far above creep_z
                                          # (clear the battery tops / better read focus)
-BCR_SEARCH_X_STEP_M: float = 0.02        # step within a row's x sweep
-BCR_SEARCH_MAX_X_M: float = 0.1          # +/- extent of each row's x sweep (far and close)
-BCR_SEARCH_Y_STEP_M: float = 0.01        # how far y nudges once an x sweep finds nothing
-BCR_SEARCH_MAX_Y_M: float = 0.02         # y stays a small perturbation, not a second sweep axis
+BCR_SWEEP_SPEED_M_S: float = 0.05        # continuous y-pass EE speed (reads in motion)
+BCR_SEARCH_MAX_Y_M: float = 0.05         # +/- extent of the continuous y pass
+BCR_SEARCH_X_STEP_M: float = 0.02        # x-offset step of the fallback columns
+BCR_SEARCH_MAX_X_M: float = 0.05         # +/- extent of the x fallback offsets
 
 # ---------------------------------------------------------------------------
 # Right-arm gripper handoff (gripper.py). The suction arm holds the battery at
@@ -397,7 +433,7 @@ CHASSIS_SETTLE_S: float = 1.0           # settle pause after a strafe, before de
 # source<->target leg is a fixed open-loop DISTANCE at CHASSIS_STRAFE_SPEED_MS
 # (overrides CHASSIS_MANUAL). Station spacing is known ~0.6-0.7 m; detection
 # recenters at each visit, so the leg only needs to land the case in view/reach.
-CHASSIS_AUTO_STRAFE_DIST_M: float = 0.5
+CHASSIS_AUTO_STRAFE_DIST_M: float = 0.7
 # Auto-adjust on a failed reach pre-check (auto-move only): turn the chassis so
 # the detected case yaw matches the taught reference (yaw 0), then translate so
 # the case center lands on the reference (x from SOURCE_CASE_CENTER at the
@@ -405,11 +441,11 @@ CHASSIS_AUTO_STRAFE_DIST_M: float = 0.5
 # CHASSIS_CENTER_CASE_Y_M), re-detect, retry. After MAX_ATTEMPTS the operator
 # gets the interactive keyboard prompt, as in manual mode. Per-attempt motion
 # is clamped; deadbands skip micro-moves.
-CHASSIS_ADJUST_MAX_ATTEMPTS: int = 2
+CHASSIS_ADJUST_MAX_ATTEMPTS: int = 3
 CHASSIS_ADJUST_MAX_TRANSLATE_M: float = 0.30   # per-attempt clamp, each axis
 CHASSIS_ADJUST_MAX_TURN_DEG: float = 30.0      # per-attempt clamp, in-place turn
 CHASSIS_ADJUST_MIN_TRANSLATE_M: float = 0.01   # deadband: skip smaller translations
-CHASSIS_ADJUST_MIN_TURN_DEG: float = 8.0       # deadband: skip smaller turns
+CHASSIS_ADJUST_MIN_TURN_DEG: float = 3.0       # deadband: skip smaller turns
 # Learned leg distances (auto-move): the arrival residual after each leg
 # (centering/adjust strafe, minus deliberate per-item re-alignments) feeds the
 # distance of the LEG THAT JUST RAN — left (target->source) and right
@@ -467,7 +503,7 @@ DIVERT_BIN_TOL_M: float = 0.03          # accepted Y residual after the first mo
 DIVERT_BIN_MAX_STRAFE_M: float = 0.6    # per-move safety clamp on the align strafe
 # Fallback when NO bin is detected: fixed extra rightward strafe (the original
 # open-loop behavior), strafed back like the aligned move. 0.0 = stay put.
-DIVERT_EXTRA_RIGHT_M: float = 0.2
+DIVERT_EXTRA_RIGHT_M: float = 0.1
 # Chassis command timing compensation (move_chassis, DISTANCE-based legs only;
 # the legacy speed*time legs keep their empirically tuned values untouched).
 # dexcontrol streams a timed velocity command for max(wait_time - 1.0, 0) s
@@ -508,7 +544,7 @@ ARM_VIEW_PARK_JOINTS: tuple[float, ...] = HOME_JOINTS_LEFT
 # unreachable or None. (TUNE y; z should clear both box walls like SAFE_TRANSPORT_Z.)
 # Offline reach scan (reach_sweep, z=1.10): y=0.30 -> x[0.69,1.0]; y=0.40 ->
 # x[0.82,1.0]; y=0.50 -> x[0.86,1.0]. Keep x inside the window for the chosen y.
-ARM_VIEW_PARK_EE_POS: tuple[float, float, float] | None = (0.90, 0.50, 1.10)
+ARM_VIEW_PARK_EE_POS: tuple[float, float, float] | None = (0.90, 0.40, 1.10)
 
 # Online FiLM authority probe: safe, non-contact height sweep above the detected
 # case top. Values are cup-tip clearances; the probe converts them to EE z with
@@ -533,11 +569,103 @@ DESCENT_CHECK_STEP_M: float = 0.02          # z step of the pre-flight sweep
 # LENGTH), NOT a top-face z. 0.7545 = measured seat contact of the first case on
 # the empty target floor (2026-07-03), matching the model floor 0.566 + pitch
 # 0.0138 + suction 0.176 = 0.756 within ~1mm. Descend-to-contact still refines.
-TARGET_DEFAULT_CASE_CENTER: tuple[float, float, float, float] = (0.90, 0.0, 0.7545, 0.0)
+TARGET_DEFAULT_CASE_CENTER: tuple[float, float, float, float] = (0.92, 0.0, 0.7545, 0.0)
+# Closed-loop seed place: the place center comes from a bin detection AFTER the
+# align strafe, plus this bias — the bbox-center projection reads the bin ~47mm
+# FORWARD of its true center (front wall + plane mismatch; measured on-robot
+# 2026-08-06, hand-centered cup vs detection). Detect fail -> the default pose.
+SEED_BIN_CENTER_OFFSET: tuple[float, float] = (-0.0469, +0.0009)
+# Misseat gate for the seed place: contact more than this ABOVE the taught seat
+# z means the case landed on the bin wall/rim, not the floor (walls sit several
+# cm higher; taught z is hand-measured, drift-free at this fixed station).
+SEED_MISSEAT_TOL_M: float = 0.025
 # Per-layer forward trim on TARGET places (chassis_sequence): every place of a
 # layer lands (tgt_layers - 1) * this further +x (base_link forward) — layer 1
 # gets no trim. Compensates the forward placement bias that grows with the
 # stack height (the BEV warp-plane geometry biases the detected center along
 # the camera ray as the top face rises). Applies to the case AND the layer's
 # battery seats (same detection, same bias). 0.0 disables.
-PLACE_X_LAYER_TRIM_M: float = 0.008
+PLACE_X_LAYER_TRIM_M: float = 0.0   # was 0.008 for the MODEL-plane regime; with the
+                                    # measured plane + PLACE_X_PLANE_TRIM the per-layer
+                                    # bias is gone (0806: target dual_x flat +7..+11mm
+                                    # across L1-L4) and the trim showed a clean forward
+                                    # dose-response on battery seats (L2 ok / L3 one
+                                    # recovery / L4 +24mm unrecoverable, operator: "x를
+                                    # 더 가깝게"). Restore 0.008 only with model planes.
+# Constant x trim on TARGET places whenever the MEASURED warp plane was used
+# for the detection (tgt_plane active). The taught offsets/trims were tuned
+# against the MODEL plane's constant xy bias; the measured (true) plane removes
+# that bias, which un-cancels the tuning: 0805 dual-plane probe measured the
+# net shift as +12.8/+13.7mm forward (source pick -5..-7mm grab offset carried
+# into the place + target detection +6.6..+7.8mm) — both L1 batteries landed
+# ~+13mm too far +x, battery_2 on the divider. This pulls it back. Verify with
+# the dual_x CSV rows + seat quality on the next run; 0.0 disables.
+PLACE_X_PLANE_TRIM_M: float = -0.013
+# Constant yaw trim (rad, base CCW+) on TARGET place wrists: the part arrives
+# systematically twisted on the cup (unobservable — the system never sees the
+# battery; 0805: both batteries landed ~2deg twisted, the empty case conformed
+# to battery_1's angle [target det yaw +0.2deg -> -1.6deg after its seat], the
+# loaded case couldn't for battery_2 -> jam at +26mm). This pre-rotates the
+# wrist to land the part square. +0.031 (~+1.8deg) cancels the 0805 estimate;
+# if a test run doubles the twist instead, flip the sign. 0.0 disables.
+PLACE_YAW_TRIM_RAD: float = 0.0 #낮출수록 CW
+# Post-place verification (CASE places): after the release, park the arm to
+# clear the head view and re-detect the just-placed case BEFORE the chassis
+# moves — landed-vs-intended (dx, dy, dyaw) in one base frame (CSV
+# place_chk_x/y/yaw). Case places align to the layer BELOW, so a constant
+# per-place bias accumulates layer over layer (0805: L2 +1.4mm, L3 barely in,
+# L4 misseat +11.5 — "a bit left" each layer); this measures that bias
+# directly instead of guessing trims. Costs one sync view-park + detection
+# per case place (the park loses its overlap with the return strafe).
+PLACE_VERIFY_DETECT: bool = True
+# Misseat contact recovery (suction.place): on a rim-landing, keep the part
+# held, lift PLACE_RECOVER_LIFT_M above the failed contact, re-orient the
+# wrist yaw by the next pattern step (offsets from the commanded place yaw),
+# and creep back down; success = a contact inside the seat band. Absorbs the
+# staging-dependent in-hand twist that constant yaw trims can't track (0805
+# tuned trim broke on the 0806 restage). Every place contact also snapshots
+# the tared 6-axis wrench + commanded-vs-measured EE yaw (CSV contact_wrench /
+# contact_yaw) — Phase 2 uses the mz sign to pick the search direction first.
+PLACE_RECOVER_ATTEMPTS: int = 10
+PLACE_RECOVER_YAW_PATTERN_RAD: tuple[float, ...] = (0.026, -0.026, 0.052, -0.052)
+PLACE_RECOVER_LIFT_M: float = 0.010         # re-orient height above the failed contact
+# Phase 2 — force-guided translation: on a misseat contact with a tared lateral
+# force of at least FORCE_MIN, the obstruction is pushing the part toward the
+# free side (0806 L4 bat1: fx=-5.8N and the operator's verdict was "move -x"),
+# so step XY along that force direction (yaw kept) instead of the next yaw
+# step. Total XY excursion from the commanded pose is capped by XY_MAX.
+PLACE_RECOVER_XY_STEP_M: float = 0.003
+PLACE_RECOVER_FORCE_MIN_N: float = 1.5  # was 3.0 — a FLAT landing (part on top of a
+                                        # divider) converts almost no press into
+                                        # lateral push, so weak-but-real signals
+                                        # were filtered and recovery went yaw-only
+                                        # (0806 bat2). Noise floor ~0.5N.
+PLACE_RECOVER_XY_MAX_M: float = 0.015   # was 0.009 — TOTAL displacement cap; with a
+                                        # mixed-direction force the per-axis reach was
+                                        # ~4mm and the cap silently dropped recovery to
+                                        # yaw-only (0806 bat1 "needed more -y")
+# mz-FEEDBACK adaptive yaw: the slot edges twist a misaligned part TOWARD
+# alignment, so each contact's mz is both a direction and a progress signal.
+# Per yaw attempt, compare mz with the previous contact's:
+#   |mz| shrank            -> helping: keep direction, same step
+#   sign flipped           -> overshot: reverse, halve the step
+#   |mz| grew (same sign)  -> wrong way: reverse (self-corrects an unknown
+#                             sign convention without a config flip)
+# Engages when |mz| >= MZ_MIN (below it there is no torque information —
+# fall back to the blind PATTERN above). Cumulative offset capped at YAW_MAX.
+# Caveat: mz carries an (r x f_lat) term when the contact is off the cup
+# axis; the feedback comparisons tolerate a constant bias but validate with
+# the recover_step CSV rows. Observed mz range 0.03-0.16 Nm (0806).
+PLACE_RECOVER_MZ_MIN_NM: float = 0.05
+PLACE_RECOVER_YAW_STEP_RAD: float = 0.026   # initial adaptive step (~1.5 deg)
+PLACE_RECOVER_YAW_MAX_RAD: float = 0.070    # |cumulative yaw offset| cap (~4 deg)
+# Blind XY fallback for FLAT landings: a part resting on a flat jig/divider
+# top converts no press into lateral push (f_lat < FORCE_MIN) and yaw wiggles
+# don't move it (0806 L2/L3 case: 10+9 yaw-only attempts, contact z pinned at
+# +7mm) — so with no force signal walk this ABSOLUTE offset pattern from the
+# commanded pose, before any yaw. -x first: every measured run landed cases
+# +4..+12mm FORWARD of intended (place_chk_x), so backward is the prior. On a
+# flat landing mz is (r x f) junk — ignore it until the pattern is spent.
+PLACE_RECOVER_BLIND_XY_M: tuple[tuple[float, float], ...] = (
+    (0.01, 0.0), (0.02, 0.0), (0.023, 0.0),
+    (0.02, -0.003), (0.02, +0.003), (0.015, 0.0))

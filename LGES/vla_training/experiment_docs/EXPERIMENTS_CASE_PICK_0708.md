@@ -232,13 +232,11 @@ dfmag_tau(5)와 wrench/seal/dfmag 통계는 persistent 버퍼라 자동 로드�
 python run_policy.py --checkpoint Chanho-Lee/smolvla_naive_0729 \
 --go --force-limit 15 --n-action-steps 5 --log-dir rollouts/smolvla_naive_0729
 
-FILM_COND=contact,fz,seal FILM_INJECT=prefix FILM_MASK_FORCE=1 \
-FILM_F0=6 FILM_TAU=4 FILM_FZ_TAU=5 FILM_FZ_OFF=2.1 \
-FILM_DATASET=/home/dexmate/LGES/Dexmate/LGES/vla_training/local_film_stats/lges_case_pick_0729 \
-python run_policy.py --film --checkpoint Chanho-Lee/smolvla_film_0729_prefix_mask1 \
---go --force-limit 15 --n-action-steps 5 --log-dir rollouts/smolvla_film_0729
-
-FILM_COND=contact,fz,seal FILM_INJECT=prefix FILM_MASK_FORCE=1 FILM_FZ_OFF=1.8 FILM_DATASET=/home/dexmate/LGES/Dexmate/LGES/vla_training/local_film_stats/lges_case_pick_0721_0727 python run_policy.py --film --checkpoint Chanho-Lee/smolvla_film_0721_0727_prefix_mask1 --go --force-limit 15 --n-action-steps 2 --log-dir rollouts/film_0721_0727_nas2
+FILM_COND=contact,fmag,fz,seal FILM_INJECT=prefix FILM_MASK_FORCE=1 \
+FILM_F0=6.6 FILM_TAU=1 FILM_FMAG_OFF=6.6 FILM_FMAG_TAU=1 FILM_FZ_OFF=3.0 FILM_FZ_TAU=0.7 \
+FILM_DATASET=lges_case_pick_0729 \
+python run_policy.py --film --film-auto-baseline --checkpoint Chanho-Lee/smolvla_film_0729_prefix_mask1_recal_fromnaive \
+--go --force-limit 15 --n-action-steps 5 --log-dir rollouts/smolvla_film_0729_mask1_recal_fromnaive
 
 FILM_COND=contact,fz,seal FILM_INJECT=prefix FILM_MASK_FORCE=1 \
 FILM_F0=6 FILM_TAU=4 FILM_FZ_TAU=5 FILM_FZ_OFF=2.1 \

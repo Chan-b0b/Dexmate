@@ -51,8 +51,12 @@ def main():
     print(f"checkpoint: {ckpt}")
 
     from lerobot.datasets.lerobot_dataset import LeRobotDataset
-    from lerobot.policies.smolvla.modeling_smolvla import SmolVLAPolicy
-    from lerobot.policies.factory import make_pre_post_processors
+    from lerobot.policies.factory import get_policy_class, make_pre_post_processors
+    from lerobot.configs.policies import PreTrainedConfig
+    try:
+        import train_pi05  # noqa: F401  pi05 ckpts: registers the preprocessor shim
+    except ValueError:
+        pass  # newer lerobot ships relative_actions_processor natively — shim collides
 
     if args.film:
         import os
@@ -80,7 +84,8 @@ def main():
               f"F0={f0:.0f} tau={tau:.0f} fz_tau={fz_tau:.0f} fz_off={fz_off:g} "
               f"fmag={fmag_off:g}/{fmag_tau:g} stats={stats_root})")
 
-    policy = SmolVLAPolicy.from_pretrained(model_dir)
+    cfg = PreTrainedConfig.from_pretrained(model_dir)
+    policy = get_policy_class(cfg.type).from_pretrained(model_dir, config=cfg)
     policy.eval()
     device = policy.config.device
     pre, post = make_pre_post_processors(

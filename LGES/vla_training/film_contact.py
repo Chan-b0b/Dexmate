@@ -284,7 +284,11 @@ def apply(variant: str, wrench_mean: torch.Tensor, wrench_std: torch.Tensor,
         return embs, pad_masks, att_masks
 
     def new_embed_prefix(self, images, img_masks, lang_tokens, lang_masks, state=None):
-        if state is not None:
+        # instance opt-out: a VANILLA policy built after the class patch (e.g. the
+        # live probe's naive baseline) sets model._film_cond = None so it gets
+        # neither c-hat nor force-masking — without this, loading a second,
+        # non-FiLM policy in the same process would silently mask its wrench.
+        if state is not None and getattr(self, "_film_cond", None):
             c = _condition_from_state(self, state)                # from the UNMASKED state
             if _CFG["variant"] == "v1" and self.training:         # decorrelate (control)
                 c = c[torch.randperm(c.shape[0], device=c.device)]

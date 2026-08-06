@@ -1,0 +1,15 @@
+time,event,station,label,layers,measured_m,predicted_m,resid_mm
+13:28:05,anchor,source,case,5,0.8231,,
+13:28:29,anchor,target,case,1,0.7397,,
+13:28:33,plane,source,battery_1,5,0.6471,0.6350,+12.1
+13:28:44,anchor,source,battery_1,5,0.8192,,
+13:28:48,plane,target,battery_1,1,0.5637,0.5798,-16.1
+13:29:02,anchor,target,battery_1,1,0.7520,,
+13:29:06,plane,source,battery_2,5,0.6471,0.6350,+12.1
+13:29:21,anchor,source,battery_2,5,0.8221,,
+13:29:26,plane,target,battery_2,1,0.5637,0.5798,-16.1
+13:29:36,anchor,target,battery_2,1,0.7709,,
+13:29:40,plane,source,case,4,0.6333,0.6212,+12.1
+13:29:52,contact,source,case,4,0.8091,0.8093,-0.2
+13:29:56,plane,target,case,2,0.5775,0.5936,-16.1
+13:30:26,place_misseat,target,case,2,0.7627,0.7535,+9.2

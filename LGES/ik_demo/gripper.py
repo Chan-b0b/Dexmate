@@ -47,18 +47,27 @@ class GripperMover(ArmMover):
         """Side-approach grasp at base-frame *pos*; True if an object was gripped.
 
         Opens, backs off along the approach axis (gripper tool +z) by
-        GRIPPER_PREGRASP_STANDOFF_M, moves there, moves straight in to *pos*,
-        and closes.
+        GRIPPER_PREGRASP_STANDOFF_M, then runs standoff -> grasp as ONE
+        blended stream (move_joints_through: the standoff is crossed at blend
+        speed instead of a full stop), and closes. The grasp solve chains from
+        the standoff solution — the same branch the old standoff-then-live
+        two-move chain landed on.
         """
         grasp_pos = np.asarray(pos, dtype=float)
         rpy = np.asarray(cfg.GRIPPER_GRASP_RPY if rpy is None else rpy, dtype=float)
         self.gripper.open()
         approach = Rotation.from_euler("xyz", rpy).as_matrix()[:, 2]  # tool +z in base_link
         pre = grasp_pos - cfg.GRIPPER_PREGRASP_STANDOFF_M * approach
-        logger.info("[gripper] pre-grasp standoff -> grasp")
-        if self.move_ee(pre, rpy) is None or self.move_ee(grasp_pos, rpy) is None:
+        sol_pre = self.solve_pose(pre, rpy, seed=self._live_arm_q(), min_motion=True)
+        if sol_pre.pos_err_m > cfg.REACH_TOL_M:
             logger.error("[gripper] grasp pose unreachable")
             return False
+        sol_grasp = self.solve_pose(grasp_pos, rpy, seed=sol_pre.q, min_motion=True)
+        if sol_grasp.pos_err_m > cfg.REACH_TOL_M:
+            logger.error("[gripper] grasp pose unreachable")
+            return False
+        logger.info("[gripper] pre-grasp standoff -> grasp")
+        self.move_joints_through([sol_pre.q, sol_grasp.q])
         self.gripper.close()
         gripped = self.gripper.is_object_grasped()
         logger.info("[gripper] grip_at -> {}", "GRIPPED" if gripped else "no object")
@@ -93,6 +102,13 @@ class GripperMover(ArmMover):
         ``on_step`` optionally maps a step label to a zero-arg callback invoked
         right before that step's move is issued — e.g. to kick off a
         concurrent move on the other arm at a specific point in this sequence.
+
+        Execution: every step is SOLVED up front (an invalid step aborts
+        BEFORE any motion — the old per-step loop walked the arm to the
+        failing step first), then the whole sequence streams as one blended
+        trajectory (move_joints_through). The release step and any step with
+        an on_step callback stay full stops; the other waypoints are crossed
+        at blend speed.
         """
         seq = cfg.PLACE_LOWER_RIGHT_EE_SEQ if seq is None else seq
         on_step = on_step or {}
@@ -100,9 +116,21 @@ class GripperMover(ArmMover):
             raise ValueError("PLACE_LOWER_RIGHT_EE_SEQ not set — teach it first")
         cmd_pos, cmd_rpy = self.current_ee_pose()
         seed = self._live_arm_q()
-        for label, is_relative, pos, rpy in seq:
-            if label in on_step:
-                on_step[label]()
+        qs: list[np.ndarray] = []
+        stops: set[int] = set()
+        at_wp: dict[int, object] = {}
+        pre_cbs: list = []   # on_step callbacks for step 0 (fire before the stream)
+
+        def _add_cb(idx: int, fn) -> None:
+            prev = at_wp.get(idx)
+            at_wp[idx] = fn if prev is None else (lambda: (prev(), fn()))
+
+        for i, (label, is_relative, pos, rpy) in enumerate(seq):
+            if label in on_step:   # "before step i's move" = at waypoint i-1
+                if i == 0:
+                    pre_cbs.append(on_step[label])
+                else:
+                    _add_cb(i - 1, on_step[label])
             if is_relative:
                 cmd_pos = cmd_pos + np.asarray(pos, dtype=float)
                 cmd_rpy = (Rotation.from_euler("xyz", rpy)
@@ -114,15 +142,22 @@ class GripperMover(ArmMover):
             sol = self.solve_pose(cmd_pos, cmd_rpy, seed=seed, min_motion=True)
             if not sol.valid:
                 logger.error("[gripper] place step {} invalid (err={:.1f}mm converged={} "
-                             "collision={} in_limits={}) — stopping", label,
+                             "collision={} in_limits={}) — aborting before moving", label,
                              sol.pos_err_m * 1000, sol.converged, sol.in_collision, sol.in_limits)
                 return False
-            logger.info("[gripper] place step {}", label)
-            self.move_joints(sol.q)
+            qs.append(sol.q)
             seed = sol.q
             if "lower" in label.lower():
-                logger.info("[gripper] at {} — partial open (release)", label)
-                self.gripper.partial_open()
+                stops.add(i)
+
+                def _release(lb=label):
+                    logger.info("[gripper] at {} — partial open (release)", lb)
+                    self.gripper.partial_open()
+                _add_cb(i, _release)
+        for cb in pre_cbs:
+            cb()
+        logger.info("[gripper] place sequence: {} steps as one blended stream", len(qs))
+        self.move_joints_through(qs, stops=stops, at_waypoint=at_wp)
         self.gripper.open()
         return True
 

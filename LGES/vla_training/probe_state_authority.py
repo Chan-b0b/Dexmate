@@ -142,11 +142,16 @@ def main():
         print(f"[probe] NAIVE checkpoint (no FiLM)  ckpt={args.checkpoint}")
 
     from lerobot.datasets.lerobot_dataset import LeRobotDataset
-    from lerobot.policies.smolvla.modeling_smolvla import SmolVLAPolicy
-    from lerobot.policies.factory import make_pre_post_processors
+    from lerobot.policies.factory import get_policy_class, make_pre_post_processors
+    from lerobot.configs.policies import PreTrainedConfig
+    try:
+        import train_pi05  # noqa: F401  pi05 ckpts: registers the preprocessor shim
+    except ValueError:
+        pass  # newer lerobot ships relative_actions_processor natively — shim collides
 
     model_dir = args.checkpoint / "pretrained_model"
-    policy = SmolVLAPolicy.from_pretrained(model_dir)
+    cfg = PreTrainedConfig.from_pretrained(model_dir)
+    policy = get_policy_class(cfg.type).from_pretrained(model_dir, config=cfg)
     policy.eval()
     policy.config.n_action_steps = 1
     pre, post = make_pre_post_processors(

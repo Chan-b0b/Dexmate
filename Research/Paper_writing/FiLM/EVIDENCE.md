@@ -114,6 +114,120 @@ chunk_boundary, action_pred[7], action_cmd[7], film.{cond_names, c_hat[3], gamma
 raw |F|에 ~5.2 N 장착 오프셋 포함 — meta.json의 `baseline_force_n` / `peak_contact_n` 사용.
 r02/r03 = `--loop` 세션 내 반복 번호.
 
+### 3.5 0729 recal/fromnaive 라운드 (서버 2026-07-31~08-03, 회수 08-04 — 커밋 5f2ea6d/e58fa27)
+
+재캘리브레이션(실측 0729 분포): contact=(|F|−5.5)/1, **fmag 채널 신설** (|F|−5.5)/1,
+fz=(fz−3.0)/0.7 (`vla/run_case_pick_0729_recal.sh` 주석 = 단일 출처). 신규 학습 2종:
+`…prefix_mask1_recal`(base init, 50k) / `…prefix_mask1_recal_fromnaive`(**naive best@10k
+warm-start**, 20k). 배포 env: `FILM_COND=contact,fmag,fz,seal F0=5.5 TAU=1 FMAG_OFF=5.5
+FMAG_TAU=1 FZ_OFF=3.0 FZ_TAU=0.7`. ⚠ HF 미업로드(스크립트 준비), 실험일지 §6.10 미기록.
+
+**state-swap probe** (실측 first-contact state를 pre-contact 하강 프레임에 주입 — §3의
+합성 c-hat "realistic"과 **측정법 다름, 혼용 금지**; `vla/probes/0729_state_*_pc_fc.txt`,
+val 60프레임): naive 상쇄 **105%** (전부 raw 경로) / pm1r best 62%·last 90% /
+fromnaive best **94%**·last **97%** (전부 dFiLM, dRaw=+0.00).
+→ **naive도 힘 반응을 학습함 — "force-blind" 서사 사용 금지** (DISCUSSION_LOG 08-04).
+
+**힘-스케일 스윕 — "형태 결정 장치" 주장의 1차 증거** (`--swap fcscale`, fc wrench를
+8/10/12N로 스케일, 전 하강 프레임 n=245; `vla/probes/0729_state_{naive,fromnaive_best}_ramp*.txt`):
+
+| 주입 \|F\| | naive 상쇄 (of −3.94mm/f) | fromnaive 상쇄 (of −3.84, 전부 FiLM) |
+|---|---|---|
+| 8N | +1.41mm (36%) | +1.20mm (31%) |
+| 10N | +1.24mm (31%) | — |
+| 12N | +1.12mm (28%) | **+4.40mm (115% = 완전정지+후퇴)** |
+
+pre-contact만(n=60, `*_pc_r12.txt`): naive +1.35 vs fromnaive **+5.42mm**.
+**응답-대-힘 기울기 부호가 정반대**: naive=템플릿 바인딩(힘↑반응↓), FiLM=단조 외삽
+(힘↑브레이크↑; 12N이면 fmag c-hat=6.5, 학습범위 ~1.2의 5배 밖에서도 방향 보존 — 채널
+단조성은 학습이 아니라 설계). 인과 고정: fromnaive=동일 초기화·데이터·병목만 추가.
+
+**press-sim 폐루프** (`vla/probe_press_sim.py`; seal_depth=never = 오정렬/씰실패 시나리오,
+force-model fzdelta; `vla/probes/0729_sim_*.txt`):
+naive off1/off30 = 4/6 정지·mean 9.8mm(**max 14.9**) / 5/6·5.3mm(max 9.4);
+fromnaive last = **6/6·7.0mm(max 8.5) / 6/6·1.7mm(max 4.1)**.
+seal 3mm 제공 시(seal3) naive 0.5mm 정상, 훈련 템플릿 그대로인 pattern 모델에서도 naive
+1.0mm 정상 → **naive 정지 = seal 이벤트/템플릿 의존, FiLM = 힘 자체 바인딩** (fzdelta+
+seal-never에서만 갈라짐 — 조건 명시해 주장할 것).
+
+**offline eval** (`vla/eval_offline.py`, val 액션 오차/step; `vla/probes/0729_eval_*.txt`):
+naive 0.84 / pm1r 0.94(best)·0.81(last) / fromnaive 0.87(best)·**0.81mm(last)** —
+병목의 정확도 비용 0. fromnaive는 **last(20k)가 전 오프라인 지표 우세** (swap 97%·
+sim 1.7mm·err 0.81) — val-best 정책과 상충, 로봇에서 A/B 필요.
+
+**운영 증거 (배포 노브)**: F/T baseline 드리프트 실측 — 7/30 하루 내 +0.4→+1.1N,
+08-04 +1.03N (rollout meta `baseline_force_n`, `vla/measure_force_baseline.py`).
+FiLM은 오프셋 재앵커로 런마다 보정(`run_policy.py --film-auto-baseline` 구현, 학습
+ep-start 앵커 |F| 4.59N/fz 1.96N); naive는 frozen stats — 보정 노브 없음. sim의
+pattern-정상/fzdelta-붕괴 대비가 템플릿 취약성의 간접 증거.
+⚠ 08-04 live probe에서 오프셋의 **측정-포즈 민감성** 실증: 수동 측정(hover 5.63N)
+기반 env 파일이 실제 probe 포즈(4.9N) 대비 ~0.7N 과보정 → c-hat 오앵커. 학습 데이터
+확인 결과 ep-start(view park)와 하강 직전 정적 hover의 힘 통계는 0.1N 내 일치
+(4.59/1.96 vs 4.62/2.04) → 자동 재앵커는 두 포즈 모두 유효; live probe에도 하강 전
+hover 자체 재앵커 추가(08-05, `--baseline-hover`).
+
+### 3.6 V1 decorrelated control — "형태 결정" 주장 완결 (2026-08-05 로컬 probe)
+
+`Chanho-Lee/smolvla_film_0729_prefix_mask1_recal_fromnaive_v1` (naive-init 20k, recal
+세팅 동일, **학습 시 c-hat 배치 셔플** = grounding만 제거; main = **val-best@5,000**,
+val loss 0.1715 — HF 커밋 메시지로 확인 08-06). 로컬(Jetson, torch 2.11) 파이프라인 검증:
+fromnaive pc_fc 재실행 = +1.57mm(94%) — 서버 수치 정확 재현.
+체크포인트 정리(HF main, 전부 val-best): fromnaive=**@2,500**, V1=@5,000,
+mask0_fromnaive=val-best — 5–15k 과적합 발견(§6.9)과 일관되게 전부 이른 지점.
+
+**동일 데이터·동일 naive-init·동일 용량의 사중 대조** (`vla/probes/0729_*{v1,mask0fn}*`,
+mask0fn·fn_last는 08-06 로컬 추가 — 전 행 HF main=val-best, fn last만 20k):
+
+| 모델 (force 접근) | 8N→12N 응답 | pc_fc | press-sim fzdelta (seal-never) | val err |
+|---|---|---|---|---|
+| naive (raw 6-d) | +1.41→+1.12 (템플릿, 감소) | +1.63 (105%) | 4–5/6, max 14.9mm | 0.84mm |
+| **mask0-fromnaive (raw+무력 c-hat)** | +1.57→+1.12 (**dRaw가 전부**, 템플릿) | +1.68 (dRaw +1.67 / dFiLM +0.04) | 4–5/6, max 11.9mm | 0.85mm |
+| **V1 (병목, 비접지 c-hat)** | **−0.06→−0.11 (0)** | −0.06 (0%) | **0/6, mean 51–167mm, max 431mm** | 0.96mm |
+| fromnaive v2 best (병목, 접지) | +1.20→+4.40 (단조) | +1.57 (94%, 전부 dFiLM) | 6/6, max 4.5mm | 0.87mm |
+| fromnaive v2 last(20k) | +0.97→+3.44 (단조) | +1.45 (97%) | 6/6, max 4.1mm | 0.81mm |
+
+판독:
+1. **예측 적중 — 스윕 완전 평평 (전 힘 레벨 0, dRaw=0·dFiLM≈0)**: fromnaive의 단조
+   브레이크는 용량·재학습·병목의 존재가 아니라 **c-hat의 grounding**에서 온다.
+   용량 반론 사망 → §3.5 "형태 결정 장치" 주장 완결.
+2. **비접지 병목 = 최악** (0/6, 431mm): mask1이 raw 경로를 지웠는데 c-hat이 무의미
+   → 진짜 force-blind. 활성 성분은 병목 자체가 아니라 **접지된 병목**. std probe도
+   NO/WRONG-SIGN (Δ−0.2mm).
+3. **동일 모방 전제 성립**: val err 0.81–0.96mm — 전 행 동급. 다섯 정책은
+   매니폴드 위에서 구분 불가, 개입에서만 갈라짐 (토론 5의 실측 완성).
+4. ⚠ ramp n(739 vs 245) — descent 프레임 선정이 정책 예측 의존. 상쇄율 결론 무관.
+5. **mask0-fromnaive (08-06): bypass 4번째 재현 + 분해 완결** — c-hat std probe
+   Tier 1 FAIL(Δ−0.04mm), state-swap 분해 dRaw ≈ 전부·dFiLM ≈ 0, 그리고 **도스-반응
+   곡선이 naive와 사실상 일치** (+1.57→+1.12 vs +1.41→+1.12; 12N 동값) — FiLM 모듈을
+   "붙이기만" 하면(마스크 없이) 아무것도 변하지 않음을 정량으로. naive-init·recal·
+   fmag 채널 포함 조건에서도 우회 재현 = 가장 강한 버전.
+6. **형태의 체크포인트 안정성**: fromnaive last(20k)도 단조 유지 (+0.97→+3.44) —
+   best@2.5k와 같은 형태, 크기만 소폭 감소. 단조 브레이크는 특정 체크포인트의
+   우연이 아니라 학습 전 구간에서 유지되는 성질.
+
+### 3.7 Live probe 시리즈 — 온로봇 반사실, fromnaive vs naive (08-04 / 08-06 ×2)
+
+`vla/live_film_probes/smolvla_film_0729_prefix_mask1_recal_fromnaive/run{1..4}_*/`
+(런별 서브폴더 + README.md로 재구성 08-06 — 유효성·모델·핵심 수치 명기; json +
+`_vs_naive.png`). 동일 동결 관측에 두 모델 예측 — naive는 raw-state swap,
+film은 c-hat 강제 + 같은 swap. 로봇 이동 직전 마지막 실기 데이터 (08-06).
+
+- **08-04 런**: env 파일 오프셋이 probe 포즈 대비 ~0.7N 과보정 → film 쪽 무효,
+  naive 쪽만 유효. 교훈 2개 = 오프셋 포즈 민감성 + 절대값 swap×재앵커 비대칭
+  (§3.5 운영 증거 참조).
+- **08-06 #1 (공정 도스, 10포즈, hover 자체 재앵커)**: 중간 도스(≤9N)에서 naive ≥ film
+  — fc 67% vs 32%, sealed **147%** vs 58% (자기 하강 대비). **오프라인 곡선의 같은
+  도스 구간(8N: naive +1.41 > film +1.20)과 정합** — 모순 아님 (토론 6).
+  film c-hat 도스-반응 단조: hover +0.29 → preseal +0.87 → sealed +1.41 → fz+6N +1.70.
+- **08-06 #2 (고도스 3포즈, fz +6/9/12N)**: **crossover 온로봇 재현** —
+  film +1.19 → **+4.59** → **+8.56**mm (가속, 12N = 자기 하강 −4.1의 2배 = 후퇴),
+  naive +1.34 → +3.18 → +4.18 (한계반응 붕괴 +1.84→+1.00). 역전 지점 6–9N,
+  12N에서 film 2×. 표면 근접 포즈(1–3cm)에선 naive 12N +1.0~1.8 vs film +7.5.
+- 설계 노트: ① 절대값 swap(fc/sealed)은 측정 드리프트만큼 평행이동해야 두 모델이
+  같은 물리 반사실을 받음 (08-06 수정, `swap_drift` JSON 기록 — 미보정이면 film이
+  드리프트만큼 저도스). ② suction=0 오프-매니폴드 등 라이브 전이 손실로 film
+  절대치는 과소평가 가능(각주 후보). ③ 소N(3포즈) — 고도스는 표적 보충 측정으로 서술.
+
 ## 4. 0727 실패 분석 (Discussion 재료 — fidelity trap)
 
 2026-07-29 로봇 평가, `smolvla_film_0721_0727_prefix_mask1` 8런 중 7 실패 분해:
@@ -151,6 +265,7 @@ r02/r03 = `--loop` 세션 내 반복 번호.
    prefix_mask0 체크포인트 로컬 확보. (+ 필요 시 0729 체크포인트 채널분해 decomp probe.)
 2. 0729 롤아웃 리비전 확정 (val-best vs refs/main) — 남은 runs: refs/main 추정 6, val-best 1(실패).
 3. 로봇: depletion sweep n≥10/층 (naive/FiLM/oracle), 중간층 2–4 보간.
-4. V1 decorrelated control 학습+probe (S2).
+4. ~~V1 decorrelated control~~ **완료 (08-05, §3.6)** — 예측 적중(스윕 평평·0/6 sim).
+   잔여: V1 main 브랜치가 best/last 어느 쪽인지 서버 확인 + probe txt 커밋.
 5. 층 분포 메타데이터 (lerobot 변환에서 layer tag 미보존 — 0729 sweep 수집 시 log-dir 규약
    `case_pick_<layer>` 준수).
