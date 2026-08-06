@@ -1,0 +1,70 @@
+WARNING:root:Vision embedding key might need handling: model.paligemma_with_expert.paligemma.model.vision_tower.vision_model.embeddings.patch_embedding.bias
+WARNING:root:Vision embedding key might need handling: model.paligemma_with_expert.paligemma.model.vision_tower.vision_model.embeddings.patch_embedding.weight
+[probe] FiLM-pi0.5 cond=('contact', 'fz', 'seal') inject=suffix (only) mask_force=True  ckpt=/home/maverick/Dexmate/LGES/vla_training/outputs/pi05_film_onnaive_0729/checkpoints/best
+The PI05 model is a direct port of the OpenPI implementation. 
+This implementation follows the original OpenPI structure for compatibility. 
+Original implementation: https://github.com/Physical-Intelligence/openpi
+Loading model from: /home/maverick/Dexmate/LGES/vla_training/outputs/pi05_film_onnaive_0729/checkpoints/best/pretrained_model
+✓ Loaded state dict from model.safetensors
+All keys loaded successfully!
+  episodes: [0, 1, 2, 3, 4, 5]
+  swap wrench (median over 18 FIRST-CONTACT frames, fz>3.0N trigger, all episodes): [ 2.32  9.88  6.4   0.02 -0.48 -0.46]  |F|=12.0N  seal stays 0  [--swap fcscale]
+  c-hat: own(example)=[[ 0.    -0.056  0.   ]]  swap=[[1.   0.86 0.  ]]  (channels ('contact', 'fz', 'seal'))
+  ep0: "pick up the case with the suction cup"  frames 0..218  descent=10  first-contact@+141  seal@+180
+  ep1: "pick up the case with the suction cup"  frames 218..438  descent=10  first-contact@+141  seal@+181
+  ep2: "pick up the case with the suction cup"  frames 438..649  descent=10  first-contact@+136  seal@+179
+  ep3: "pick up the case with the suction cup"  frames 649..821  descent=10  first-contact@+100  seal@+140
+  ep4: "pick up the case with the suction cup"  frames 821..996  descent=10  first-contact@+104  seal@+142
+  ep5: "pick up the case with the suction cup"  frames 996..1169  descent=10  first-contact@+101  seal@+140
+
+   frame    ee_z   |F|N |  expert  dz(own) dz(swap)    dzRAW   dzFiLM |    dTot    dRaw   dFiLM
+  ---------------------------------------------------------------------------------------------
+     131   0.777    5.3 |   -1.0m    -2.5m    -2.5m    -2.5m    -2.5m |   -0.0m   -0.0m   -0.0m
+     133   0.774    4.9 |   -1.5m    -2.4m    -2.5m    -2.5m    -2.5m |   -0.0m   -0.0m   -0.0m
+     135   0.772    5.1 |   -1.8m    -2.5m    -2.5m    -2.5m    -2.5m |   -0.0m   -0.0m   -0.0m
+     137   0.768    4.9 |   -1.1m    -2.4m    -2.4m    -2.4m    -2.4m |   -0.0m   -0.0m   -0.0m
+     139   0.765    6.5 |   -1.4m    -2.4m    -2.5m    -2.4m    -2.5m |   -0.0m   -0.0m   -0.0m
+     349   0.780    5.2 |   -1.8m    -2.4m    -2.5m    -2.4m    -2.5m |   -0.0m   -0.0m   -0.0m
+     351   0.777    4.6 |   -1.3m    -2.5m    -2.5m    -2.5m    -2.5m |   -0.0m   -0.0m   -0.0m
+     353   0.774    4.7 |   -1.1m    -2.4m    -2.5m    -2.5m    -2.5m |   -0.0m   -0.0m   -0.0m
+     355   0.771    4.9 |   -2.0m    -2.4m    -2.5m    -2.4m    -2.5m |   -0.0m   -0.0m   -0.0m
+     357   0.768    5.3 |   -1.5m    -2.4m    -2.5m    -2.4m    -2.5m |   -0.0m   -0.0m   -0.0m
+     564   0.777    5.0 |   -1.9m    -2.5m    -2.5m    -2.5m    -2.5m |   -0.0m   -0.0m   -0.0m
+     566   0.774    4.6 |   -1.4m    -2.5m    -2.5m    -2.5m    -2.5m |   -0.0m   -0.0m   -0.0m
+     568   0.771    4.9 |   -1.5m    -2.5m    -2.5m    -2.5m    -2.5m |   -0.0m   -0.0m   -0.0m
+     570   0.768    4.9 |   -1.5m    -2.5m    -2.5m    -2.5m    -2.5m |   -0.0m   -0.0m   -0.0m
+     572   0.765    6.7 |   -1.4m    -2.5m    -2.5m    -2.5m    -2.5m |   -0.0m   -0.0m   -0.0m
+     739   0.833    5.0 |   -1.4m    -2.4m    -2.5m    -2.5m    -2.5m |   -0.0m   -0.0m   -0.0m
+     741   0.830    4.8 |   -1.4m    -2.4m    -2.5m    -2.4m    -2.5m |   -0.0m   -0.0m   -0.0m
+     743   0.827    5.1 |   -1.6m    -2.5m    -2.5m    -2.5m    -2.5m |   -0.0m   -0.0m   -0.0m
+     745   0.824    5.0 |   -1.6m    -2.4m    -2.4m    -2.4m    -2.4m |   -0.0m   -0.0m   -0.0m
+     747   0.821    5.3 |   -1.4m    -2.4m    -2.4m    -2.4m    -2.4m |   -0.0m   -0.0m   -0.0m
+     915   0.832    5.2 |   -1.5m    -2.4m    -2.5m    -2.5m    -2.5m |   -0.0m   -0.0m   -0.0m
+     917   0.829    5.1 |   -1.6m    -2.4m    -2.4m    -2.4m    -2.4m |   -0.0m   -0.0m   -0.0m
+     919   0.825    5.3 |   -1.4m    -2.3m    -2.4m    -2.4m    -2.4m |   -0.0m   -0.0m   -0.0m
+     921   0.822    5.4 |   -1.5m    -2.4m    -2.5m    -2.4m    -2.5m |   -0.0m   -0.0m   -0.0m
+     923   0.820    6.4 |   -1.3m    -2.4m    -2.4m    -2.4m    -2.4m |   -0.0m   -0.0m   -0.0m
+    1087   0.832    5.4 |   -1.5m    -2.4m    -2.4m    -2.4m    -2.4m |   -0.0m   -0.0m   -0.0m
+    1089   0.829    5.3 |   -1.6m    -2.2m    -2.3m    -2.3m    -2.3m |   -0.0m   -0.0m   -0.0m
+    1091   0.825    5.1 |   -1.5m    -1.0m    -1.0m    -1.0m    -1.0m |   -0.0m   -0.0m   -0.0m
+    1093   0.822    4.9 |   -1.4m    -1.8m    -1.9m    -1.8m    -1.9m |   -0.0m   -0.0m   -0.0m
+    1095   0.820    6.2 |   -1.3m    -1.5m    -1.5m    -1.5m    -1.5m |   -0.0m   -0.0m   -0.0m
+  ---------------------------------------------------------------------------------------------
+
+  decomposition over 60 descent frames (d* = dz(cell) - dz(own,own)):
+    ALL frames                  : n= 60  dz(own)= -2.31mm  dTotal= -0.03mm  dRaw= -0.01mm  dFiLM= -0.03mm  interact= +0.01mm
+    approach/hover dz(own)>=-3mm: n= 60  dz(own)= -2.31mm  dTotal= -0.03mm  dRaw= -0.01mm  dFiLM= -0.03mm  interact= +0.01mm
+
+  time-to-contact split (pooled over 6 episode(s), per-episode first-contact detection):
+    <2s before contact (late)   : n= 60  dz(own)= -2.31mm  dTotal= -0.03mm  dRaw= -0.01mm  dFiLM= -0.03mm  interact= +0.01mm
+
+  per-episode split (ABSOLUTE dz, mm/step):
+    ep0 (contact z=0.763): n= 10  dz(own)= -2.44  dz(swap)= -2.47  d= -0.03  (FiLM  -0.03)
+    ep1 (contact z=0.765): n= 10  dz(own)= -2.44  dz(swap)= -2.47  d= -0.03  (FiLM  -0.03)
+    ep2 (contact z=0.762): n= 10  dz(own)= -2.45  dz(swap)= -2.48  d= -0.03  (FiLM  -0.03)
+    ep3 (contact z=0.818): n= 10  dz(own)= -2.40  dz(swap)= -2.43  d= -0.03  (FiLM  -0.03)
+    ep4 (contact z=0.817): n= 10  dz(own)= -2.39  dz(swap)= -2.42  d= -0.03  (FiLM  -0.03)
+    ep5 (contact z=0.817): n= 10  dz(own)= -1.70  dz(swap)= -1.73  d= -0.03  (FiLM  -0.03)
+
+── verdict ─────────────────────────────────────────────────────────
+  INCONCLUSIVE: no committed-descent frames in this episode.
