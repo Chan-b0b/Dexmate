@@ -1,0 +1,102 @@
+# RESULTS_LINEUP — 논문 수록 실험 결과 확정본 (08-11)
+
+전면 재작성(prescription-led)용 결과 인벤토리. 수치 출처는 EVIDENCE.md 해당 절.
+**로컬 데이터 > 구 EVIDENCE 집계** (08-11 사용자 확정, EVIDENCE §3 로봇 롤아웃 08-11 블록 참조).
+
+## 모델 명명 (paper-wide)
+- **naive policy** = 구 "baseline" (full wrench in state)
+- **conditioned policy** = grounded bottleneck (computed ĉ + zero-init FiLM + wrench mask)
+- ⚠ 논문에 등장하는 conditioned 모델은 **두 캘리브레이션 라운드**가 섞임 (아래 D 참조)
+
+## A. §V Offline (통계 본진 — held-out val 6 eps)
+
+### A1. Bypass matrix (Table I) — 원 캘리브레이션 4모델 (07-29 학습)
+| 모델 | val loss | authority (best/last) | contact-moment |
+|---|---|---|---|
+| naive | 0.15087 | — | — |
+| prefix, wrench 유지 (mask0) | 0.15075 | 7/8% | 3/4% |
+| prefix, mask1 | **0.14624** | **76/54%** | 7/8% |
+| suffix, mask1 | 0.15924 | 60/42% | 10/1% |
+핵심: ① mask0 loss = naive와 소수 4째 자리 동일, 권한 7% (bypass) ② loss 순위 ↮ 권한 순위 ③ prefix > suffix ④ val-best > last.
+
+### A2. Ablation 표 (Table II) — fromnaive(recal) 계열, 동일 naive-init (§3.5–3.6)
+| 모델 (force 접근) | dose 8→12N | transplant pc_fc | press-sim (seal-never) | val err |
+|---|---|---|---|---|
+| naive best@10k | +1.41→+1.12 (36→28%, 감소) | +1.63 (105%) | 4–5/6, max 14.9mm | 0.84 |
+| naive last@50k | +1.73→+2.00 (57→65%, 완만 상승) | +1.69 (108%) | 3/6, max 16.0mm | 0.71 |
+| mask0-fromnaive (raw+죽은 ĉ) | +1.57→+1.12 (dRaw 전부) | +1.68 (dFiLM 0.04) | 4–5/6, max 11.9mm | 0.85 |
+| V1 (병목, 셔플 ĉ) | −0.06→−0.11 (0) | −0.06 (0%) | **0/6, max 431mm** | 0.96 |
+| fromnaive v2 best (접지 병목) | +1.20→**+4.40 (115%)** | +1.57 (94%, 전부 dFiLM) | **6/6, max 4.5mm** | 0.87 |
+| fromnaive v2 last@20k | +0.97→+3.44 | +1.45 (97%) | 6/6, max 4.1mm | 0.81 |
+- loss: v2 0.14762 vs mask0fn **0.14750 (4째 자리 동일, bypass 재현)**; V1 0.17081(+16%, 정직 표기).
+- naive 형태는 ckpt 의존 (best 감소 / last 완만 상승) → 견고 판별축 3개: 기울기 크기(~10×) /
+  100% 상쇄선 통과 여부 / 폐루프 결과 (naive-last 오픈루프↑인데 폐루프 악화 3/6·16mm).
+- seal-granted 대조: naive seal3에서 0.5mm 정상 정지 → naive 정지는 seal 이벤트 바인딩.
+- 접촉-순간(반응형) 권한은 전 구성 7–10% — 성공 기제는 anticipatory 행동 + 사후 게이팅 (물리 산술 ~5N/mm과 정합).
+
+### A3. π0.5 (3.6B) — 스케일/아키텍처 일반성 (텍스트만)
+**⚠ 08-11 HOLD: pi0 offline 실험 재수행 중 (사용자) — 결과 나올 때까지 아래 수치로 §V-D
+확정하지 말 것. 신규 결과로 대체 예정.**
+- pi05_naive: transplant 65–97% (템플릿 존재), ramp ≤37% (얕은 포화), press-sim 사실상 0/6 max 86mm (SmolVLA naive보다 악화), val err 0.69–0.89.
+- pi05_film (suffix, 구캘리브레이션): 전 도스 권한 0 (contact 포화에도), press-sim 0/6 max 94–102mm — V1 시그니처 재현 → "접지는 공짜가 아니다" (Discussion).
+
+## B. §VI Robot
+
+### B1. Closed-loop picks — **원 캘리브레이션 prefix_mask1** (07-30, 로컬 canonical)
+| 모델 | 결과 | peak_contact_n |
+|---|---|---|
+| naive (L5, 3런) | 0/3 전부 외부 abort (자가 정지 0회) | 15.41 / 17.8 / 18.7 (censored 하한) |
+| conditioned (L1/L3/L5 각 3런) | **9/9 자가 정지 + seal** | 2.84–14.54 (median 4.32, 7/9 ≤ 5.36; 상위 10.16·14.54) |
+- FiLM 활동 (성공런): |γ| +48%, |β| +79% at contact/seal vs descent.
+- naive는 L5 단일 높이만 평가 (validity note).
+- **NEW Fig**: per-trial force 궤적/strip (states.jsonl 15Hz, 전 런 로컬 보유). 14.54 런 숨기지 않음 — 한계 직전 자가 정지 = brake 증거.
+- Table III(성공 카운트 표)는 제거, 카운트는 본문 종속절.
+
+**pm1 자체 probe 세트 (08-11 로컬 확인 — 9/9 모델의 독립 메커니즘 증거):**
+- dose ramp (`0729_state_pm1_ramp8/10/12`): committed descent 상쇄 **+3%→+7%→+13% 단조 상승**,
+  전부 dFiLM (dRaw=+0.00 — mask 검증); near-contact(<2s) 구간은 +1.40→+1.61→+1.98mm
+  (자기 하강 −2.14 대비 **65→93%**), pre-contact r12는 +2.03 (**95%**, ep5는 +dz 후퇴).
+- transplant (`pc_fc`): +1.01mm / 자기 하강 −2.13 (47%, 전부 FiLM 경로).
+- press-sim (`sim_pm1_seal0/seal3`): seal-never **3/6 정지, max 9.6mm** (높이 의존: z~0.817
+  3/3, z~0.763 0/3 — fromnaive 6/6보다 약함, naive max 14.9–16mm보단 우위);
+  seal3 제공 시 6/6, 3.1mm.
+- live probe 07-30 (`20260730-151402`, 10포즈): contact +0.73 / sealed +2.09 / +6N +2.18 mm/f.
+- ⚠ 정규화 주의: pm1 ramp의 committed-descent 프레임(dz −8.42, 2 eps)과 fromnaive
+  ramp(−3.84, n=245)는 분모가 달라 **% 수치를 한 표에서 직접 비교 금지** — 형태(단조 상승)만
+  공유 사실로 서술.
+- ⚠ pm1은 seal-never 반사실에서 부분 정지(3/6) — 로봇 9/9는 seal 가용 조건. "pm1이
+  seal-never에서도 만능"으로 쓰지 말 것.
+
+### B2. Live counterfactual probes — **fromnaive vs naive** (08-06 ×2, 로봇 반출 직전)
+- 공정 도스(≤9N, 10포즈): naive ≥ film (fc 67% vs 32%, sealed 147% vs 58%) — 오프라인 같은 도스 구간과 정합. film은 단조: hover +0.29 → preseal +0.87 → sealed +1.41 → +6N +1.70.
+- 고도스(3포즈, +6/9/12N): **crossover 온로봇 재현** — film +1.19→+4.59→+8.56 (12N=자기 하강 2배=후퇴) vs naive +1.34→+3.18→+4.18 (한계반응 붕괴). 역전 6–9N. 표면 근접에서 naive +1.0~1.8 vs film +7.5.
+- validity: hover 자체 재앵커, swap_drift 보정 (양모델 동일 물리 도스), film 절대치는 보수적 하한.
+- (07-30 구 live probe, 원 캘리브레이션 prefix: contact +0.73 / sealed +2.09 / +6N +2.18 — 보조)
+
+## C. Discussion 재료
+- 물리 산술: 강성 ~5N/mm → 15N 이내 정지에 접촉 후 ~2mm 필요 → 반응형 게이팅 산술적 불가 → anticipatory 처방 필연.
+- 운영 비대칭: F/T 드리프트 실측 0.4→1.1N/일; conditioned는 hover 재앵커 노브 (--film-auto-baseline), naive는 frozen stats.
+- pi05_film 이식 실패 = "병목+데이터만으론 부족, 주입점·캘리브레이션 아키텍처별 재설계".
+
+## D. 모델 정체성 (08-11 최종 — 단일 모델 표현)
+사실관계: §VI-B1 (9/9 picks) = 원 캘리브레이션 prefix_mask1; §V-A2 (ablation) + §VI-B2 (live)
+= 재캘리브레이션 fromnaive 계열. pm1도 자체 ramp/transplant/sim/live probe 보유 (B1).
+
+**논문 표현 방침 (08-11 사용자 결정)**: 캘리브레이션 라운드 구분을 본문·캡션에서 제거하고
+전부 **"the conditioned policy"**로 통칭 — 같은 설계의 인스턴스들이므로. "캘리브레이션하면
+grounding이 강해진다" 진행 서사도 삭제 (그 포인트는 §IV 각주 + Discussion의 π0.5 이식
+실패가 감당).
+
+가드레일:
+1. 인스턴스별 수치를 한 프로필로 합성 금지 — 각 수치는 자기 표/그림/실험 안에서만.
+   (예: "76% 정책이 115% dose-response" 같은 문장 금지)
+2. 인스턴스 공시는 §IV 각주 한 줄이 전담: "bypass matrix와 ablation의 conditioned 정책은
+   같은 설계를 별도 학습·캘리브레이션한 인스턴스" — §IV 수정 시 기존 각주를 이 역할로 정비.
+3. 라운드 간 % 직접 비교 금지 (분모 상이 — B1 주의 참조).
+
+## E. 논문 제외 확정 (08-11)
+- suffix 로봇 런 (1/3, 6.9/16.6/19.5) — 로컬 부재, 검증 불가. suffix는 offline만.
+- 14:34 val-best 런 (28.1N) — 로컬 부재.
+- 구 집계 "5/7, 2.5–4.8N" — 08-11 재검증으로 대체.
+- 08-04/05 fromnaive 폐루프 시도들 (1/6, 0/9) — 오프셋 과보정/드리프트 이슈 세션 (EVIDENCE §3.5, §3.7 08-04 런 무효 판정). 논문은 fromnaive의 폐루프 성공을 주장하지 않음 (fromnaive는 offline+live만).
+- contact-z decomp fig (분석 미수행), loss-authority scatter fig (Table I과 중복).

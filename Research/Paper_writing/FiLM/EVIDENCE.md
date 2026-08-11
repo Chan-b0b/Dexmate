@@ -79,6 +79,20 @@ abs 계열 probe는 INCONCLUSIVE(committed-descent 프레임 부재).
   val-best(7119b99) 스냅샷 확정 — 이 런만 overpress 실패. 리비전별로 나누면
   **refs/main 5/6, val-best 0/1**. 논문 수치 확정 전 리비전 정리 필요.
 
+#### ⚠ 08-11 재검증 — 위 표를 대체 (사용자 확정: 로컬 데이터 > 위 집계)
+로컬 `vla/rollouts/` meta.json 전수 재검(08-11). 사용자 확인: "전부 실제 성공런이었다."
+
+| 모델 | 성공 | peak_contact_n |
+|---|---|---|
+| naive (L5만, 3런) | **0/3** 전부 force-limit abort | 15.41 / 17.8 / 18.7 |
+| film prefix_mask1 (L1/L3/L5 각 3런) | **9/9** 전부 자가 정지 후 seal | 2.84–14.54 (median 4.32; 7/9 ≤ 5.36; 상위 10.16, 14.54) |
+
+- 구 집계(5/7, 성공런 2.5–4.8 N)와 14:34 val-best 런(28.1 N)은 로컬에 부재 → **논문 미사용**.
+- suffix 롤아웃도 로컬 부재 (1/3, 6.9/16.6/19.5는 검증 불가) → 로봇 suffix 수치 논문 제외 권장.
+- naive는 L5 단일 높이에서만 평가 — §VI validity note 필요.
+- 논문 서사 확정: "naive는 매 시도 외부 abort로만 종료(censored ≥15.4 N) vs conditioned는
+  매 pick 자가 정지(median 4.3 N)" — 성공 카운트 표 대신 per-trial force figure로 제시.
+
 ### Offline authority probe (0729 체크포인트, **held-out VAL 6 eps**, 2026-07-30 추가)
 `vla/probes/0729bl_*.txt` (best/last × std/real), `0729_*.txt`(=best 중복). contact-n 6,
 realistic c1=[0.6, 0.42, 0].

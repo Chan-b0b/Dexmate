@@ -41,9 +41,6 @@ R.~Geirhos, J.-H. Jacobsen, C.~Michaelis, R.~Zemel, W.~Brendel, M.~Bethge, and F
 \bibitem{perez2018film}
 E.~Perez, F.~Strub, H.~de~Vries, V.~Dumoulin, and A.~Courville, ``{FiLM}: Visual reasoning with a general conditioning layer,'' in \emph{AAAI}, 2018.
 
-\bibitem{pi05}
-K.~Black \emph{et~al.}, ``$\pi_{0.5}$: A vision-language-action model with open-world generalization,'' \emph{arXiv preprint arXiv:2504.16054}, 2025, tODO-verify arXiv ID and author list.
-
 \bibitem{farm}
 {TODO-verify authors}, ``{FARM}: Tactile-conditioned diffusion policies (todo-verify full title),'' \emph{arXiv preprint arXiv:2510.13324}, 2025.
 
@@ -76,6 +73,9 @@ D.~Chen, B.~Zhou, V.~Koltun, and P.~Kr{\"a}henb{\"u}hl, ``Learning by cheating,'
 
 \bibitem{smolvla}
 M.~Shukor \emph{et~al.}, ``{SmolVLA}: A vision-language-action model for affordable and efficient robotics,'' \emph{arXiv preprint arXiv:2506.01844}, 2025, tODO-verify arXiv ID.
+
+\bibitem{pi05}
+K.~Black \emph{et~al.}, ``$\pi_{0.5}$: A vision-language-action model with open-world generalization,'' \emph{arXiv preprint arXiv:2504.16054}, 2025, tODO-verify arXiv ID and author list.
 
 \bibitem{ross2011dagger}
 S.~Ross, G.~J. Gordon, and J.~A. Bagnell, ``A reduction of imitation learning and structured prediction to no-regret online learning,'' in \emph{AISTATS}, 2011.

@@ -20,9 +20,11 @@ contact-rich manipulation~\cite{forcevla,phaforce,forceflow,filic}. All of this 
 validation recipe---add the signal, retrain, report task success---and none of it measures
 whether the trained policy \emph{causally uses} the signal when it matters: whether, holding
 everything else fixed, changing the force input changes the action. Imitation learning offers no
-such guarantee. The objective pins down what the expert did along the data manifold; \emph{which
-input the behavior is bound to} is left to whatever correlations the demonstrations happen to
-contain~\cite{dehaan2019causal,geirhos2020shortcut}.
+such guarantee. The objective asks the policy to reproduce \emph{what} the expert did, not
+\emph{why}: a clone can imitate the behavior convincingly while being driven by entirely
+different cues than the expert was. Imitation pins down the trajectory, not the
+mechanism---equally faithful clones can act from opposite causes, and the loss cannot tell
+them apart~\cite{dehaan2019causal,geirhos2020shortcut}.
 
 The consequence is easiest to see where force is the only signal that can carry the task. We
 study real-robot suction case picking with a single head-mounted camera and no wrist camera: the
@@ -65,23 +67,20 @@ indistinguishable---the naive policy \emph{does} respond to force at the demonst
 magnitudes, as strongly as the conditioned policy or more so. But its response is a
 \emph{template}: strongest near what the demonstrations felt, fading as force rises past them.
 The conditioned policy's response instead grows with force, to the point of stopping and
-backing away at forces beyond anything in the training data (Sec.~\ref{sec:offline}). The same
-comparison doubles as an ablation of the recipe: remove the mask and the pathway trains dead
-(bypass); remove the grounding and the policy becomes the worst in the study. On the robot, the difference
-appears as \emph{force regulation}: the naive policy's contact forces are censored at the
-external abort ($15$\,N$+$---lower bounds, not chosen stopping forces), the conditioned
-policy's sit at $2.5$--$4.8$\,N---an order of magnitude below---and live counterfactual probes
-reproduce the offline crossover on the physical system (Sec.~\ref{sec:robot}). The failure
-class also survives scale: a $3.6$B-parameter $\pi_{0.5}$~\cite{pi05} fine-tuned on the same
-demonstrations shows the same fading-template signature (Sec.~\ref{sec:offline-pi05}).
+backing away at forces beyond anything in the training data (Sec.~\ref{sec:offline}). The
+mechanism carries to the real closed loop: while the naive policy drives contact force past the
+$15$\,N safety limit on every attempt, the conditioned policy stops on its own in every
+pick---across three stack heights, at a median contact force of $4.3$\,N---and live
+counterfactual probes reproduce the offline crossover on the physical system
+(Sec.~\ref{sec:robot}).
 
 Our contributions:
 \begin{itemize}
 \item \textbf{A recipe for making a VLA use force when it matters.} Force-decorrelated
   press-retreat demonstrations plus a grounded conditioning bottleneck (computed \chat{},
   zero-initialized FiLM, raw-wrench mask) turn the same demonstrations into a force-monotone
-  brake instead of a fading template---on the robot, regulating contact force an order of
-  magnitude below the safety limit on a transition the naive policy fails uniformly
+  brake instead of a fading template---on the robot, stopping under the $15$\,N abort limit in
+  every pick (median contact force $4.3$\,N) on a transition the naive policy fails uniformly
   (Sec.~\ref{sec:method},~\ref{sec:robot}).
 \item \textbf{An instrument for causal authority.} The bottleneck is measurable by construction:
   a counterfactual probe battery---condition forcing, state transplants with pathway
@@ -91,8 +90,9 @@ Our contributions:
 \item \textbf{Findings standard validation cannot produce.} \emph{Bypass}: with the raw signal
   available, the conditioning pathway trains causally dead at indistinguishable validation
   loss---replicated in two independent model pairs---so no quantity in the standard stack
-  detects whether force is used. A matched-quintuple ablation shows each ingredient of the
-  recipe is necessary (mask, grounding, injection site), and dissociates the roles: the data's
+  detects whether force is used. A controlled ablation (same data, same initialization, only
+  the force routing varied) shows the mask and the grounding are each necessary and the
+  injection site matters, and dissociates the roles: the data's
   correlation structure decides \emph{whether} a signal is used; the conditioning design decides
   the \emph{form} its use takes under extrapolation. The failure class persists unchanged at
   $3.6$B scale (Sec.~\ref{sec:offline}).

@@ -7,7 +7,6 @@
 \citation{perez2018film}
 \@writefile{toc}{\contentsline {section}{\numberline {I}Introduction}{1}{section.1}\protected@file@percent }
 \newlabel{sec:intro}{{I}{1}{Introduction}{section.1}{}}
-\citation{pi05}
 \citation{forcevla}
 \citation{phaforce}
 \citation{forceflow}
@@ -45,9 +44,9 @@
 \newlabel{sec:offline}{{V}{4}{Experiments}{section.5}{}}
 \@writefile{toc}{\contentsline {subsection}{\numberline {\mbox  {V-A}}Bypass: standard validation cannot see causal use}{4}{subsection.5.1}\protected@file@percent }
 \newlabel{sec:offline-bypass}{{\mbox  {V-A}}{4}{Bypass: standard validation cannot see causal use}{subsection.5.1}{}}
+\@writefile{toc}{\contentsline {subsection}{\numberline {\mbox  {V-B}}Where authority binds: stable states, not the transient}{4}{subsection.5.2}\protected@file@percent }
+\newlabel{sec:offline-posthoc}{{\mbox  {V-B}}{4}{Where authority binds: stable states, not the transient}{subsection.5.2}{}}
 \citation{pi05}
-\@writefile{toc}{\contentsline {subsection}{\numberline {\mbox  {V-B}}Where authority binds: stable states, not the transient}{5}{subsection.5.2}\protected@file@percent }
-\newlabel{sec:offline-posthoc}{{\mbox  {V-B}}{5}{Where authority binds: stable states, not the transient}{subsection.5.2}{}}
 \@writefile{toc}{\contentsline {subsection}{\numberline {\mbox  {V-C}}The matched quintuple: architecture determines the form of force use}{5}{subsection.5.3}\protected@file@percent }
 \newlabel{sec:offline-quintuple}{{\mbox  {V-C}}{5}{The matched quintuple: architecture determines the form of force use}{subsection.5.3}{}}
 \@writefile{toc}{\contentsline {subsection}{\numberline {\mbox  {V-D}}Scale does not change the class}{5}{subsection.5.4}\protected@file@percent }
@@ -56,8 +55,10 @@
 \newlabel{sec:robot}{{\mbox  {V-E}}{5}{Robot validation: closed-loop picks}{subsection.5.5}{}}
 \@writefile{lot}{\contentsline {table}{\numberline {II}{\ignorespaces Matched quintuple: same data, same initialization, indistinguishable imitation---three mechanisms. Dose-response = P3 cancellation at 8\,N$\rightarrow $12\,N (\% of own descent). Press sim = P4 seal-never: episodes stopped before force limit / max penetration.}}{6}{table.2}\protected@file@percent }
 \newlabel{tab:quintuple}{{II}{6}{Matched quintuple: same data, same initialization, indistinguishable imitation---three mechanisms. Dose-response = P3 cancellation at 8\,N$\rightarrow $12\,N (\% of own descent). Press sim = P4 seal-never: episodes stopped before force limit / max penetration}{table.2}{}}
-\@writefile{lot}{\contentsline {table}{\numberline {III}{\ignorespaces Robot case-pick outcomes (same demonstrations for all policies).}}{6}{table.3}\protected@file@percent }
-\newlabel{tab:robot}{{III}{6}{Robot case-pick outcomes (same demonstrations for all policies)}{table.3}{}}
+\@writefile{lof}{\contentsline {figure}{\numberline {1}{\ignorespaces Contact force per trial on the robot. Every naive-policy attempt (three trials) rises monotonically until the external $15$\,N abort terminates the run at $15.4$--$18.7$\,N---the policy never initiates a stop, so these peaks are lower bounds. Every conditioned-policy pick (nine trials, three per stack height) stops on its own and seals, at peak contact forces of $2.8$--$14.5$\,N (median $4.3$\,N).}}{6}{figure.1}\protected@file@percent }
+\newlabel{fig:forcetraces}{{1}{6}{Contact force per trial on the robot. Every naive-policy attempt (three trials) rises monotonically until the external $15$\,N abort terminates the run at $15.4$--$18.7$\,N---the policy never initiates a stop, so these peaks are lower bounds. Every conditioned-policy pick (nine trials, three per stack height) stops on its own and seals, at peak contact forces of $2.8$--$14.5$\,N (median $4.3$\,N)}{figure.1}{}}
+\@writefile{lof}{\contentsline {figure}{\numberline {2}{\ignorespaces On-robot counterfactuals (P5), naive vs.\ recalibrated conditioned policy on identical frozen observations. Left: at demonstration-level doses the naive response is equal or larger. Right: raising the dose to $+6/+9/+12$\,N reverses the ordering between $6$ and $9$\,N---the offline crossover, reproduced on the physical system.}}{6}{figure.2}\protected@file@percent }
+\newlabel{fig:live}{{2}{6}{On-robot counterfactuals (P5), naive vs.\ recalibrated conditioned policy on identical frozen observations. Left: at demonstration-level doses the naive response is equal or larger. Right: raising the dose to $+6/+9/+12$\,N reverses the ordering between $6$ and $9$\,N---the offline crossover, reproduced on the physical system}{figure.2}{}}
 \@writefile{toc}{\contentsline {subsection}{\numberline {\mbox  {V-F}}Robot validation: on-robot counterfactuals}{6}{subsection.5.6}\protected@file@percent }
 \newlabel{sec:robot-live}{{\mbox  {V-F}}{6}{Robot validation: on-robot counterfactuals}{subsection.5.6}{}}
 \@writefile{toc}{\contentsline {section}{\numberline {VI}Discussion and Limitations}{6}{section.6}\protected@file@percent }
@@ -73,18 +74,18 @@
 \bibcite{dehaan2019causal}{5}
 \bibcite{geirhos2020shortcut}{6}
 \bibcite{perez2018film}{7}
-\bibcite{pi05}{8}
-\bibcite{farm}{9}
-\bibcite{tacforesight}{10}
-\bibcite{rtaffordance}{11}
-\bibcite{wen2020copycat}{12}
-\bibcite{hermann2023foundations}{13}
-\bibcite{shortcutgeneralist}{14}
-\bibcite{interventionil2025}{15}
-\bibcite{interventionil2023}{16}
-\bibcite{chen2020lbc}{17}
-\bibcite{privilegedaction}{18}
-\bibcite{smolvla}{19}
+\bibcite{farm}{8}
+\bibcite{tacforesight}{9}
+\bibcite{rtaffordance}{10}
+\bibcite{wen2020copycat}{11}
+\bibcite{hermann2023foundations}{12}
+\bibcite{shortcutgeneralist}{13}
+\bibcite{interventionil2025}{14}
+\bibcite{interventionil2023}{15}
+\bibcite{chen2020lbc}{16}
+\bibcite{privilegedaction}{17}
+\bibcite{smolvla}{18}
+\bibcite{pi05}{19}
 \bibcite{ross2011dagger}{20}
 \@writefile{toc}{\contentsline {section}{\numberline {VII}Conclusion}{7}{section.7}\protected@file@percent }
 \newlabel{sec:conclusion}{{VII}{7}{Conclusion}{section.7}{}}

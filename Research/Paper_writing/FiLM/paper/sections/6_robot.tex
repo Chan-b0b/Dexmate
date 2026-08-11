@@ -1,75 +1,106 @@
-% Robot validation subsections of §V Experiments (Table III, Fig. 6–7). EVIDENCE §3 rollouts +
-% §3.7 live series. Merged under Experiments per user decision 08-06 ("V를 Experiments로").
-% Scope framing (F1): small-n case study in a controlled diagnostic setting, stated upfront.
-% Revision pin honesty (EVIDENCE §6.2): 6 runs refs/main + 1 val-best(failed) — TODO footnote final.
-% 토론 6 defense (mid-dose naive ≥ film) included as anticipated-question paragraph.
+% §VI Robot validation. REWRITE 08-11 (사용자 결정): force-language framing, RESULTS_LINEUP.md B1/B2.
+% Canonical numbers = 로컬 롤아웃 (EVIDENCE §3 08-11 재검증 블록): naive 0/3 (15.4–18.7 N
+% censored), conditioned pm1 9/9 자가정지 (median 4.3 N, L1/L3/L5 × 3). Table III 제거,
+% counts는 종속절 한 번. Suffix 로봇 런 제외 (로컬 부재). Live probes = fromnaive 라운드
+% (08-06) — 캘리브레이션 라운드 캡션 명기, 라운드 간 % 직접 비교 금지 (분모 상이).
+% pm1은 seal-never sim에서 3/6 (높이 의존) — 만능으로 쓰지 말 것 (RESULTS_LINEUP B1 주의).
+% Intro nugget ("stops when it feels...")은 §I로 승격됨 — verbatim 반복 금지.
+% 08-11 사용자 결정 (단일 모델 표현): 캘리브레이션 라운드 구분을 본문/캡션에서 제거 —
+% 전부 "the conditioned policy". 가드레일: ① 인스턴스별 수치를 한 프로필로 합성 금지
+% (각 수치는 자기 실험 안에서만) ② 인스턴스 공시는 §IV 각주 한 줄이 전담 (§IV 수정 시 반영).
 \subsection{Robot validation: closed-loop picks}
 \label{sec:robot}
 
-Robot results are a small-$n$ case study in a controlled diagnostic setting; their role is to
-test whether the mechanisms measured offline---template fading, monotone braking, the
-crossover---survive contact with the real closed loop, not to establish success statistics.
-All runs use a $15$\,N force limit and 5-step action chunks.
+The offline battery makes three predictions about the real closed loop. A template response
+that fades beyond the demonstrations should let contact force run away until something outside
+the policy intervenes; a monotone brake should stop on its own, at forces near the demonstrated
+range; and the two responses should cross between the demonstrated magnitudes and the safety
+limit. The robot experiments test these predictions, and the outcome variable is the
+\emph{force behavior} of each attempt---task success follows from it by definition.
 
-\begin{table}[t]
-\caption{Robot case-pick outcomes (same demonstrations for all policies).}
-\label{tab:robot}
+\begin{figure}[t]
 \centering
-\begin{tabular}{lcccc}
-\toprule
-Policy & Success & Over-press & Contact force \\
-\midrule
-baseline           & 0/3 & 3/3 (15.4--18.7\,N) & --- \\
-FiLM prefix, mask  & \textbf{5/7} & 1/7\footnotemark & \textbf{2.5--4.8\,N} \\
-FiLM suffix, mask  & 1/3 & 2/3 (16.6/19.5\,N) & 6.9\,N \\
-\bottomrule
-\end{tabular}
-\end{table}
-\footnotetext{One prefix failure was a light press that never sealed; the single over-press run
-used a different checkpoint revision than the other six---per-revision accounting is
-$5/6$ for the primary checkpoint. \todo{finalize revision pinning before submission}}
+% \includegraphics[width=\linewidth]{figs/robot_force_traces}
+\todo{generate per-trial contact-force figure from rollout states.jsonl (RESULTS\_LINEUP B1)}
+\caption{Contact force per trial on the robot. Every naive-policy attempt (three trials) rises
+monotonically until the external $15$\,N abort terminates the run at $15.4$--$18.7$\,N---the
+policy never initiates a stop, so these peaks are lower bounds. Every conditioned-policy pick
+(nine trials, three per stack height) stops on its own and seals, at peak contact forces of
+$2.8$--$14.5$\,N (median $4.3$\,N).}
+\label{fig:forcetraces}
+\end{figure}
 
-The baseline fails uniformly by its offline signature: contact, continued descent, force-limit
-abort---the closed-loop realization of a response that saturates below full cancellation. The
-grounded prefix policy converts this to $5/7$ success with contact forces of $2.5$--$4.8$\,N,
-an order of magnitude below the abort threshold, sealing in $14$--$41$\,s and lifting cleanly.
-The suffix policy lands between, consistent with its intermediate offline authority. During
-successful runs the FiLM modulation is measurably active at the transitions ($|\gamma|$
-$+48\%$, $|\beta|$ $+79\%$ at contact/seal relative to descent).
+The predictions hold (Fig.~\ref{fig:forcetraces}). Under the naive policy every attempt ends
+the same way: contact, continued descent, and an external force-limit abort at
+$15.4$--$18.7$\,N---the closed-loop realization of a response that saturates below full
+cancellation. The conditioned policy stops itself in \emph{every} pick, across three stack
+heights whose differences are visually near-indistinguishable, sealing and lifting at peak
+contact forces of $2.8$--$14.5$\,N (median $4.3$\,N; seven of nine below $5.4$\,N). The two
+force distributions do not overlap, and the task outcomes are their threshold readout: $0/3$
+versus $9/9$. The two hardest-pressing picks ($10.2$ and $14.5$\,N) are the brake visible near
+its limit---both stopped short of the abort threshold and completed the pick where the naive
+policy, at the same forces, was still commanding descent.
+
+The stopping runs through the bottleneck. The deployed policy's own dose-response is monotone:
+transplanted wrenches at $8/10/12$\,N cancel $3\%\rightarrow7\%\rightarrow13\%$ of committed
+descent---rising with dose, and carried entirely by the FiLM path (the masked raw route
+contributes $+0.00$\,mm, the mask working as designed). During the picks themselves the
+modulation is measurably active at the transitions ($|\gamma|$ $+48\%$, $|\beta|$ $+79\%$ at
+contact/seal relative to descent), and forcing \chat{} at ten frozen poses on the robot moves
+the commanded action in the correct direction at every staged condition (contact $+0.73$,
+sealed $+2.09$, $+6$\,N $+2.18$\,mm/frame).
 
 \subsection{Robot validation: on-robot counterfactuals}
 \label{sec:robot-live}
 
-The live probe (P5) freezes observations at staged poses and doses both policies with identical
-counterfactual states. Two sessions matter (Fig.~\ref{fig:live}).
+The live probe (P5) freezes observations at staged poses and doses the naive policy and the
+conditioned policy with identical counterfactual states. Two sessions matter
+(Fig.~\ref{fig:live}).
 
-\textbf{Fair dose.} At transplant doses matching the demonstrations ($\leq$\,contact magnitude),
-the \emph{baseline} responds as strongly or stronger than the conditioned policy (first-contact:
-$67\%$ vs.\ $32\%$ of own descent; sealed state: $147\%$ vs.\ $58\%$)---in quantitative agreement
-with the offline dose-response curves at the same doses, where the template peaks. The
-conditioned policy's response is dose-monotone across the staged conditions (hover $+0.29$
-$\rightarrow$ pre-seal $+0.87$ $\rightarrow$ sealed $+1.41$ $\rightarrow$ $+6$\,N $+1.70$\,mm/frame).
+\begin{figure}[t]
+\centering
+% \includegraphics[width=\linewidth]{figs/live_counterfactuals}
+\todo{live counterfactual figure: fair-dose bars + high-dose crossover curves
+(assets: vla/live\_film\_probes 08-06 runs, \_vs\_naive.png)}
+\caption{On-robot counterfactuals (P5), naive vs.\ recalibrated conditioned policy on
+identical frozen observations. Left: at demonstration-level doses the naive response is equal
+or larger. Right: raising the dose to $+6/+9/+12$\,N reverses the ordering between $6$ and
+$9$\,N---the offline crossover, reproduced on the physical system.}
+\label{fig:live}
+\end{figure}
+
+\textbf{Fair dose.} At transplant doses matching the demonstrations ($\leq$\,contact
+magnitude), the \emph{naive} policy responds as strongly or stronger than the conditioned
+policy (first-contact: $67\%$ vs.\ $32\%$ of own descent; sealed state: $147\%$ vs.\
+$58\%$)---in quantitative agreement with the offline dose-response curves at the same doses,
+where the template peaks. The conditioned policy's response is dose-monotone across the staged
+conditions (hover $+0.29$ $\rightarrow$ pre-seal $+0.87$ $\rightarrow$ sealed $+1.41$
+$\rightarrow$ $+6$\,N $+1.70$\,mm/frame).
 
 \textbf{High dose.} Raising the forced normal force to $+6/+9/+12$\,N reproduces the offline
-crossover on the robot: the conditioned policy accelerates its braking, $+1.19 \rightarrow +4.59
-\rightarrow +8.56$\,mm/frame---at $12$\,N, twice its own descent command, i.e., commanded
-retreat---while the baseline's response collapses at the margin ($+1.34 \rightarrow +3.18
+crossover on the robot: the conditioned policy accelerates its braking, $+1.19 \rightarrow
++4.59 \rightarrow +8.56$\,mm/frame---at $12$\,N, twice its own descent command, i.e., commanded
+retreat---while the naive policy's response collapses at the margin ($+1.34 \rightarrow +3.18
 \rightarrow +4.18$; increments $+1.84 \rightarrow +1.00$). The reversal sits between $6$ and
-$9$\,N. At near-surface poses the separation is starkest: baseline $+1.0$--$1.8$ vs.\ conditioned
+$9$\,N. At near-surface poses the separation is starkest: naive $+1.0$--$1.8$ vs.\ conditioned
 $+7.5$\,mm/frame at $12$\,N.
 
-\textbf{Isn't the baseline better, then?} At mid dose, yes---and it does not matter. Over-press
-is a dynamical process in which force rises \emph{past} the demonstrated magnitude; what
-determines the outcome is the response exactly where the template fades. The baseline's brake
-weakens as it becomes more necessary (closed loop: $0/3$; press-sim penetration to the force
-limit), while the conditioned brake strengthens ($5/7$; $6/6$ stops in simulation). The
-baseline's strongest counterfactual response is to the \emph{sealed} state---but over-press is
-precisely the scenario in which the seal never arrives: its most powerful brake is bound to an
-absent signal. A policy that stops ``when it feels exactly what the demonstrations felt'' and a
-policy that stops ``harder the harder it is pressed'' are indistinguishable in loss, similar at
-fair dose, and categorically different where the task is decided.
+\textbf{Isn't the naive policy better, then?} At mid dose, yes---and it does not matter.
+Over-press is a dynamical process in which force rises \emph{past} the demonstrated magnitude;
+what determines the outcome is the response exactly where the template fades. The naive
+policy's brake weakens as it becomes more necessary (closed loop: force runaway in every
+attempt; press-simulation penetration to the force limit), while the conditioned brake
+strengthens (self-stop in every pick; $6/6$ simulated presses converging). The naive policy's
+strongest counterfactual response is to the \emph{sealed} state---but over-press is precisely
+the scenario in which the seal never arrives: its most powerful brake is bound to an absent
+signal. Similar in loss, similar at the demonstrated doses, categorically different where the
+task is decided.
 
-Two validity notes: force-torque baselines were re-anchored at a pre-descent hover before each
-session, and absolute transplant targets were drift-shifted so both policies received the same
-physical dose; live conditioned-policy magnitudes are conservative lower bounds, as some frozen
-states are slightly off-manifold for its input distribution.
+Three validity notes. Force-torque baselines were re-anchored at a pre-descent hover before
+each probe session, and absolute transplant targets were drift-shifted so both policies
+received the same physical dose; live conditioned-policy magnitudes are conservative lower
+bounds, as some frozen states are slightly off-manifold for its input distribution. The naive
+policy's closed-loop attempts were run at a single stack height---its failure mode is uniform
+and force-driven, but the height-generalization evidence applies to the conditioned policy
+only. High-dose probes cover three poses; we report them as targeted supplementary
+measurements, not a survey.

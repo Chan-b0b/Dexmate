@@ -1,13 +1,13 @@
 # Fdb version 4
-["bibtex main"] 1786416633.28315 "main.aux" "main.bbl" "main" 1786416633.87137 0
+["bibtex main"] 1786427270.11263 "main.aux" "main.bbl" "main" 1786429668.17932 0
   "./refs.bib" 1786348270.39718 5257 408db8646151c0394f5b19a833e5b114 ""
   "/usr/share/texlive/texmf-dist/bibtex/bst/ieeetran/IEEEtran.bst" 1440712899 57748 7c8250ecf02814ce6ddc0cdbb63df1dd ""
-  "main.aux" 1786416633.70044 6859 3f7929a35bd55e12a33f56554c25e1c0 "pdflatex"
+  "main.aux" 1786429668.01362 8328 1b1a2e4db34e0c9982a9f980fc7332fe "pdflatex"
   (generated)
   "main.bbl"
   "main.blg"
   (rewritten before read)
-["pdflatex"] 1786416633.35482 "/home/maverick/Humanoid/Dexmate/Research/Paper_writing/FiLM/paper/main.tex" "main.pdf" "main" 1786416633.87148 0
+["pdflatex"] 1786429667.68572 "/home/maverick/Humanoid/Dexmate/Research/Paper_writing/FiLM/paper/main.tex" "main.pdf" "main" 1786429668.17946 0
   "/etc/texmf/web2c/texmf.cnf" 1786408945.4201 475 c0e671620eb5563b2130f56340a5fde8 ""
   "/home/maverick/Humanoid/Dexmate/Research/Paper_writing/FiLM/paper/main.tex" 1786348270.39718 1657 ada8055e9adc712d6dff1f8a100c5937 ""
   "/usr/share/texlive/texmf-dist/fonts/enc/dvips/base/8r.enc" 1165713224 4850 80dc9bab7f31fb78a000ccfed0e27cab ""
@@ -127,17 +127,17 @@
   "/usr/share/texmf/web2c/texmf.cnf" 1707919699 40399 f2c302f7d2af602abb742093540a5834 ""
   "/var/lib/texmf/fonts/map/pdftex/updmap/pdftex.map" 1786408961.01466 5472669 54eaf61a88b6b7896ebd0dac973cb29c ""
   "/var/lib/texmf/web2c/pdftex/pdflatex.fmt" 1786409037 8212342 6b18bb3393f2a47b363d52a33258b249 ""
-  "main.aux" 1786416633.70044 6859 3f7929a35bd55e12a33f56554c25e1c0 "pdflatex"
-  "main.bbl" 1786416633.35138 4378 493ece7feb4bc5021b7a1580da523dbb "bibtex main"
-  "main.out" 1786416633.70144 3758 cec5f7993c40ef73f6168e91032f2d01 "pdflatex"
+  "main.aux" 1786429668.01362 8328 1b1a2e4db34e0c9982a9f980fc7332fe "pdflatex"
+  "main.bbl" 1786427270.16477 4378 679052c54a815e6ed0a3688451e8f556 "bibtex main"
+  "main.out" 1786429668.01462 3758 cec5f7993c40ef73f6168e91032f2d01 "pdflatex"
   "main.tex" 1786348270.39718 1657 ada8055e9adc712d6dff1f8a100c5937 ""
   "sections/0_abstract.tex" 1786348270.39718 2069 fd2d2a25d3cf41aea55cb3c2e1479932 ""
-  "sections/1_intro.tex" 1786416605.23398 8194 1926e9620aa81d6b8c27dccf25ae4c1d ""
+  "sections/1_intro.tex" 1786429662.27396 8051 f3e67376541286bf2a803bd92fe8a176 ""
   "sections/2_related.tex" 1786348270.39724 3866 687496b8c0500c901f834d109f0d8b5d ""
   "sections/3_task.tex" 1786348270.39724 3647 08e4e92a8e5eeb7444fd779b14a179e0 ""
   "sections/4_method.tex" 1786348270.39724 7579 4650c216ce8eb89cc65ba050541d421b ""
   "sections/5_offline.tex" 1786348270.39724 10569 25d5f71da6a6612abe373cc4dc546e26 ""
-  "sections/6_robot.tex" 1786348270.39724 4879 ad874a342d0e97053f91b3f209e82d0d ""
+  "sections/6_robot.tex" 1786427283.67905 7436 9a13b2e4938d956e6ca296d13b679000 ""
   "sections/7_discussion.tex" 1786348270.39724 3730 21866ed0b4a839edd6b5c6e54ea0a299 ""
   "sections/8_conclusion.tex" 1786348270.39724 1276 f738a7caadc90e3e68931a5f150296b6 ""
   (generated)
