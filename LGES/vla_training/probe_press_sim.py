@@ -46,6 +46,9 @@ def main():
     ap.add_argument("--film-pi05", action="store_true",
                     help="pi0.5 FiLM checkpoint: patch via film_contact_pi05 (suffix-only, "
                          "quantile-normalized state) instead of film_contact")
+    ap.add_argument("--film-pi0", action="store_true",
+                    help="π0 FiLM checkpoint: patch via film_contact_pi0 (MEAN_STD state; "
+                         "FILM_INJECT must be state|action)")
     ap.add_argument("--stiffness", type=float, default=1.0,
                     help="contact stiffness k (N per mm of penetration)")
     ap.add_argument("--f-base", type=float, default=6.8,
@@ -69,8 +72,8 @@ def main():
                     help="[fzdelta] fz jump (N) at first touch (measured ~3.65-2.0)")
     args = ap.parse_args()
 
-    if args.naive and args.film_pi05:
-        ap.error("--naive and --film-pi05 are mutually exclusive")
+    if sum((args.naive, args.film_pi05, args.film_pi0)) > 1:
+        ap.error("--naive, --film-pi05 and --film-pi0 are mutually exclusive")
     if not args.naive:
         cond = tuple(c.strip() for c in
                      os.environ.get("FILM_COND", "contact").split(",") if c.strip())
@@ -92,6 +95,27 @@ def main():
                 fmag_tau=float(os.environ.get("FILM_FMAG_TAU", "5")),
                 dfmag_tau=float(os.environ.get("FILM_DFMAG_TAU", "5")),
                 mask_force=mask_force)
+        elif args.film_pi0:
+            # π0: MEAN_STD state — film_contact's loaders apply verbatim; inject picks the
+            # TOKEN (state|action), both inside embed_suffix.
+            import film_contact_pi0 as fc0
+            inject = os.environ.get("FILM_INJECT", "state")
+            print(f"[sim] FiLM-pi0 cond={cond} inject={inject} mask_force={mask_force}  "
+                  f"ckpt={args.checkpoint}")
+            wm, ws = film_contact.load_wrench_stats(args.dataset_root)
+            sm, ss = film_contact.load_seal_stats(args.dataset_root)
+            dm, dsd = film_contact.load_dfmag_stats(args.dataset_root)
+            fc0.apply(
+                "v2", wm, ws, seal_mean=sm, seal_std=ss, cond=cond,
+                contact_F0=float(os.environ.get("FILM_F0", "6")),
+                contact_tau=float(os.environ.get("FILM_TAU", "4")),
+                fz_tau=float(os.environ.get("FILM_FZ_TAU", "5")),
+                fz_off=float(os.environ.get("FILM_FZ_OFF", "2.6")),
+                fmag_off=float(os.environ.get("FILM_FMAG_OFF", "5.1")),
+                fmag_tau=float(os.environ.get("FILM_FMAG_TAU", "5")),
+                dfmag_mean=dm, dfmag_std=dsd,
+                dfmag_tau=float(os.environ.get("FILM_DFMAG_TAU", "5")),
+                inject=inject, mask_force=mask_force)
         else:
             print(f"[sim] FiLM cond={cond} inject={inject} mask_force={mask_force}  "
                   f"ckpt={args.checkpoint}")

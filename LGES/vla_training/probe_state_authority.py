@@ -73,6 +73,14 @@ def _forced_cond_pi05(model, state_norm):
 
 fcp._cond_from_state = _forced_cond_pi05
 
+# π0 (film_contact_pi0) imported film_contact._condition_from_state into its OWN namespace
+# at module load, so the film_contact rebind above doesn't reach it — the same silent-no-op
+# trap as pi05. Rebind the pi0 module attribute too; π0 state is MEAN_STD-normalized like
+# SmolVLA's, so film_contact's forced fn is signature-compatible as-is.
+import film_contact_pi0 as fc0  # noqa: E402
+
+fc0._condition_from_state = _forced_cond
+
 
 def c_from_raw(model, raw_state: torch.Tensor) -> torch.Tensor:
     """c-hat (1, cond_dim) from a RAW (un-normalized) state vector, via the model's own
@@ -130,6 +138,10 @@ def main():
                          "(suffix-only, quantile-normalized state) instead of film_contact. "
                          "Its numbers are NOT comparable to the SmolVLA recal runs (prefix, "
                          "4 channels) — read them only as sign/shape reproduction.")
+    ap.add_argument("--film-pi0", action="store_true",
+                    help="the checkpoint is a π0 FiLM run: patch via film_contact_pi0 "
+                         "(MEAN_STD state like SmolVLA; FILM_INJECT must be state|action — "
+                         "the token-level injection probe)")
     ap.add_argument("--swap", choices=("both", "wrench", "seal", "onset", "firstcontact",
                                        "fcscale", "bias"),
                     default="both",
@@ -156,8 +168,8 @@ def main():
     args = ap.parse_args()
 
     naive = args.naive
-    if naive and args.film_pi05:
-        ap.error("--naive and --film-pi05 are mutually exclusive")
+    if sum((naive, args.film_pi05, args.film_pi0)) > 1:
+        ap.error("--naive, --film-pi05 and --film-pi0 are mutually exclusive")
     if not naive:
         cond = tuple(c.strip() for c in
                      os.environ.get("FILM_COND", "contact").split(",") if c.strip())
@@ -183,6 +195,26 @@ def main():
                 fmag_tau=float(os.environ.get("FILM_FMAG_TAU", "5")),
                 dfmag_tau=float(os.environ.get("FILM_DFMAG_TAU", "5")),
                 mask_force=mask_force)
+        elif args.film_pi0:
+            # π0: MEAN_STD state, so film_contact's stat loaders apply verbatim; inject
+            # picks the TOKEN (state|action), both inside embed_suffix.
+            inject = os.environ.get("FILM_INJECT", "state")
+            print(f"[probe] FiLM-pi0 cond={cond} inject={inject} mask_force={mask_force}  "
+                  f"ckpt={args.checkpoint}")
+            wm, ws = film_contact.load_wrench_stats(stats_root)
+            sm, ss = film_contact.load_seal_stats(stats_root)
+            dm, dsd = film_contact.load_dfmag_stats(stats_root)
+            fc0.apply(
+                "v2", wm, ws, seal_mean=sm, seal_std=ss, cond=cond,
+                contact_F0=float(os.environ.get("FILM_F0", "6")),
+                contact_tau=float(os.environ.get("FILM_TAU", "4")),
+                fz_tau=float(os.environ.get("FILM_FZ_TAU", "5")),
+                fz_off=float(os.environ.get("FILM_FZ_OFF", "2.6")),
+                fmag_off=float(os.environ.get("FILM_FMAG_OFF", "5.1")),
+                fmag_tau=float(os.environ.get("FILM_FMAG_TAU", "5")),
+                dfmag_mean=dm, dfmag_std=dsd,
+                dfmag_tau=float(os.environ.get("FILM_DFMAG_TAU", "5")),
+                inject=inject, mask_force=mask_force)
         else:
             print(f"[probe] FiLM cond={cond} inject={inject} mask_force={mask_force}  "
                   f"ckpt={args.checkpoint}")

@@ -37,6 +37,11 @@ def main():
     if not ckpts:
         sys.exit(f"no checkpoints under {args.run}")
 
+    from lerobot.configs.policies import PreTrainedConfig
+    from lerobot.datasets.lerobot_dataset import LeRobotDataset
+    from lerobot.policies.factory import get_policy_class, make_pre_post_processors  # registers policy config choices
+    ptype = PreTrainedConfig.from_pretrained(ckpts[-1] / "pretrained_model").type
+
     # FiLM: patch iff the checkpoint carries contact_film weights
     from safetensors import safe_open
     with safe_open(ckpts[-1] / "pretrained_model" / "model.safetensors", framework="pt") as f:
@@ -47,8 +52,8 @@ def main():
         wm, ws = film_contact.load_wrench_stats(args.val_root)
         sm, ss = film_contact.load_seal_stats(args.val_root)
         dm, dsd = film_contact.load_dfmag_stats(args.val_root)
-        film_contact.apply(
-            "v2", wm, ws, seal_mean=sm, seal_std=ss, cond=cond,
+        film_kw = dict(
+            seal_mean=sm, seal_std=ss, cond=cond,
             contact_F0=float(os.environ.get("FILM_F0", "6")),
             contact_tau=float(os.environ.get("FILM_TAU", "4")),
             fz_tau=float(os.environ.get("FILM_FZ_TAU", "5")),
@@ -56,15 +61,20 @@ def main():
             fmag_off=float(os.environ.get("FILM_FMAG_OFF", "5.1")),
             fmag_tau=float(os.environ.get("FILM_FMAG_TAU", "5")),
             dfmag_tau=float(os.environ.get("FILM_DFMAG_TAU", "5")),
-            mask_force=os.environ.get("FILM_MASK_FORCE", "1") not in ("0", "false", "False"),
-            inject=os.environ.get("FILM_INJECT", "prefix"))
-        print(f"[best] FiLM patched: cond={cond}")
+            mask_force=os.environ.get("FILM_MASK_FORCE", "1") not in ("0", "false", "False"))
+        if ptype == "pi0":
+            # pi0 film ckpts need film_contact_pi0's patched __init__ BEFORE from_pretrained,
+            # else contact_film weights are dropped as unexpected keys and the val loss is
+            # computed on an unmasked naive backbone (that's what happened for pi05 0729).
+            import film_contact_pi0
+            film_contact_pi0.apply("v2", wm, ws, dfmag_mean=dm, dfmag_std=dsd,
+                                   inject=os.environ.get("FILM_INJECT", "state"), **film_kw)
+        else:
+            film_contact.apply("v2", wm, ws,
+                               inject=os.environ.get("FILM_INJECT", "prefix"), **film_kw)
+        print(f"[best] FiLM patched ({ptype}): cond={cond}")
 
-    from lerobot.configs.policies import PreTrainedConfig
-    from lerobot.datasets.lerobot_dataset import LeRobotDataset
-    from lerobot.policies.factory import get_policy_class, make_pre_post_processors
-    ptype = PreTrainedConfig.from_pretrained(ckpts[-1] / "pretrained_model").type
-    if ptype == "pi05":
+    if ptype in ("pi0", "pi05"):
         import train_pi05  # noqa: F401  registers the relative_actions_processor shim
     PolicyCls = get_policy_class(ptype)
     print(f"[best] policy type: {ptype}")

@@ -44,6 +44,9 @@ def main():
     ap.add_argument("--film-pi05", action="store_true",
                     help="the FiLM checkpoint is pi0.5: patch via film_contact_pi05 "
                          "(suffix-only, quantile-normalized state). Implies --film.")
+    ap.add_argument("--film-pi0", action="store_true",
+                    help="the FiLM checkpoint is π0: patch via film_contact_pi0 (MEAN_STD "
+                         "state; FILM_INJECT must be state|action). Implies --film.")
     ap.add_argument("--stats-root", type=Path, default=None,
                     help="dataset whose stats feed c-hat (default: --val-root); set to the "
                          "TRAINING dataset to match training exactly")
@@ -61,7 +64,9 @@ def main():
     except ValueError:
         pass  # newer lerobot ships relative_actions_processor natively — shim collides
 
-    if args.film or args.film_pi05:
+    if args.film_pi05 and args.film_pi0:
+        ap.error("--film-pi05 and --film-pi0 are mutually exclusive")
+    if args.film or args.film_pi05 or args.film_pi0:
         import os
         import film_contact
         mask_force = os.environ.get("FILM_MASK_FORCE", "1") not in ("0", "false", "False")
@@ -84,6 +89,20 @@ def main():
                       dfmag_tau=float(os.environ.get("FILM_DFMAG_TAU", "5")),
                       mask_force=mask_force)
             inject = "suffix"
+        elif args.film_pi0:
+            # π0: MEAN_STD state — film_contact's loaders apply verbatim; inject picks the
+            # TOKEN (state|action), both inside embed_suffix.
+            import film_contact_pi0 as fc0
+            inject = os.environ.get("FILM_INJECT", "state")
+            wm, ws = film_contact.load_wrench_stats(stats_root)
+            sm, ss = film_contact.load_seal_stats(stats_root)
+            dm, dsd = film_contact.load_dfmag_stats(stats_root)
+            fc0.apply("v2", wm, ws, seal_mean=sm, seal_std=ss, cond=cond,
+                      contact_F0=f0, contact_tau=tau, fz_tau=fz_tau, fz_off=fz_off,
+                      fmag_off=fmag_off, fmag_tau=fmag_tau,
+                      dfmag_mean=dm, dfmag_std=dsd,
+                      dfmag_tau=float(os.environ.get("FILM_DFMAG_TAU", "5")),
+                      inject=inject, mask_force=mask_force)
         else:
             wm, ws = film_contact.load_wrench_stats(stats_root)
             sm, ss = film_contact.load_seal_stats(stats_root)
@@ -94,7 +113,7 @@ def main():
                                dfmag_mean=dm, dfmag_std=dsd,
                                dfmag_tau=float(os.environ.get("FILM_DFMAG_TAU", "5")),
                                fmag_off=fmag_off, fmag_tau=fmag_tau)
-        print(f"[eval] FiLM ENABLED{'-pi0.5' if args.film_pi05 else ''} "
+        print(f"[eval] FiLM ENABLED{'-pi0.5' if args.film_pi05 else '-pi0' if args.film_pi0 else ''} "
               f"(cond={cond} inject={inject} mask_force={mask_force} "
               f"F0={f0:.0f} tau={tau:.0f} fz_tau={fz_tau:.0f} fz_off={fz_off:g} "
               f"fmag={fmag_off:g}/{fmag_tau:g} stats={stats_root})")

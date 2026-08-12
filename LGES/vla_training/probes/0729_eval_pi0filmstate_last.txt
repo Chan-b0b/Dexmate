@@ -1,0 +1,25 @@
+WARNING:root:Vision embedding key might need handling: model.paligemma_with_expert.paligemma.model.vision_tower.vision_model.embeddings.patch_embedding.bias
+WARNING:root:Vision embedding key might need handling: model.paligemma_with_expert.paligemma.model.vision_tower.vision_model.embeddings.patch_embedding.weight
+checkpoint: /home/maverick/Dexmate/LGES/vla_training/outputs/pi0_film_frombase_state_0729/checkpoints/last
+[eval] FiLM ENABLED-pi0 (cond=('contact', 'fz', 'seal') inject=state mask_force=True F0=6 tau=4 fz_tau=5 fz_off=2.1 fmag=5.1/5 stats=/home/maverick/Dexmate/LGES/vla_training/datasets/lges_case_pick_0729_val)
+The PI0 model is a direct port of the OpenPI implementation. 
+This implementation follows the original OpenPI structure for compatibility. 
+Original implementation: https://github.com/Physical-Intelligence/openpi
+Loading model from: /home/maverick/Dexmate/LGES/vla_training/outputs/pi0_film_frombase_state_0729/checkpoints/last/pretrained_model
+✓ Loaded state dict from model.safetensors
+All keys loaded successfully!
+val: 6 episodes, 1169 frames
+
+task                                        pos(mm)  rot(mrad)  suction
+pick up the case with the suction cup          0.71       1.48    99.7%
+------------------------------------------------------------------------
+OVERALL mean |err| per step                    0.71       1.48    99.7%
+
+per-dimension mean |err|:
+  dx       0.00054
+  dy       0.00059
+  dz       0.00100
+  drx      0.00110
+  dry      0.00188
+  drz      0.00146
+  suction  0.01297
