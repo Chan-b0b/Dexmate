@@ -19,14 +19,14 @@ that it correctly \emph{predicted which mechanism could not work}.
 
 \textbf{Grounding is not free.}
 Transplanting the instrument naively fails, and the failure is diagnostic. Attaching the same
-conditioning to $\pi_{0.5}$ via suffix injection with uncalibrated offsets produces the
+conditioning to $\pi_{0.5}$ via action-expert injection with uncalibrated offsets produces the
 ungrounded-control signature at scale: zero authority at every dose---including with the contact
 channel forced to saturation---and closed-loop penetration \emph{worse} than the raw $\pi_{0.5}$
 baseline ($0/6$, max $94$--$102$\,mm vs.\ $86$\,mm), at unchanged imitation error. The mask
 removes the raw route; if \chat{} fails to ground, what remains is a policy with genuinely no
 force pathway. A bottleneck plus counterfactual data is necessary but not sufficient: injection
-site and calibration must be re-engineered per architecture (consistent with prefix $>$ suffix
-and the calibration sensitivity observed within SmolVLA). \decide{keep this paragraph's
+site and calibration must be re-engineered per architecture (consistent with the calibration
+sensitivity observed within SmolVLA). \decide{keep this paragraph's
 numeric detail vs.\ compress to two sentences --- page budget}
 
 \textbf{Operational asymmetry.}

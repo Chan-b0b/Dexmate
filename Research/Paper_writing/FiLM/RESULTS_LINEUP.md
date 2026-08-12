@@ -3,6 +3,15 @@
 전면 재작성(prescription-led)용 결과 인벤토리. 수치 출처는 EVIDENCE.md 해당 절.
 **로컬 데이터 > 구 EVIDENCE 집계** (08-11 사용자 확정, EVIDENCE §3 로봇 롤아웃 08-11 블록 참조).
 
+## 보고 정책 (08-11 사용자 확정)
+- **best-only**: 모든 표·수치는 val-loss 선택(best) 체크포인트만. last 행 전부 삭제.
+  균일 규칙임을 §V 서두에 선언 ("one uniform selection rule").
+- last가 하던 방어 2건은 §V remark 두 문장으로 대체: ① 어느 naive ckpt도 65% 상쇄를
+  못 넘고, 늦은 ckpt는 오픈루프 반응↑·폐루프 악화 ② grounded 단조 형태는 학습 후반까지 유지.
+- 로봇 9/9 배포 체크포인트 = **val-best** (사용자 확인 08-11) — 오프라인 best-only와 정합.
+- intro의 "fades or saturates, never strengthening into a stop" 표현은 유지 (naive-last 인지
+  하의 정직 표현).
+
 ## 모델 명명 (paper-wide)
 - **naive policy** = 구 "baseline" (full wrench in state)
 - **conditioned policy** = grounded bottleneck (computed ĉ + zero-init FiLM + wrench mask)
@@ -10,14 +19,17 @@
 
 ## A. §V Offline (통계 본진 — held-out val 6 eps)
 
-### A1. Bypass matrix (Table I) — 원 캘리브레이션 4모델 (07-29 학습)
-| 모델 | val loss | authority (best/last) | contact-moment |
+### A1. Bypass matrix (Table I) — 원 캘리브레이션 (07-29 학습), best-only
+| 모델 | val loss | authority | contact-moment |
 |---|---|---|---|
-| naive | 0.15087 | — | — |
-| prefix, wrench 유지 (mask0) | 0.15075 | 7/8% | 3/4% |
-| prefix, mask1 | **0.14624** | **76/54%** | 7/8% |
-| suffix, mask1 | 0.15924 | 60/42% | 10/1% |
-핵심: ① mask0 loss = naive와 소수 4째 자리 동일, 권한 7% (bypass) ② loss 순위 ↮ 권한 순위 ③ prefix > suffix ④ val-best > last.
+| naive VLA (full wrench) | 0.15087 | — | — |
+| FiLM, wrench kept | 0.15075 | 7% | 3% |
+| FiLM, wrench masked | **0.14624** | **76%** | 7% |
+핵심: ① wrench-kept loss = naive와 소수 4째 자리 동일, 권한 7% (bypass) ② mask = 재라우팅
+비용 0 (loss 최저 + 권한 76%).
+**⚠ 08-12 suffix 전면 제거 (사용자)**: suffix 행·"site matters" 관찰·§VII "prefix>suffix"
+근거 모두 삭제. 유일한 흔적 = §IV-B 각주 반 줄 ("action-expert 주입은 개발 중 일관되게 낮은
+authority — 미채택"). π0.5 실험의 주입점 서술은 "action-expert injection"으로 표기.
 
 ### A2. Ablation 표 (Table II) — fromnaive(recal) 계열, 동일 naive-init (§3.5–3.6)
 | 모델 (force 접근) | dose 8→12N | transplant pc_fc | press-sim (seal-never) | val err |
@@ -43,10 +55,19 @@
 ## B. §VI Robot
 
 ### B1. Closed-loop picks — **원 캘리브레이션 prefix_mask1** (07-30, 로컬 canonical)
-| 모델 | 결과 | peak_contact_n |
+| 모델 | 결과 | peak force (interaction window, 08-11 확정) |
 |---|---|---|
 | naive (L5, 3런) | 0/3 전부 외부 abort (자가 정지 0회) | 15.41 / 17.8 / 18.7 (censored 하한) |
-| conditioned (L1/L3/L5 각 3런) | **9/9 자가 정지 + seal** | 2.84–14.54 (median 4.32, 7/9 ≤ 5.36; 상위 10.16·14.54) |
+| conditioned (L1/L3/L5 각 3런) | **9/9 자가 정지 + seal** | **0.88–14.54, median 2.50 (7/9 ≤ 3.1)**; 상위 10.16·14.54는 진짜 압축 press (fz −11) |
+
+- **train set 높이 = L1, L5만** (08-11 사용자 확인). **L3는 학습에 없던 robustness 평가
+  높이** → §VI "3/3 at an intermediate height absent from the demonstrations" 절의 근거.
+  §III demo 문단의 "two different stack heights"와 정합 (val contact z 이봉: 0.762/0.817).
+
+- **metric**: lift 전(interaction window) |F|−baseline max — meta의 전 구간 max는 carry 하중
+  혼입으로 폐기 (EVIDENCE 08-11 metric 블록). 본문 표현은 "median 2.5 N, 7/9 ≤ 3 N" 권장
+  (low end 0.9 N은 드리프트 ~1 N 규모라 range 강조 금지).
+- 두 런은 측정 가능한 압축 없이 seal (min fz > 0) — gentleness 서술 재료.
 - FiLM 활동 (성공런): |γ| +48%, |β| +79% at contact/seal vs descent.
 - naive는 L5 단일 높이만 평가 (validity note).
 - **NEW Fig**: per-trial force 궤적/strip (states.jsonl 15Hz, 전 런 로컬 보유). 14.54 런 숨기지 않음 — 한계 직전 자가 정지 = brake 증거.

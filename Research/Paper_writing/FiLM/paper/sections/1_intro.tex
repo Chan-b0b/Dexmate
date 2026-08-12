@@ -17,7 +17,8 @@ Behavior-cloned vision-language-action (VLA) policies are rapidly acquiring phys
 signals. Wrist force/torque, contact events, and task-state bits now routinely appear in the
 observation vector, and a growing line of work fuses force into the policy backbone for
 contact-rich manipulation~\cite{forcevla,phaforce,forceflow,filic}. All of this work shares a
-validation recipe---add the signal, retrain, report task success---and none of it measures
+validation recipe---add the signal, retrain, and validate by task success (occasionally
+alongside rollout force statistics~\cite{phaforce,forceflow})---and none of it measures
 whether the trained policy \emph{causally uses} the signal when it matters: whether, holding
 everything else fixed, changing the force input changes the action. Imitation learning offers no
 such guarantee. The objective asks the policy to reproduce \emph{what} the expert did, not
@@ -33,9 +34,9 @@ by a few millimeters---the entire success margin---are visually near-indistingui
 head-camera range. The wrench is in the state the policy receives, and every demonstration
 exhibits the stop. Yet a naively fine-tuned VLA---full wrench in its state, hereafter the
 \emph{naive policy}---presses through contact in every evaluation trial and never initiates a
-stop of its own: each run ends only when an external safety layer, separate
-from the policy, trips at its $15$\,N force limit ($15.4$--$18.7$\,N measured at abort)---the
-policy still commanding descent. The task turns on a single transition---stop when force
+stop of its own: each run ends only when an external safety layer, separate from the policy,
+trips at its $15$\,N force limit---set to protect the battery cells the cases carry
+($15.4$--$18.7$\,N measured at abort)---the policy still commanding descent. The task turns on a single transition---stop when force
 rises---and it is precisely this transition that the policy fails to bind to force.
 
 This failure leaves no trace in training. A policy that binds its actions to force and a policy
@@ -46,8 +47,8 @@ that routes around it can reach the same validation loss---in our experiments, e
 signal directly measurable.
 
 Our prescription does both. A condition vector \chat{} (contact, normal force, seal) is
-\emph{computed} from signals the naive policy already receives and injected through zero-initialized
-FiLM modulation~\cite{perez2018film}, and the raw wrench is masked from the state, so \chat{}
+\emph{computed} from signals the naive policy already receives and injected through FiLM
+modulation~\cite{perez2018film}, and the raw wrench is masked from the state, so \chat{}
 becomes the \emph{only} pathway from force to action---no route around. We call this design a
 \emph{grounded bottleneck}---a bottleneck because \chat{} is the sole route from force to
 action, grounded because its content is computed from measured signals---and the policy trained
@@ -65,40 +66,41 @@ The resulting policy is not uniformly better---it is different exactly where the
 decided. In a matched comparison---same data, same initialization, imitation error
 indistinguishable---the naive policy \emph{does} respond to force at the demonstrated
 magnitudes, as strongly as the conditioned policy or more so. But its response is a
-\emph{template}: strongest near what the demonstrations felt, fading as force rises past them.
-The conditioned policy's response instead grows with force, to the point of stopping and
+\emph{template}: sized to the demonstrated forces, it fades or saturates as force rises past
+them, never strengthening into a stop. The conditioned policy's response instead grows with
+force, to the point of stopping and
 backing away at forces beyond anything in the training data (Sec.~\ref{sec:offline}). The
 mechanism carries to the real closed loop: while the naive policy drives contact force past the
 $15$\,N safety limit on every attempt, the conditioned policy stops on its own in every
-pick---across three stack heights, at a median contact force of $4.3$\,N---and live
+pick---across three stack heights, at a median contact force of $2.5$\,N---and live
 counterfactual probes reproduce the offline crossover on the physical system
 (Sec.~\ref{sec:robot}).
 
 Our contributions:
 \begin{itemize}
-\item \textbf{A recipe for making a VLA use force when it matters.} Force-decorrelated
-  press-retreat demonstrations plus a grounded conditioning bottleneck (computed \chat{},
-  zero-initialized FiLM, raw-wrench mask) turn the same demonstrations into a force-monotone
-  brake instead of a fading template---on the robot, stopping under the $15$\,N abort limit in
-  every pick (median contact force $4.3$\,N) on a transition the naive policy fails uniformly
+\item \textbf{From force runaway to force regulation, with the same demonstrations.} A
+  grounded FiLM bottleneck---\chat{} computed from signals the policy already receives,
+  injected through FiLM, the raw wrench masked---turns the same press-retreat
+  demonstrations into a policy that brakes monotonically with force instead of reproducing a
+  saturating template: on the robot it stops under the $15$\,N abort limit in every pick
+  (median contact force $2.5$\,N) on a transition the naive policy fails uniformly
   (Sec.~\ref{sec:method},~\ref{sec:robot}).
 \item \textbf{An instrument for causal authority.} The bottleneck is measurable by construction:
   a counterfactual probe battery---condition forcing, state transplants with pathway
   decomposition, dose-response sweeps, closed-loop press simulation, and on-robot
   frozen-observation counterfactuals---quantifies moment-resolved causal use and transfers to
   the real system (Sec.~\ref{sec:method-probes}).
-\item \textbf{Findings standard validation cannot produce.} \emph{Bypass}: with the raw signal
-  available, the conditioning pathway trains causally dead at indistinguishable validation
-  loss---replicated in two independent model pairs---so no quantity in the standard stack
-  detects whether force is used. A controlled ablation (same data, same initialization, only
-  the force routing varied) shows the mask and the grounding are each necessary and the
-  injection site matters, and dissociates the roles: the data's
-  correlation structure decides \emph{whether} a signal is used; the conditioning design decides
-  the \emph{form} its use takes under extrapolation. The failure class persists unchanged at
-  $3.6$B scale (Sec.~\ref{sec:offline}).
+\item \textbf{Robustness beyond the demonstrations.} The conditioned policy's stop is bound to
+  force itself, not to force's correlates---under intervention, its response runs entirely
+  through the conditioning pathway---and this buys robustness on the two axes we test: braking
+  grows monotonically at forces beyond anything demonstrated, stopping and retreating where
+  the naive policy's template saturates and presses through, and picks succeed $3/3$ at a
+  stack height absent from the demonstrations. The failure class the recipe corrects persists
+  unchanged at $3.6$B scale (Sec.~\ref{sec:offline},~\ref{sec:robot}).
 \end{itemize}
 
 \noindent In one sentence: \emph{a policy that stops when it feels what the demonstrations felt
 and a policy that stops harder the harder it is pressed are indistinguishable in loss and
 similar at the demonstrated forces---they differ exactly where the task is decided, and only
-force-decorrelated data behind a grounded, masked FiLM bottleneck yields the second.}
+demonstrations in which force alone predicts the stop, behind a grounded, masked FiLM
+bottleneck, yield the second.}

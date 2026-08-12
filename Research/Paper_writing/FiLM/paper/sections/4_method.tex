@@ -5,20 +5,35 @@
 %   "press simulation"       = closed-loop probe_press_sim
 %   "live counterfactual probe" = on-robot frozen-obs
 % Authority = % of mean commanded descent cancelled by the intervention.
+% 08-11 수정: 용어 naive policy 통일; 각주 = 인스턴스 공시 전담 (RESULTS_LINEUP D 가드레일 ②);
+% 서두를 prescription 프레임에 연결 ("recipe의 구조 절반이 instrument를 겸한다").
 \section{An Instrument for Causal Authority}
 \label{sec:method}
 
-Our instrument has two halves: a conditioning pathway constructed so that interventions on it are
-meaningful (\ref{sec:method-chat}--\ref{sec:method-mask}), and a battery of counterfactual probes
-that perform the interventions (\ref{sec:method-probes}). Throughout, the design goal is
+The architectural half of our recipe doubles as an instrument. It has two parts: a conditioning
+pathway constructed so that interventions on it are meaningful
+(\ref{sec:method-chat}--\ref{sec:method-mask}), and a battery of counterfactual probes that
+perform the interventions (\ref{sec:method-probes}). Throughout, the design goal is
 \emph{measurement validity}, not architectural novelty: every component exists to make one number
 well-defined---how much does the condition causally move the action?
 
+\begin{figure}[t]
+\centering
+\includegraphics[width=\linewidth]{figs/architecture}
+% 08-12 사용자 결정: mask는 그림에 미표기 — wrench가 state에 아예 없는 것으로 묘사
+% (기능적으로 동등; mask 메커니즘은 §IV-C 본문이 설명).
+\caption{The conditioned policy. The raw wrench does not enter the policy state; force reaches
+the action only as the computed condition vector \chat{}, injected through FiLM modulation of
+the state token entering the VLM backbone. Because this pathway is explicit and unique, forcing
+\chat{} at inference measures the causal authority of the condition.}
+\label{fig:arch}
+\end{figure}
+
 \subsection{Computed condition vector \chat{}}
 \label{sec:method-chat}
-From the wrench $F$ and seal bit already present in the state we compute a small set of
-task-critical conditions---the physical cues a human operator references (``if you feel contact,
-stop; if the seal is on, lift''):
+From the wrench $F$ and seal bit already present in the naive policy's state we compute a small
+set of task-critical conditions---the physical cues a human operator references (``if you feel
+contact, stop; if the seal is on, lift''):
 \begin{align}
 \chat_{\mathrm{contact}} &= \mathrm{clip}\!\left(\left(\Fmag - F_0\right)/\tau,\ 0,\ 1\right),\nonumber\\
 \chat_{\mathrm{fmag}} &= \left(\Fmag - F_0\right)/\tau_m \quad\text{(unsaturated)},\nonumber\\
@@ -28,34 +43,34 @@ stop; if the seal is on, lift''):
 \end{align}
 with offsets and scales calibrated to the measured force statistics of the demonstrations (e.g.,
 $F_0$ at the contact-onset magnitude).\footnote{Calibration quality matters and is itself a
-finding: the four-model matrix of Sec.~\ref{sec:offline-bypass} uses an earlier, coarser
-calibration; the matched quintuple of Sec.~\ref{sec:offline-quintuple} uses offsets re-estimated
-from the measured contact distribution plus the unsaturated $\chat_{\mathrm{fmag}}$ channel. An
-uncalibrated transplant onto a different architecture fails outright
-(Sec.~\ref{sec:discussion}).} Two properties are essential. \emph{Computed, not learned:} \chat{}
-is a fixed function of observed signals, so it cannot itself be bypassed during training the way
-a learned condition head could. \emph{Zero new information:} every channel is a deterministic
-function of state dimensions the baseline also receives, so conditioning changes
+finding. The conditioned policies in this paper are separately trained instances of the same
+design: the bypass matrix (Sec.~\ref{sec:offline-bypass}) and the robot picks
+(Sec.~\ref{sec:robot}) use an earlier calibration; the recipe ablation
+(Sec.~\ref{sec:offline-quintuple}) and the live counterfactuals (Sec.~\ref{sec:robot-live}) use
+offsets re-estimated from the measured contact distribution plus the unsaturated
+$\chat_{\mathrm{fmag}}$ channel. An uncalibrated transplant onto a different architecture fails
+outright (Sec.~\ref{sec:discussion}).} Two properties are essential. \emph{Computed, not
+learned:} \chat{} is a fixed function of observed signals, so its physical meaning cannot drift
+during training---which is what makes forcing \chat{} at inference a well-defined intervention
+rather than a perturbation of an arbitrary latent. \emph{Zero new information:} every channel is a deterministic
+function of state dimensions the naive policy also receives, so conditioning changes
 \emph{routing}, never \emph{content}---the ``it works because it got extra sensing'' objection is
 excluded by construction. The channels are deliberately plural: keeping contact, force magnitude,
 and seal separate is what later lets the probes attribute authority to specific signals
 (Sec.~\ref{sec:offline-posthoc}).
 
-\subsection{Zero-initialized FiLM injection}
-\chat{} enters the policy through FiLM modulation~\cite{perez2018film}, with the modulation
-initialized to identity so that training starts from the unconditioned policy. We instantiate two
-injection points in SmolVLA: \emph{prefix} (modulating the state token entering the VLM backbone)
-and \emph{suffix} (modulating the action-expert input). The comparison is not incidental---the
-two sites differ consistently in the authority they acquire (Sec.~\ref{sec:offline-bypass}).
-
-\subsection{The force-mask bottleneck}
+\subsection{FiLM injection and the force-mask bottleneck}
 \label{sec:method-mask}
+\chat{} enters the policy through FiLM modulation~\cite{perez2018film}, with the modulation
+initialized to identity so that training starts from the unconditioned policy; the injection
+point is the state token entering the VLM backbone.\footnote{Injecting at the action-expert
+input instead acquired consistently less authority in development; we do not pursue it here.}
 With \chat{} injected but the raw wrench still present in the state, the policy has two routes to
 force. Masking the wrench dimensions from the state closes the raw route, making \chat{} the
 \emph{only} pathway from force to action. The mask is the instrument's validity device: under it,
 forcing \chat{} intervenes on the totality of the policy's force access, so measured authority is
 a property of the policy's force use, not of one redundant pathway among several. It also
-strictly \emph{reduces} the conditioned model's information relative to the baseline. The
+strictly \emph{reduces} the conditioned policy's information relative to the naive policy. The
 unmasked configuration is retained as a control---and turns out to demonstrate bypass
 (Sec.~\ref{sec:offline-bypass}).
 
@@ -74,7 +89,7 @@ forcing}). Applicable to conditioned models only.
 
 \textbf{(P2) State transplant (open loop).} The force-bearing dimensions of a \emph{measured}
 first-contact state are transplanted into pre-contact descent frames of held-out episodes. This
-probe applies to any policy, including the baseline, and supports a pathway decomposition: apply
+probe applies to any policy, including the naive policy, and supports a pathway decomposition: apply
 the transplant to the raw state only ($d_{\mathrm{raw}}$), to the \chat{} computation only
 ($d_{\mathrm{FiLM}}$), or to both (total), attributing the response to the raw route versus the
 conditioning route. \todo{verify exact transplanted dims (wrench+seal vs full state) in
@@ -97,7 +112,8 @@ separating force-driven stopping from seal-event-driven stopping.
 
 \textbf{(P5) Live counterfactual probe.} The full loop contains physics no offline probe
 reproduces. On the robot, we freeze observations at staged poses along the approach and apply
-(P1)--(P3) interventions to \emph{two} policies---the conditioned model and the baseline---on
+(P1)--(P3) interventions to \emph{two} policies---the conditioned policy and the naive
+policy---on
 identical frozen observations, so both receive the same physical counterfactual. Two operational
 details matter for validity: force/torque baseline drift is re-anchored at a pre-descent hover
 pose before probing (drift of up to ${\sim}1$\,N within a day was measured, pose-sensitive), and

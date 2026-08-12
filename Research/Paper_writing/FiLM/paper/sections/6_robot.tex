@@ -20,13 +20,14 @@ limit. The robot experiments test these predictions, and the outcome variable is
 
 \begin{figure}[t]
 \centering
-% \includegraphics[width=\linewidth]{figs/robot_force_traces}
-\todo{generate per-trial contact-force figure from rollout states.jsonl (RESULTS\_LINEUP B1)}
-\caption{Contact force per trial on the robot. Every naive-policy attempt (three trials) rises
-monotonically until the external $15$\,N abort terminates the run at $15.4$--$18.7$\,N---the
-policy never initiates a stop, so these peaks are lower bounds. Every conditioned-policy pick
-(nine trials, three per stack height) stops on its own and seals, at peak contact forces of
-$2.8$--$14.5$\,N (median $4.3$\,N).}
+\includegraphics[width=\linewidth]{figs/robot_force_traces}
+\caption{Contact force on the robot: one representative trial per policy, aligned at peak
+force ($t{=}0$), over the interaction window (before lift, where carrying the case would
+re-enter payload weight into the measured force). The naive attempt rises through the
+demonstrated range and is terminated by the external $15$\,N abort ($\times$; all three naive
+attempts end this way, at $15.4$--$18.7$\,N), while the conditioned pick presses to
+$2.5$\,N---the median of its nine picks across three stack heights, one of them absent from
+the demonstrations---and stops on its own.}
 \label{fig:forcetraces}
 \end{figure}
 
@@ -34,12 +35,15 @@ The predictions hold (Fig.~\ref{fig:forcetraces}). Under the naive policy every 
 the same way: contact, continued descent, and an external force-limit abort at
 $15.4$--$18.7$\,N---the closed-loop realization of a response that saturates below full
 cancellation. The conditioned policy stops itself in \emph{every} pick, across three stack
-heights whose differences are visually near-indistinguishable, sealing and lifting at peak
-contact forces of $2.8$--$14.5$\,N (median $4.3$\,N; seven of nine below $5.4$\,N). The two
-force distributions do not overlap, and the task outcomes are their threshold readout: $0/3$
-versus $9/9$. The two hardest-pressing picks ($10.2$ and $14.5$\,N) are the brake visible near
-its limit---both stopped short of the abort threshold and completed the pick where the naive
-policy, at the same forces, was still commanding descent.
+heights: $3/3$ at the naive policy's own height, and $3/3$ at an intermediate height absent
+from the demonstrations, which contain only the other two. Peak force, measured over the \emph{interaction window} (descent
+through retreat, before lifting re-enters payload weight into the wrench; the abort monitors
+the same quantity), stays at or below $3.1$\,N in seven of the nine picks (median $2.5$\,N;
+two picks sealed with no measurable compression at all). The two force distributions do not
+overlap, and the task outcomes are their threshold readout: $0/3$ versus $9/9$. The two harder
+presses ($10.2$ and $14.5$\,N) are the brake visible near its limit---both stopped short of
+the abort threshold and completed the pick where the naive policy, at the same forces, was
+still commanding descent.
 
 The stopping runs through the bottleneck. The deployed policy's own dose-response is monotone:
 transplanted wrenches at $8/10/12$\,N cancel $3\%\rightarrow7\%\rightarrow13\%$ of committed

@@ -1,24 +1,36 @@
 % §II Related Work (~0.75 page). 4 clusters per OUTLINE §5-II. Differentiation via 토론 1
 % (3-layer claim discipline: their evidence doesn't establish causal use; ours is an existence
 % proof of bypass; falsifiable prediction, not accusation).
+% 08-11 reviewer-proofing (reference/ANALYSIS.md 전수조사 기반): near-miss 구분 추가 —
+% TA-VLA(노이즈는 baseline 토큰, HSIC는 상관), Tactile-VLA(dose-response는 language 입력),
+% ForceFlow(마스킹은 vision 입력), ForceSight(개입은 출력 force goal, readout은 SR).
+% hedge "rollout force statistics" §I과 미러링. FuSe/FM-VLA = 분야가 인지하고도 SR로만 검증한 사례.
 \section{Related Work}
 \label{sec:related}
 
 \textbf{Force- and tactile-conditioned VLA policies.}
 ForceVLA fuses wrist force as dedicated tokens through a mixture-of-experts
-backbone~\cite{forcevla}; PhaForce schedules policy phases on contact and force
+backbone~\cite{forcevla}; TA-VLA injects torque adapters into the action
+decoder~\cite{tavla}; PhaForce schedules policy phases on contact and force
 signals~\cite{phaforce}; ForceFlow~\cite{forceflow}, FARM~\cite{farm}, and
 FILIC~\cite{filic} condition diffusion or impedance-loop policies on force and tactile
 input; TacForeSight learns force-conditioned tactile prediction~\cite{tacforesight}.
 These works \emph{design for} force use and validate it with task success and retraining
-ablations. Neither measurement establishes causal use at the decision moment: an ablation
-compares two differently-trained functions, and success can be carried by correlates of force
-rather than force itself. We do not claim these systems bypass their force inputs---their tasks
+ablations, sometimes alongside rollout force statistics~\cite{phaforce,forceflow}. None of
+these measurements establishes causal use at the decision moment: an ablation compares two
+differently-trained functions, rollout statistics are observational, and success can be
+carried by correlates of force rather than force itself. The nearest analyses stop short of
+the force input: TA-VLA perturbs input tokens of its \emph{baseline} to site the adapters and
+reports correlational representation similarity~\cite{tavla}; Tactile-VLA's dose-response
+intervenes on the \emph{instruction}, not the force stream~\cite{tactilevla}; ForceFlow masks
+its trained policy's \emph{visual} input and reads out task success~\cite{forceflow}.
+We do not claim these systems bypass their force inputs---their tasks
 may contain force information that vision cannot substitute, leaving no shortcut to take.
 Our claim is narrower and falsifiable: \emph{when} the demonstrations correlate the condition
 with cheaper cues, a policy with a dedicated force pathway can train to indistinguishable loss
 while routing around that pathway (we exhibit exactly this with our unmasked control), and no
-metric in the standard validation stack detects it. We contribute the missing measurement.
+metric in the standard validation stack detects it. We contribute the missing measurement: an
+inference-time intervention on the trained policy's force input, with the action as the readout.
 
 \textbf{Intermediate condition representations.}
 Injecting a compact, task-level representation between observation and action is a recurring
@@ -35,6 +47,10 @@ IL~\cite{dehaan2019causal}, copycat behavior on observation histories~\cite{wen2
 and shortcut learning in deep networks broadly~\cite{geirhos2020shortcut,hermann2023foundations}.
 Recent work documents shortcuts in generalist robot policies~\cite{shortcutgeneralist} and uses
 targeted interventions to expose or correct them~\cite{interventionil2025,interventionil2023}.
+The symptoms are on record in force-conditioned policies themselves: FuSe observes fine-tuned
+generalists ignoring newly added sensors~\cite{fuse}, and FM-VLA diagnoses a history-length
+shortcut in its own force stream and patches it with augmentation---verifying the fix, again,
+only by task success~\cite{fmvla}.
 We instantiate this literature where it has not been applied---force conditioning in fine-tuned
 VLAs---and add two elements: a quantitative demonstration that \emph{training loss carries zero
 signal} about which input the policy is bound to (equal to the fourth decimal in two independent
@@ -45,7 +61,10 @@ its use takes under extrapolation.
 \textbf{Privileged supervision and interventional evaluation.}
 Privileged-teacher distillation~\cite{chen2020lbc,privilegedaction} assumes access to a signal
 worth distilling; our probes answer the prior question of whether the deployed policy uses the
-signal at all. Our press-retreat prescription is a data-side intervention in the spirit of
+signal at all. The closest interventional precedent is ForceSight, which ablates predicted
+force \emph{goals} at its controller under matched initial conditions~\cite{forcesight}; the
+intervention sits on the output side of a model that takes no force input, and reads out
+end-of-episode success rather than the action. Our press-retreat prescription is a data-side intervention in the spirit of
 decorrelation fixes for causal confusion~\cite{dehaan2019causal}, but designed from a physical
 argument (Sec.~\ref{sec:discussion}) that reactive gating is arithmetically insufficient on
 stiff contact, so the demonstrations must teach anticipatory approach and retreat.

@@ -82,11 +82,26 @@ abs 계열 probe는 INCONCLUSIVE(committed-descent 프레임 부재).
 #### ⚠ 08-11 재검증 — 위 표를 대체 (사용자 확정: 로컬 데이터 > 위 집계)
 로컬 `vla/rollouts/` meta.json 전수 재검(08-11). 사용자 확인: "전부 실제 성공런이었다."
 
-| 모델 | 성공 | peak_contact_n |
+| 모델 | 성공 | peak (interaction window) |
 |---|---|---|
 | naive (L5만, 3런) | **0/3** 전부 force-limit abort | 15.41 / 17.8 / 18.7 |
-| film prefix_mask1 (L1/L3/L5 각 3런) | **9/9** 전부 자가 정지 후 seal | 2.84–14.54 (median 4.32; 7/9 ≤ 5.36; 상위 10.16, 14.54) |
+| film prefix_mask1 (L1/L3/L5 각 3런) | **9/9** 전부 자가 정지 후 seal | **0.88–14.54, median 2.50** (7/9 ≤ 3.12) |
 
+**⚠ 08-11 metric 확정 (사용자)**: 공식 peak = **interaction window** (하강~press~retreat,
+lift 시작 전 = EE z가 최저점+20mm를 마지막으로 벗어나기 전) 내 |F|−baseline 최대.
+- 이유: meta `peak_contact_n`(전 구간 max)은 gentle 런들에서 **seal 후 carry 하중**(fz>0
+  인장)을 잡음 — L1 run1은 press 1.5N인데 meta 4.83N(z 0.830, 표면+7cm). abort가 감시하는
+  양과 동일 층위라 15N 선과 비교 일관, naive는 lift 없어 불변.
+- 층별 interaction peak: L1 = 2.13/10.16/3.12* → 창 재계산 [2.13, 10.16, 3.12],
+  L3 = [1.36, 2.50, 2.85], L5 = [2.50, 0.88, 14.54]. (*스크립트 `scripts/make_force_traces.py`
+  및 재계산 로그 08-11)
+- 두 hard 런(10.16/14.54)은 min fz −11.3/−10.7 = 진짜 압축 press. 두 런(L1 run1, L5 r04)은
+  min fz > 0 = **측정 가능한 압축 없이 seal**.
+- 14.54 런의 |F| 피크 프레임은 fz +3.9·횡력 지배 (표면 높이, pre-seal) — "누른 힘" 성분
+  주의. 압축만으로는 max −fz ≈ 10.7.
+
+- 사용자 확인(08-11): 로컬 9런 전부 **val-best 체크포인트** 배포 — 논문 best-only 보고
+  정책과 정합.
 - 구 집계(5/7, 성공런 2.5–4.8 N)와 14:34 val-best 런(28.1 N)은 로컬에 부재 → **논문 미사용**.
 - suffix 롤아웃도 로컬 부재 (1/3, 6.9/16.6/19.5는 검증 불가) → 로봇 suffix 수치 논문 제외 권장.
 - naive는 L5 단일 높이에서만 평가 — §VI validity note 필요.

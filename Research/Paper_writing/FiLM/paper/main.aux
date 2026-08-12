@@ -3,16 +3,22 @@
 \providecommand\HyField@AuxAddToFields[1]{}
 \providecommand\HyField@AuxAddToCoFields[2]{}
 \citation{forcevla,phaforce,forceflow,filic}
+\citation{phaforce,forceflow}
 \citation{dehaan2019causal,geirhos2020shortcut}
 \citation{perez2018film}
 \@writefile{toc}{\contentsline {section}{\numberline {I}Introduction}{1}{section.1}\protected@file@percent }
 \newlabel{sec:intro}{{I}{1}{Introduction}{section.1}{}}
 \citation{forcevla}
+\citation{tavla}
 \citation{phaforce}
 \citation{forceflow}
 \citation{farm}
 \citation{filic}
 \citation{tacforesight}
+\citation{phaforce,forceflow}
+\citation{tavla}
+\citation{tactilevla}
+\citation{forceflow}
 \citation{rtaffordance}
 \citation{perez2018film}
 \citation{dehaan2019causal}
@@ -20,12 +26,14 @@
 \citation{geirhos2020shortcut,hermann2023foundations}
 \citation{shortcutgeneralist}
 \citation{interventionil2025,interventionil2023}
-\citation{chen2020lbc,privilegedaction}
-\citation{dehaan2019causal}
+\citation{fuse}
+\citation{fmvla}
 \@writefile{toc}{\contentsline {section}{\numberline {II}Related Work}{2}{section.2}\protected@file@percent }
 \newlabel{sec:related}{{II}{2}{Related Work}{section.2}{}}
+\citation{chen2020lbc,privilegedaction}
+\citation{forcesight}
+\citation{dehaan2019causal}
 \citation{smolvla}
-\citation{perez2018film}
 \@writefile{toc}{\contentsline {section}{\numberline {III}Task, Setting, and the Failure}{3}{section.3}\protected@file@percent }
 \newlabel{sec:task}{{III}{3}{Task, Setting, and the Failure}{section.3}{}}
 \@writefile{toc}{\contentsline {section}{\numberline {IV}An Instrument for Causal Authority}{3}{section.4}\protected@file@percent }
@@ -33,38 +41,42 @@
 \@writefile{toc}{\contentsline {subsection}{\numberline {\mbox  {IV-A}}Computed condition vector \ensuremath  {\hat  {c}}{}}{3}{subsection.4.1}\protected@file@percent }
 \newlabel{sec:method-chat}{{\mbox  {IV-A}}{3}{Computed condition vector \chat {}}{subsection.4.1}{}}
 \newlabel{eq:chat}{{1}{3}{Computed condition vector \chat {}}{equation.4.1}{}}
-\@writefile{toc}{\contentsline {subsection}{\numberline {\mbox  {IV-B}}Zero-initialized FiLM injection}{3}{subsection.4.2}\protected@file@percent }
-\@writefile{toc}{\contentsline {subsection}{\numberline {\mbox  {IV-C}}The force-mask bottleneck}{3}{subsection.4.3}\protected@file@percent }
-\newlabel{sec:method-mask}{{\mbox  {IV-C}}{3}{The force-mask bottleneck}{subsection.4.3}{}}
-\@writefile{toc}{\contentsline {subsection}{\numberline {\mbox  {IV-D}}Counterfactual probe battery}{4}{subsection.4.4}\protected@file@percent }
-\newlabel{sec:method-probes}{{\mbox  {IV-D}}{4}{Counterfactual probe battery}{subsection.4.4}{}}
-\@writefile{lot}{\contentsline {table}{\numberline {I}{\ignorespaces Bypass matrix: validation loss vs.\ causal authority (val-best / last checkpoints). Full forcing = P1 all-channel; contact-moment = P1 calibrated onset pattern.}}{4}{table.1}\protected@file@percent }
-\newlabel{tab:bypass}{{I}{4}{Bypass matrix: validation loss vs.\ causal authority (val-best / last checkpoints). Full forcing = P1 all-channel; contact-moment = P1 calibrated onset pattern}{table.1}{}}
-\@writefile{toc}{\contentsline {section}{\numberline {V}Experiments}{4}{section.5}\protected@file@percent }
-\newlabel{sec:offline}{{V}{4}{Experiments}{section.5}{}}
-\@writefile{toc}{\contentsline {subsection}{\numberline {\mbox  {V-A}}Bypass: standard validation cannot see causal use}{4}{subsection.5.1}\protected@file@percent }
-\newlabel{sec:offline-bypass}{{\mbox  {V-A}}{4}{Bypass: standard validation cannot see causal use}{subsection.5.1}{}}
-\@writefile{toc}{\contentsline {subsection}{\numberline {\mbox  {V-B}}Where authority binds: stable states, not the transient}{4}{subsection.5.2}\protected@file@percent }
-\newlabel{sec:offline-posthoc}{{\mbox  {V-B}}{4}{Where authority binds: stable states, not the transient}{subsection.5.2}{}}
+\citation{perez2018film}
+\@writefile{lof}{\contentsline {figure}{\numberline {1}{\ignorespaces The conditioned policy. The raw wrench does not enter the policy state; force reaches the action only as the computed condition vector \ensuremath  {\hat  {c}}{}, injected through FiLM modulation of the state token entering the VLM backbone. Because this pathway is explicit and unique, forcing \ensuremath  {\hat  {c}}{} at inference measures the causal authority of the condition.}}{4}{figure.1}\protected@file@percent }
+\newlabel{fig:arch}{{1}{4}{The conditioned policy. The raw wrench does not enter the policy state; force reaches the action only as the computed condition vector \chat {}, injected through FiLM modulation of the state token entering the VLM backbone. Because this pathway is explicit and unique, forcing \chat {} at inference measures the causal authority of the condition}{figure.1}{}}
+\@writefile{toc}{\contentsline {subsection}{\numberline {\mbox  {IV-B}}FiLM injection and the force-mask bottleneck}{4}{subsection.4.2}\protected@file@percent }
+\newlabel{sec:method-mask}{{\mbox  {IV-B}}{4}{FiLM injection and the force-mask bottleneck}{subsection.4.2}{}}
+\@writefile{toc}{\contentsline {subsection}{\numberline {\mbox  {IV-C}}Counterfactual probe battery}{4}{subsection.4.3}\protected@file@percent }
+\newlabel{sec:method-probes}{{\mbox  {IV-C}}{4}{Counterfactual probe battery}{subsection.4.3}{}}
+\@writefile{lot}{\contentsline {table}{\numberline {I}{\ignorespaces Bypass matrix: validation loss vs.\ causal authority. Full forcing = P1 all-channel; contact-moment = P1 calibrated onset pattern.}}{5}{table.1}\protected@file@percent }
+\newlabel{tab:bypass}{{I}{5}{Bypass matrix: validation loss vs.\ causal authority. Full forcing = P1 all-channel; contact-moment = P1 calibrated onset pattern}{table.1}{}}
+\@writefile{toc}{\contentsline {section}{\numberline {V}Experiments}{5}{section.5}\protected@file@percent }
+\newlabel{sec:offline}{{V}{5}{Experiments}{section.5}{}}
+\@writefile{toc}{\contentsline {subsection}{\numberline {\mbox  {V-A}}Bypass: standard validation cannot see causal use}{5}{subsection.5.1}\protected@file@percent }
+\newlabel{sec:offline-bypass}{{\mbox  {V-A}}{5}{Bypass: standard validation cannot see causal use}{subsection.5.1}{}}
+\@writefile{toc}{\contentsline {subsection}{\numberline {\mbox  {V-B}}Where authority binds: stable states, not the transient}{5}{subsection.5.2}\protected@file@percent }
+\newlabel{sec:offline-posthoc}{{\mbox  {V-B}}{5}{Where authority binds: stable states, not the transient}{subsection.5.2}{}}
+\@writefile{lof}{\contentsline {figure}{\numberline {2}{\ignorespaces Dose-response under forced wrench magnitude (P3). The naive policy's response fades past the demonstrated range; the unmasked variant lies on top of it (all response through the raw route); the ungrounded bottleneck is flat at zero; only the grounded bottleneck grows with dose, crossing full cancellation into commanded retreat at $12$\,N.}}{5}{figure.2}\protected@file@percent }
+\newlabel{fig:doseresponse}{{2}{5}{Dose-response under forced wrench magnitude (P3). The naive policy's response fades past the demonstrated range; the unmasked variant lies on top of it (all response through the raw route); the ungrounded bottleneck is flat at zero; only the grounded bottleneck grows with dose, crossing full cancellation into commanded retreat at $12$\,N}{figure.2}{}}
+\@writefile{toc}{\contentsline {subsection}{\numberline {\mbox  {V-C}}Ablating the recipe: each ingredient is necessary}{5}{subsection.5.3}\protected@file@percent }
+\newlabel{sec:offline-quintuple}{{\mbox  {V-C}}{5}{Ablating the recipe: each ingredient is necessary}{subsection.5.3}{}}
 \citation{pi05}
-\@writefile{toc}{\contentsline {subsection}{\numberline {\mbox  {V-C}}The matched quintuple: architecture determines the form of force use}{5}{subsection.5.3}\protected@file@percent }
-\newlabel{sec:offline-quintuple}{{\mbox  {V-C}}{5}{The matched quintuple: architecture determines the form of force use}{subsection.5.3}{}}
-\@writefile{toc}{\contentsline {subsection}{\numberline {\mbox  {V-D}}Scale does not change the class}{5}{subsection.5.4}\protected@file@percent }
-\newlabel{sec:offline-pi05}{{\mbox  {V-D}}{5}{Scale does not change the class}{subsection.5.4}{}}
-\@writefile{toc}{\contentsline {subsection}{\numberline {\mbox  {V-E}}Robot validation: closed-loop picks}{5}{subsection.5.5}\protected@file@percent }
-\newlabel{sec:robot}{{\mbox  {V-E}}{5}{Robot validation: closed-loop picks}{subsection.5.5}{}}
-\@writefile{lot}{\contentsline {table}{\numberline {II}{\ignorespaces Matched quintuple: same data, same initialization, indistinguishable imitation---three mechanisms. Dose-response = P3 cancellation at 8\,N$\rightarrow $12\,N (\% of own descent). Press sim = P4 seal-never: episodes stopped before force limit / max penetration.}}{6}{table.2}\protected@file@percent }
-\newlabel{tab:quintuple}{{II}{6}{Matched quintuple: same data, same initialization, indistinguishable imitation---three mechanisms. Dose-response = P3 cancellation at 8\,N$\rightarrow $12\,N (\% of own descent). Press sim = P4 seal-never: episodes stopped before force limit / max penetration}{table.2}{}}
-\@writefile{lof}{\contentsline {figure}{\numberline {1}{\ignorespaces Contact force per trial on the robot. Every naive-policy attempt (three trials) rises monotonically until the external $15$\,N abort terminates the run at $15.4$--$18.7$\,N---the policy never initiates a stop, so these peaks are lower bounds. Every conditioned-policy pick (nine trials, three per stack height) stops on its own and seals, at peak contact forces of $2.8$--$14.5$\,N (median $4.3$\,N).}}{6}{figure.1}\protected@file@percent }
-\newlabel{fig:forcetraces}{{1}{6}{Contact force per trial on the robot. Every naive-policy attempt (three trials) rises monotonically until the external $15$\,N abort terminates the run at $15.4$--$18.7$\,N---the policy never initiates a stop, so these peaks are lower bounds. Every conditioned-policy pick (nine trials, three per stack height) stops on its own and seals, at peak contact forces of $2.8$--$14.5$\,N (median $4.3$\,N)}{figure.1}{}}
-\@writefile{lof}{\contentsline {figure}{\numberline {2}{\ignorespaces On-robot counterfactuals (P5), naive vs.\ recalibrated conditioned policy on identical frozen observations. Left: at demonstration-level doses the naive response is equal or larger. Right: raising the dose to $+6/+9/+12$\,N reverses the ordering between $6$ and $9$\,N---the offline crossover, reproduced on the physical system.}}{6}{figure.2}\protected@file@percent }
-\newlabel{fig:live}{{2}{6}{On-robot counterfactuals (P5), naive vs.\ recalibrated conditioned policy on identical frozen observations. Left: at demonstration-level doses the naive response is equal or larger. Right: raising the dose to $+6/+9/+12$\,N reverses the ordering between $6$ and $9$\,N---the offline crossover, reproduced on the physical system}{figure.2}{}}
-\@writefile{toc}{\contentsline {subsection}{\numberline {\mbox  {V-F}}Robot validation: on-robot counterfactuals}{6}{subsection.5.6}\protected@file@percent }
-\newlabel{sec:robot-live}{{\mbox  {V-F}}{6}{Robot validation: on-robot counterfactuals}{subsection.5.6}{}}
-\@writefile{toc}{\contentsline {section}{\numberline {VI}Discussion and Limitations}{6}{section.6}\protected@file@percent }
-\newlabel{sec:discussion}{{VI}{6}{Discussion and Limitations}{section.6}{}}
+\@writefile{lot}{\contentsline {table}{\numberline {II}{\ignorespaces Recipe ablation: same data, same initialization, indistinguishable imitation---three mechanisms. Dose-response = P3 cancellation at 8\,N$\rightarrow $12\,N (\% of own descent). Press sim = P4 seal-never: episodes stopped before force limit / max penetration.}}{6}{table.2}\protected@file@percent }
+\newlabel{tab:quintuple}{{II}{6}{Recipe ablation: same data, same initialization, indistinguishable imitation---three mechanisms. Dose-response = P3 cancellation at 8\,N$\rightarrow $12\,N (\% of own descent). Press sim = P4 seal-never: episodes stopped before force limit / max penetration}{table.2}{}}
+\@writefile{toc}{\contentsline {subsection}{\numberline {\mbox  {V-D}}Scale does not change the class}{6}{subsection.5.4}\protected@file@percent }
+\newlabel{sec:offline-pi05}{{\mbox  {V-D}}{6}{Scale does not change the class}{subsection.5.4}{}}
+\@writefile{toc}{\contentsline {subsection}{\numberline {\mbox  {V-E}}Robot validation: closed-loop picks}{6}{subsection.5.5}\protected@file@percent }
+\newlabel{sec:robot}{{\mbox  {V-E}}{6}{Robot validation: closed-loop picks}{subsection.5.5}{}}
+\@writefile{lof}{\contentsline {figure}{\numberline {3}{\ignorespaces Contact force on the robot: one representative trial per policy, aligned at peak force ($t{=}0$), over the interaction window (before lift, where carrying the case would re-enter payload weight into the measured force). The naive attempt rises through the demonstrated range and is terminated by the external $15$\,N abort ($\times $; all three naive attempts end this way, at $15.4$--$18.7$\,N), while the conditioned pick presses to $2.5$\,N---the median of its nine picks across three stack heights, one of them absent from the demonstrations---and stops on its own.}}{6}{figure.3}\protected@file@percent }
+\newlabel{fig:forcetraces}{{3}{6}{Contact force on the robot: one representative trial per policy, aligned at peak force ($t{=}0$), over the interaction window (before lift, where carrying the case would re-enter payload weight into the measured force). The naive attempt rises through the demonstrated range and is terminated by the external $15$\,N abort ($\times $; all three naive attempts end this way, at $15.4$--$18.7$\,N), while the conditioned pick presses to $2.5$\,N---the median of its nine picks across three stack heights, one of them absent from the demonstrations---and stops on its own}{figure.3}{}}
 \citation{ross2011dagger,chen2020lbc}
 \citation{forcevla,forceflow}
+\@writefile{lof}{\contentsline {figure}{\numberline {4}{\ignorespaces On-robot counterfactuals (P5), naive vs.\ recalibrated conditioned policy on identical frozen observations. Left: at demonstration-level doses the naive response is equal or larger. Right: raising the dose to $+6/+9/+12$\,N reverses the ordering between $6$ and $9$\,N---the offline crossover, reproduced on the physical system.}}{7}{figure.4}\protected@file@percent }
+\newlabel{fig:live}{{4}{7}{On-robot counterfactuals (P5), naive vs.\ recalibrated conditioned policy on identical frozen observations. Left: at demonstration-level doses the naive response is equal or larger. Right: raising the dose to $+6/+9/+12$\,N reverses the ordering between $6$ and $9$\,N---the offline crossover, reproduced on the physical system}{figure.4}{}}
+\@writefile{toc}{\contentsline {subsection}{\numberline {\mbox  {V-F}}Robot validation: on-robot counterfactuals}{7}{subsection.5.6}\protected@file@percent }
+\newlabel{sec:robot-live}{{\mbox  {V-F}}{7}{Robot validation: on-robot counterfactuals}{subsection.5.6}{}}
+\@writefile{toc}{\contentsline {section}{\numberline {VI}Discussion and Limitations}{7}{section.6}\protected@file@percent }
+\newlabel{sec:discussion}{{VI}{7}{Discussion and Limitations}{section.6}{}}
 \bibstyle{IEEEtran}
 \bibdata{refs}
 \bibcite{forcevla}{1}
@@ -74,20 +86,25 @@
 \bibcite{dehaan2019causal}{5}
 \bibcite{geirhos2020shortcut}{6}
 \bibcite{perez2018film}{7}
-\bibcite{farm}{8}
-\bibcite{tacforesight}{9}
-\bibcite{rtaffordance}{10}
-\bibcite{wen2020copycat}{11}
-\bibcite{hermann2023foundations}{12}
-\bibcite{shortcutgeneralist}{13}
-\bibcite{interventionil2025}{14}
-\bibcite{interventionil2023}{15}
-\bibcite{chen2020lbc}{16}
-\bibcite{privilegedaction}{17}
-\bibcite{smolvla}{18}
-\bibcite{pi05}{19}
-\bibcite{ross2011dagger}{20}
-\@writefile{toc}{\contentsline {section}{\numberline {VII}Conclusion}{7}{section.7}\protected@file@percent }
-\newlabel{sec:conclusion}{{VII}{7}{Conclusion}{section.7}{}}
-\@writefile{toc}{\contentsline {section}{References}{7}{section*.1}\protected@file@percent }
-\gdef \@abspage@last{7}
+\bibcite{tavla}{8}
+\bibcite{farm}{9}
+\bibcite{tacforesight}{10}
+\bibcite{tactilevla}{11}
+\bibcite{rtaffordance}{12}
+\bibcite{wen2020copycat}{13}
+\bibcite{hermann2023foundations}{14}
+\bibcite{shortcutgeneralist}{15}
+\bibcite{interventionil2025}{16}
+\bibcite{interventionil2023}{17}
+\bibcite{fuse}{18}
+\bibcite{fmvla}{19}
+\bibcite{chen2020lbc}{20}
+\bibcite{privilegedaction}{21}
+\bibcite{forcesight}{22}
+\bibcite{smolvla}{23}
+\bibcite{pi05}{24}
+\bibcite{ross2011dagger}{25}
+\@writefile{toc}{\contentsline {section}{\numberline {VII}Conclusion}{8}{section.7}\protected@file@percent }
+\newlabel{sec:conclusion}{{VII}{8}{Conclusion}{section.7}{}}
+\@writefile{toc}{\contentsline {section}{References}{8}{section*.1}\protected@file@percent }
+\gdef \@abspage@last{8}

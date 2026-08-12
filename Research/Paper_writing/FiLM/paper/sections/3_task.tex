@@ -1,21 +1,25 @@
 % §III Task and the Failure (~0.75 page, Fig. 2). 0729-pure per Q2: no June depletion sweep /
-% gate-oracle in body. Failure = naive 0/3 overpress (EVIDENCE §3 rollouts). The policy is
-% phenomenologically described here; mechanism diagnosis deferred to §V (probes).
-% NOTE anonymity: platform/task described generically; no robot brand, no company, no HF repos.
+% gate-oracle in body. Failure = naive 0/3 overpress (canonical: EVIDENCE §3 08-11 블록). The
+% policy is phenomenologically described here; mechanism diagnosis deferred to §V (probes).
+% 08-11 수정: 용어 naive policy로 통일; abort는 external-layer/censored 서술 (§I과 정합);
+% 성공 카운트 미표기 ("every evaluation trial"). 로봇 명시 08-11 사용자 결정: Dexmate Vega-1p
+% (하드웨어 벤더 명시는 double-anonymous 허용 관행; 필요시 camera-ready 전 재검토).
 \section{Task, Setting, and the Failure}
 \label{sec:task}
 
 \textbf{Task and platform.}
-We study suction case picking on a dual-arm mobile manipulator: the arm descends onto a stack of
-rigid cases, must stop when the suction cup meets the top case, hold until vacuum seal is
-confirmed, and lift (Fig.~\ref{fig:setup}). The margin is tight in both directions---too little
-press and the seal fails; a few millimeters too much and contact force climbs past the $15$\,N
-safety limit, since the stack is stiff (${\sim}5$\,N/mm, Sec.~\ref{sec:discussion}). The policy
-controls a 7-D end-effector action (Cartesian pose increments and a suction command) at
-$15$\,Hz, executed in chunks of $5$ actions (${\sim}330$\,ms between observations).
-\todo{verify action-space wording (7-D split) against deployment config}
+We study suction case picking on a Dexmate Vega-1p, a dual-arm mobile manipulator: the arm
+descends onto a stack of rigid cases, must stop when the suction cup meets the top case, hold
+until vacuum seal is confirmed, and lift (Fig.~\ref{fig:setup}). The cases carry battery
+cells, which tolerate little compression---over-pressing risks the product, not just the
+pick---so deployment enforces a $15$\,N contact-force limit. The margin is tight in both
+directions: too little press and the seal fails; a few millimeters too much and contact force
+climbs past the limit, since the stack is stiff (${\sim}5$\,N/mm, Sec.~\ref{sec:discussion}). The policy
+controls a 7-D end-effector action ($3$-D position and $3$-D rotation increments plus a
+suction command) at $15$\,Hz, executed in chunks of $5$ actions (${\sim}330$\,ms between
+observations).
 
-\textbf{Observations and their asymmetry.}
+\textbf{Observations.}
 The policy observes a single head-mounted camera (RGB and colorized depth; no wrist camera) and a
 15-D state: end-effector position and quaternion, suction command, vacuum-seal bit, and the 6-D
 wrist wrench. The setting is a deliberately clean diagnostic: at head-camera range, case-stack
@@ -29,18 +33,20 @@ We collect $100$ training episodes ($19{,}445$ frames) and hold out $6$ validati
 ($1{,}169$ frames) with a scripted expert designed to \emph{decorrelate} force from its habitual
 correlates: each episode descends with suction on, presses to a randomized force target drawn
 from $[8,15]$\,N, retreats $5$--$10$\,mm from the contact plane, then hovers and lifts
-immediately on seal. Every episode thus demonstrates the counterfactual the task requires:
+immediately on seal. Episodes are collected at two different stack heights, so the contact
+plane itself moves across the dataset. Every episode thus demonstrates the counterfactual the task requires:
 force rises $\rightarrow$ stop $\rightarrow$ move back up, \emph{before} any seal event, at a
 force level that varies independently of depth. This is the data-side prescription whose
-rationale we develop in Sec.~\ref{sec:discussion}; here it matters that the baseline and all
-conditioned variants are trained on exactly these episodes.
+rationale we develop in Sec.~\ref{sec:discussion}; here it matters that the naive policy and
+all conditioned variants are trained on exactly these episodes.
 
 \textbf{The failure.}
-A SmolVLA policy~\cite{smolvla} fine-tuned on these demonstrations---receiving the full wrench
-and seal bit in its state---fails $3/3$ evaluation trials the same way: it descends, makes
-contact, and keeps pressing until the force limit aborts the run at $15.4$--$18.7$\,N. The
-transition that the demonstrations exhibit in every single episode, driven by the one signal
-that observably announces it, is the transition the policy does not perform. Success rate says
+Deployed on the robot, the naive policy---a SmolVLA~\cite{smolvla} fine-tuned on these
+demonstrations, with the full wrench and seal bit in its state---fails every evaluation trial
+the same way: it descends, makes contact, and keeps pressing---never initiating a stop of its
+own---until the external safety layer aborts the run ($15.4$--$18.7$\,N measured at abort).
+The transition that the demonstrations exhibit in every single episode, driven by the one signal
+that observably announces it, is the transition the policy does not perform. The rollout says
 the policy is bad; it does not say \emph{why}. The policy might ignore force entirely; it might
 respond to force but too weakly; it might respond in a form that collapses precisely when force
 exceeds the demonstrated range. These hypotheses have opposite prescriptions (more data?

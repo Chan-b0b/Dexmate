@@ -1,13 +1,13 @@
 # Fdb version 4
-["bibtex main"] 1786427270.11263 "main.aux" "main.bbl" "main" 1786429668.17932 0
-  "./refs.bib" 1786348270.39718 5257 408db8646151c0394f5b19a833e5b114 ""
+["bibtex main"] 1786501190.35583 "main.aux" "main.bbl" "main" 1786501190.91608 0
+  "./refs.bib" 1786435208.47356 7013 379217c5ace1c7718124728dcac8ee01 ""
   "/usr/share/texlive/texmf-dist/bibtex/bst/ieeetran/IEEEtran.bst" 1440712899 57748 7c8250ecf02814ce6ddc0cdbb63df1dd ""
-  "main.aux" 1786429668.01362 8328 1b1a2e4db34e0c9982a9f980fc7332fe "pdflatex"
+  "main.aux" 1786501190.7653 10475 dc0e40489333743e9f4161e414f8a8d8 "pdflatex"
   (generated)
   "main.bbl"
   "main.blg"
   (rewritten before read)
-["pdflatex"] 1786429667.68572 "/home/maverick/Humanoid/Dexmate/Research/Paper_writing/FiLM/paper/main.tex" "main.pdf" "main" 1786429668.17946 0
+["pdflatex"] 1786501190.41412 "/home/maverick/Humanoid/Dexmate/Research/Paper_writing/FiLM/paper/main.tex" "main.pdf" "main" 1786501190.91617 0
   "/etc/texmf/web2c/texmf.cnf" 1786408945.4201 475 c0e671620eb5563b2130f56340a5fde8 ""
   "/home/maverick/Humanoid/Dexmate/Research/Paper_writing/FiLM/paper/main.tex" 1786348270.39718 1657 ada8055e9adc712d6dff1f8a100c5937 ""
   "/usr/share/texlive/texmf-dist/fonts/enc/dvips/base/8r.enc" 1165713224 4850 80dc9bab7f31fb78a000ccfed0e27cab ""
@@ -127,18 +127,20 @@
   "/usr/share/texmf/web2c/texmf.cnf" 1707919699 40399 f2c302f7d2af602abb742093540a5834 ""
   "/var/lib/texmf/fonts/map/pdftex/updmap/pdftex.map" 1786408961.01466 5472669 54eaf61a88b6b7896ebd0dac973cb29c ""
   "/var/lib/texmf/web2c/pdftex/pdflatex.fmt" 1786409037 8212342 6b18bb3393f2a47b363d52a33258b249 ""
-  "main.aux" 1786429668.01362 8328 1b1a2e4db34e0c9982a9f980fc7332fe "pdflatex"
-  "main.bbl" 1786427270.16477 4378 679052c54a815e6ed0a3688451e8f556 "bibtex main"
-  "main.out" 1786429668.01462 3758 cec5f7993c40ef73f6168e91032f2d01 "pdflatex"
+  "figs/architecture.pdf" 1786500919.40044 26740 8de4f1d09af16c75a5846bcc4c4a24ea ""
+  "figs/robot_force_traces.pdf" 1786433617.71994 16643 122672fc22ea26c7a07f826240857ef3 ""
+  "main.aux" 1786501190.7653 10475 dc0e40489333743e9f4161e414f8a8d8 "pdflatex"
+  "main.bbl" 1786501190.41182 5510 0d0f2f2dbaa5bd0e3b40071ec7a74fdd "bibtex main"
+  "main.out" 1786501190.7653 3539 7ceb50bfb8d70a738136474ff1a3a57b "pdflatex"
   "main.tex" 1786348270.39718 1657 ada8055e9adc712d6dff1f8a100c5937 ""
-  "sections/0_abstract.tex" 1786348270.39718 2069 fd2d2a25d3cf41aea55cb3c2e1479932 ""
-  "sections/1_intro.tex" 1786429662.27396 8051 f3e67376541286bf2a803bd92fe8a176 ""
-  "sections/2_related.tex" 1786348270.39724 3866 687496b8c0500c901f834d109f0d8b5d ""
-  "sections/3_task.tex" 1786348270.39724 3647 08e4e92a8e5eeb7444fd779b14a179e0 ""
-  "sections/4_method.tex" 1786348270.39724 7579 4650c216ce8eb89cc65ba050541d421b ""
-  "sections/5_offline.tex" 1786348270.39724 10569 25d5f71da6a6612abe373cc4dc546e26 ""
-  "sections/6_robot.tex" 1786427283.67905 7436 9a13b2e4938d956e6ca296d13b679000 ""
-  "sections/7_discussion.tex" 1786348270.39724 3730 21866ed0b4a839edd6b5c6e54ea0a299 ""
+  "sections/0_abstract.tex" 1786495073.75363 2090 bea1ceff06ff70a56eebf2e140795faa ""
+  "sections/1_intro.tex" 1786496692.34603 8173 7466ea7ee6dbb13f1977fb93e4e722ec ""
+  "sections/2_related.tex" 1786435187.72273 5590 699b395e6d62dcd6a3c3f4fc5a234505 ""
+  "sections/3_task.tex" 1786499252.75065 4195 6b4185d35c2eda4f125d7810a7d0fe92 ""
+  "sections/4_method.tex" 1786501177.66341 8667 41a2e6c2683a79c7c5617b4a7c5c5377 ""
+  "sections/5_offline.tex" 1786500897.05783 10505 f4a9e6ce6cc143980404bfe067d6573f ""
+  "sections/6_robot.tex" 1786437041.53297 7783 1d4fe6491616a3cddabbb0c6f12aef20 ""
+  "sections/7_discussion.tex" 1786500901.38565 3715 09b954f296db3f70a76e08c1e8a53ace ""
   "sections/8_conclusion.tex" 1786348270.39724 1276 f738a7caadc90e3e68931a5f150296b6 ""
   (generated)
   "main.aux"
