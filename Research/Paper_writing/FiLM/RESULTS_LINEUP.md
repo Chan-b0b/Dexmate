@@ -33,10 +33,12 @@ authority"). π0.5 실험의 주입점 서술은 "action-expert injection"으로
 (구 Table I 수치 보존: naive 0.15087/— · wrench-kept 0.15075/7%/3% · masked 0.14624/76%/7%)
 
 ### A2. Ablation 표 (Table II) — fromnaive(recal) 계열, 동일 naive-init (§3.5–3.6)
-**08-12 재구성 (사용자): §V 결과 제시를 probe 순서 P1→P4로** — 표 열 순서 = P1 forcing /
-P2 transplant / P3 dose / P4 press-sim; 해석 문단 재배치 (bypass→P2, form dissociation→P3,
-grounding-not-capacity→P4); "Where authority binds" 소절 폐지, 내용은 P1(접촉-순간 7%)과
-P2(sealed 147% vs 67%, 통계적 성격) 문단으로 흡수. label sec:offline-posthoc은 P2 문단 유지.
+**08-12 재구성 (사용자, 2단계): §V 결과 제시를 probe 순서 P1→P4로 + 표/서사 분리** —
+§V-A (sec:offline-main) = naive vs conditioned 2행 표 `tab:probes`, P1→P4 bold 문단;
+§V-B "Ablating the recipe" (sec:offline-quintuple) = 컨트롤 2행 표 `tab:ablation`
+(wrench-kept/shuffled) + bypass 문단 + grounding-not-capacity 문단.
+"Where authority binds" 소절 폐지 — 내용은 P1(접촉-순간 7%)과 P2(sealed 147% vs 67%,
+통계적 성격) 문단으로 흡수. label sec:offline-posthoc은 §V-A P2 문단 유지.
 | 모델 (force 접근) | P1 forcing (committed Δdz) | dose 8→12N | transplant pc_fc | press-sim (seal-never) | val err |
 |---|---|---|---|---|---|
 | naive best@10k | — (ĉ 없음) | +1.41→+1.12 (36→28%, 감소) | +1.63 (105%) | 4–5/6, max 14.9mm | 0.84 |
@@ -47,6 +49,12 @@ P2(sealed 147% vs 67%, 통계적 성격) 문단으로 흡수. label sec:offline-
 | fromnaive v2 last@20k | (미측정) | +0.97→+3.44 | +1.45 (97%) | 6/6, max 4.1mm | 0.81 |
 - P1 출처: `0729_{fromnaive_best,mask0fn_main,v1_main}_std.txt` COMMITTED-desc Δdz. 논문 표는
   **mm만 표기** (% 금지 — P1 분모 −7.8mm/frame ≠ P2 분모 −1.7mm/frame, % 병렬은 오독 유발).
+- **08-12 표 미니멀화 (사용자)**: 셀 2줄 구성(makecell) — 응답값 / own descent(실측 분모,
+  P1: −7.8/−7.7/−8.2, P2: −1.55/−1.67/−1.52/−1.35, P3: −3.94/−3.84/−3.77/−1.35 mm/frame).
+  d_raw/d_FiLM 분해·press-sim 정지 횟수(6/6 등)·Val err 열은 표에서 제외 — 전부 본문 전담
+  (분해→P2/bypass 문단, 6/6→P4 문단, val err→서두 0.84–0.96 문장).
+  주의: shuffled의 P3 own(−1.35)은 pc_r12 파일(pre-contact 프레임) 기준 — 타 모델의 ramp
+  파일(n=245)과 프레임 집합이 다름.
   probe_film_authority.py 헤더 "(counterfactual on training data)"는 stale 하드코딩 라벨 —
   실제 에피소드 = state probe와 동일한 **val ep0** (frames 0..218, first-contact ~141) 확인 08-12.
 - loss: v2 0.14762 vs mask0fn **0.14750 (4째 자리 동일, bypass 재현)**; V1 0.17081(+16%, 정직 표기).
