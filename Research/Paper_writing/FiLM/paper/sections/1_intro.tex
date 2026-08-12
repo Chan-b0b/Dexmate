@@ -39,28 +39,30 @@ trips at its $15$\,N force limit---set to protect the battery cells the cases ca
 ($15.4$--$18.7$\,N measured at abort)---the policy still commanding descent. The task turns on a single transition---stop when force
 rises---and it is precisely this transition that the policy fails to bind to force.
 
-This failure leaves no trace in training. A policy that binds its actions to force and a policy
-that routes around it can reach the same validation loss---in our experiments, equal to the
-\emph{fourth decimal place}---so no loss value can certify a fix. We call this routing-around
-\emph{bypass} and exhibit it directly in Sec.~\ref{sec:offline}. A fix must therefore hold
-\emph{by construction}: leave the policy no route around the signal, and make its use of the
-signal directly measurable.
+Our fix changes how force is delivered, not what is delivered. A condition vector \chat{}
+(contact, normal force, seal) is \emph{computed} from signals the naive policy already receives
+and injected through FiLM modulation~\cite{perez2018film}; the raw wrench is masked from the
+state so that the same signal does not enter twice, making \chat{} the \emph{only} pathway from
+force to action. We call this pathway \emph{grounded} because its content is computed from
+measured signals, and the policy trained behind it the \emph{conditioned policy}. By
+construction it receives no information the naive policy lacks, and because the pathway is
+explicit and unique, forcing \chat{} at inference directly measures its \emph{causal
+authority}---the fraction of commanded descent the condition can cancel.
 
-Our prescription does both. A condition vector \chat{} (contact, normal force, seal) is
-\emph{computed} from signals the naive policy already receives and injected through FiLM
-modulation~\cite{perez2018film}, and the raw wrench is masked from the state, so \chat{}
-becomes the \emph{only} pathway from force to action---no route around. We call this design a
-\emph{grounded bottleneck}---a bottleneck because \chat{} is the sole route from force to
-action, grounded because its content is computed from measured signals---and the policy trained
-behind it the \emph{conditioned policy}. By construction the
-conditioned policy receives no information the naive policy lacks; the design changes routing, not
-content. And because the pathway is explicit, forcing \chat{} at inference directly measures its
-\emph{causal authority}---the fraction of commanded descent the condition can cancel. The
-demonstrations complete the recipe: each press-retreat episode presses to a randomized force
-target and retreats before any seal event, so the force at which the expert stops varies from
-episode to episode---in the data, depth, appearance, and timing no longer predict the stop;
-only the force reading does. The same interface that fixes the
-policy is the instrument that audits it (Sec.~\ref{sec:method}).
+The mask is load-bearing. Leave the raw wrench in the state and the conditioning pathway trains
+causally dead at unchanged validation loss: training routes force through the already-functional
+raw path and starves the dedicated one. We call this \emph{bypass} and exhibit it in
+Sec.~\ref{sec:offline}; it is why a fix of this kind cannot be certified after the fact, and why
+ours holds by construction. The demonstrations complete the recipe: each press-retreat episode
+presses to a randomized force target and retreats before any seal event, so the force at which
+the expert stops varies from episode to episode---in the data, depth, appearance, and timing no
+longer predict the stop; only the force reading does. The same interface that fixes the policy
+is the instrument that audits it (Sec.~\ref{sec:method}).
+\memo{open (08-12): demote ``The demonstrations complete the recipe'' to setting-the-stage
+wording, and drop the data co-attribution from the one-sentence summary at the end?
+Follow-up of the architecture-emphasis decision. Also optional: restore ``replicated in two
+independent model pairs'' somewhere in para.~3 --- it left the intro with the contributions
+rework.}
 
 The resulting policy is not uniformly better---it is different exactly where the task is
 decided. In a matched comparison---same data, same initialization, imitation error
@@ -79,13 +81,13 @@ counterfactual probes reproduce the offline crossover on the physical system
 Our contributions:
 \begin{itemize}
 \item \textbf{From force runaway to force regulation, with the same demonstrations.} A
-  grounded FiLM bottleneck---\chat{} computed from signals the policy already receives,
+  grounded FiLM pathway---\chat{} computed from signals the policy already receives,
   injected through FiLM, the raw wrench masked---turns the same press-retreat
   demonstrations into a policy that brakes monotonically with force instead of reproducing a
   saturating template: on the robot it stops under the $15$\,N abort limit in every pick
   (median contact force $2.5$\,N) on a transition the naive policy fails uniformly
   (Sec.~\ref{sec:method},~\ref{sec:robot}).
-\item \textbf{An instrument for causal authority.} The bottleneck is measurable by construction:
+\item \textbf{An instrument for causal authority.} The pathway is measurable by construction:
   a counterfactual probe battery---condition forcing, state transplants with pathway
   decomposition, dose-response sweeps, closed-loop press simulation, and on-robot
   frozen-observation counterfactuals---quantifies moment-resolved causal use and transfers to
@@ -103,4 +105,4 @@ Our contributions:
 and a policy that stops harder the harder it is pressed are indistinguishable in loss and
 similar at the demonstrated forces---they differ exactly where the task is decided, and only
 demonstrations in which force alone predicts the stop, behind a grounded, masked FiLM
-bottleneck, yield the second.}
+pathway, yield the second.}

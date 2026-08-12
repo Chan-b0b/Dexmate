@@ -44,12 +44,11 @@ contact, stop; if the seal is on, lift''):
 with offsets and scales calibrated to the measured force statistics of the demonstrations (e.g.,
 $F_0$ at the contact-onset magnitude).\footnote{Calibration quality matters and is itself a
 finding. The conditioned policies in this paper are separately trained instances of the same
-design: the bypass matrix (Sec.~\ref{sec:offline-bypass}) and the robot picks
-(Sec.~\ref{sec:robot}) use an earlier calibration; the recipe ablation
-(Sec.~\ref{sec:offline-quintuple}) and the live counterfactuals (Sec.~\ref{sec:robot-live}) use
-offsets re-estimated from the measured contact distribution plus the unsaturated
-$\chat_{\mathrm{fmag}}$ channel. An uncalibrated transplant onto a different architecture fails
-outright (Sec.~\ref{sec:discussion}).} Two properties are essential. \emph{Computed, not
+design: the robot picks (Sec.~\ref{sec:robot}) and the replication pair quoted in
+Sec.~\ref{sec:offline-quintuple} use an earlier calibration; the recipe ablation and the live
+counterfactuals (Sec.~\ref{sec:robot-live}) use offsets re-estimated from the measured contact
+distribution plus the unsaturated $\chat_{\mathrm{fmag}}$ channel. An uncalibrated transplant
+onto a different architecture fails outright (Sec.~\ref{sec:discussion}).} Two properties are essential. \emph{Computed, not
 learned:} \chat{} is a fixed function of observed signals, so its physical meaning cannot drift
 during training---which is what makes forcing \chat{} at inference a well-defined intervention
 rather than a perturbation of an arbitrary latent. \emph{Zero new information:} every channel is a deterministic
@@ -59,24 +58,25 @@ excluded by construction. The channels are deliberately plural: keeping contact,
 and seal separate is what later lets the probes attribute authority to specific signals
 (Sec.~\ref{sec:offline-posthoc}).
 
-\subsection{FiLM injection and the force-mask bottleneck}
+\subsection{FiLM injection and the force mask}
 \label{sec:method-mask}
-\chat{} enters the policy through FiLM modulation~\cite{perez2018film}, with the modulation
-initialized to identity so that training starts from the unconditioned policy; the injection
-point is the state token entering the VLM backbone.\footnote{Injecting at the action-expert
-input instead acquired consistently less authority in development; we do not pursue it here.}
-With \chat{} injected but the raw wrench still present in the state, the policy has two routes to
-force. Masking the wrench dimensions from the state closes the raw route, making \chat{} the
-\emph{only} pathway from force to action. The mask is the instrument's validity device: under it,
-forcing \chat{} intervenes on the totality of the policy's force access, so measured authority is
-a property of the policy's force use, not of one redundant pathway among several. It also
-strictly \emph{reduces} the conditioned policy's information relative to the naive policy. The
-unmasked configuration is retained as a control---and turns out to demonstrate bypass
-(Sec.~\ref{sec:offline-bypass}).
+\chat{} enters the policy through FiLM modulation~\cite{perez2018film} (initialized to
+identity), at the state token entering the VLM backbone.\footnote{Injecting at the
+action-expert input instead acquired consistently less authority in preliminary experiments.}
+The policy still receives the force information---only the structure of its delivery changes.
+Because \chat{} is computed \emph{from} the wrench, leaving the raw wrench in the state would
+hand the policy the same signal twice, once in each form; we therefore mask the wrench
+dimensions from the state (Fig.~\ref{fig:arch}). Forcing \chat{} at inference then manipulates
+\emph{all} of the force information the policy receives: if the policy responds to force at
+all, it must show in how the action changes with \chat{}---the quantity the probes below
+measure.
+\memo{revive in Sec.~VII if useful: the mask strictly \emph{reduces} the conditioned policy's
+information relative to the naive policy---and it still wins (cut from this subsection 08-12)}
 
 \subsection{Counterfactual probe battery}
 \label{sec:method-probes}
-All probes intervene on a trained, frozen policy; none involves retraining. We define
+All probes intervene on a trained, frozen policy; none involves retraining. The offline probes
+(P1--P4) run on held-out validation episodes. We define
 \textbf{authority} as the intervention-induced change in the commanded vertical action on
 committed-descent frames, expressed as a percentage of the mean commanded descent: $0\%$ means
 the intervention is ignored, $100\%$ means it fully cancels descent, ${>}100\%$ means reversal
@@ -88,11 +88,11 @@ calibrated contact-onset pattern matching measured first-contact statistics (\em
 forcing}). Applicable to conditioned models only.
 
 \textbf{(P2) State transplant (open loop).} The force-bearing dimensions of a \emph{measured}
-first-contact state are transplanted into pre-contact descent frames of held-out episodes. This
-probe applies to any policy, including the naive policy, and supports a pathway decomposition: apply
-the transplant to the raw state only ($d_{\mathrm{raw}}$), to the \chat{} computation only
-($d_{\mathrm{FiLM}}$), or to both (total), attributing the response to the raw route versus the
-conditioning route. \todo{verify exact transplanted dims (wrench+seal vs full state) in
+first-contact state are transplanted into pre-contact descent frames. This
+probe applies to any policy, including the naive policy---it is what puts both policies on the
+same scale. Routing the transplant selectively, to the \chat{} computation alone
+($d_{\mathrm{FiLM}}$) or the raw state alone ($d_{\mathrm{raw}}$), attributes the response to
+each route. \todo{verify exact transplanted dims (wrench+seal vs full state) in
 probe\_state\_authority.py before submission}
 
 \textbf{(P3) Dose-response sweep.} The transplanted wrench is rescaled to target magnitudes
@@ -103,7 +103,7 @@ memorized a contact template should respond most near the template and fade beyo
 sweep's \emph{slope sign} is the paper's central discriminator.
 
 \textbf{(P4) Closed-loop press simulation.} Open-loop probes cannot show consequences. We place
-the frozen policy in a closed loop on held-out episodes: commanded descent advances a virtual
+the frozen policy in a closed loop: commanded descent advances a virtual
 penetration depth, a linear-stiffness force model raises the simulated wrench accordingly, and
 the seal event is withheld---simulating the operationally critical misalignment scenario in
 which no press depth ever produces a seal. Outcomes: whether the policy stops before the force
@@ -114,11 +114,7 @@ separating force-driven stopping from seal-event-driven stopping.
 reproduces. On the robot, we freeze observations at staged poses along the approach and apply
 (P1)--(P3) interventions to \emph{two} policies---the conditioned policy and the naive
 policy---on
-identical frozen observations, so both receive the same physical counterfactual. Two operational
-details matter for validity: force/torque baseline drift is re-anchored at a pre-descent hover
-pose before probing (drift of up to ${\sim}1$\,N within a day was measured, pose-sensitive), and
-absolute transplant targets are shifted by the measured drift so that both models receive the
-same effective dose.
+identical frozen observations, so both receive the same physical counterfactual.
 
 \textbf{Scope.} P1--P3 are single-frame and open-loop; P4 closes the loop under a force model;
 P5 closes the gap to the real system. No single probe is decisive---the findings below rest on

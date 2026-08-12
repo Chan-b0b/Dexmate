@@ -14,32 +14,41 @@
 
 ## 모델 명명 (paper-wide)
 - **naive policy** = 구 "baseline" (full wrench in state)
-- **conditioned policy** = grounded bottleneck (computed ĉ + zero-init FiLM + wrench mask)
+- **conditioned policy** = grounded pathway 정책 (computed ĉ + FiLM + wrench mask)
+- **08-12: "bottleneck" 용어 전면 폐기** (사용자) — pathway/route로 통일, 형용사 쌍은
+  grounded/ungrounded. 설계 고유명 없음 (조어 최소화 방침).
 - ⚠ 논문에 등장하는 conditioned 모델은 **두 캘리브레이션 라운드**가 섞임 (아래 D 참조)
 
 ## A. §V Offline (통계 본진 — held-out val 6 eps)
 
-### A1. Bypass matrix (Table I) — 원 캘리브레이션 (07-29 학습), best-only
-| 모델 | val loss | authority | contact-moment |
-|---|---|---|---|
-| naive VLA (full wrench) | 0.15087 | — | — |
-| FiLM, wrench kept | 0.15075 | 7% | 3% |
-| FiLM, wrench masked | **0.14624** | **76%** | 7% |
-핵심: ① wrench-kept loss = naive와 소수 4째 자리 동일, 권한 7% (bypass) ② mask = 재라우팅
-비용 0 (loss 최저 + 권한 76%).
+### A1. ~~Bypass matrix (Table I)~~ — **08-12 삭제 (사용자, "압축")**
+Table I과 §V-A 소절 제거. bypass는 §V ablation 내 명명 문단("Bypass: the mask, not the
+module, reroutes force")으로 이동 — 메커니즘 한 문장(gradient가 raw 경로로 만족, 전용 통로
+기아) + ablation의 wrench-kept 행이 1차 증거 + **원 캘리브레이션 쌍은 재현 한 절로 압축**
+("7% vs 76% condition-forcing authority, near-identical loss"). §IV mask 동기는 bypass가
+아니라 **중복 방지**("같은 신호 두 번 방지") 프레임 (08-12 사용자).
 **⚠ 08-12 suffix 전면 제거 (사용자)**: suffix 행·"site matters" 관찰·§VII "prefix>suffix"
-근거 모두 삭제. 유일한 흔적 = §IV-B 각주 반 줄 ("action-expert 주입은 개발 중 일관되게 낮은
-authority — 미채택"). π0.5 실험의 주입점 서술은 "action-expert injection"으로 표기.
+근거 모두 삭제. 유일한 흔적 = §IV-B 각주 반 줄 ("action-expert 주입은 예비 실험에서 낮은
+authority"). π0.5 실험의 주입점 서술은 "action-expert injection"으로 표기.
+(구 Table I 수치 보존: naive 0.15087/— · wrench-kept 0.15075/7%/3% · masked 0.14624/76%/7%)
 
 ### A2. Ablation 표 (Table II) — fromnaive(recal) 계열, 동일 naive-init (§3.5–3.6)
-| 모델 (force 접근) | dose 8→12N | transplant pc_fc | press-sim (seal-never) | val err |
-|---|---|---|---|---|
-| naive best@10k | +1.41→+1.12 (36→28%, 감소) | +1.63 (105%) | 4–5/6, max 14.9mm | 0.84 |
-| naive last@50k | +1.73→+2.00 (57→65%, 완만 상승) | +1.69 (108%) | 3/6, max 16.0mm | 0.71 |
-| mask0-fromnaive (raw+죽은 ĉ) | +1.57→+1.12 (dRaw 전부) | +1.68 (dFiLM 0.04) | 4–5/6, max 11.9mm | 0.85 |
-| V1 (병목, 셔플 ĉ) | −0.06→−0.11 (0) | −0.06 (0%) | **0/6, max 431mm** | 0.96 |
-| fromnaive v2 best (접지 병목) | +1.20→**+4.40 (115%)** | +1.57 (94%, 전부 dFiLM) | **6/6, max 4.5mm** | 0.87 |
-| fromnaive v2 last@20k | +0.97→+3.44 | +1.45 (97%) | 6/6, max 4.1mm | 0.81 |
+**08-12 재구성 (사용자): §V 결과 제시를 probe 순서 P1→P4로** — 표 열 순서 = P1 forcing /
+P2 transplant / P3 dose / P4 press-sim; 해석 문단 재배치 (bypass→P2, form dissociation→P3,
+grounding-not-capacity→P4); "Where authority binds" 소절 폐지, 내용은 P1(접촉-순간 7%)과
+P2(sealed 147% vs 67%, 통계적 성격) 문단으로 흡수. label sec:offline-posthoc은 P2 문단 유지.
+| 모델 (force 접근) | P1 forcing (committed Δdz) | dose 8→12N | transplant pc_fc | press-sim (seal-never) | val err |
+|---|---|---|---|---|---|
+| naive best@10k | — (ĉ 없음) | +1.41→+1.12 (36→28%, 감소) | +1.63 (105%) | 4–5/6, max 14.9mm | 0.84 |
+| naive last@50k | — | +1.73→+2.00 (57→65%, 완만 상승) | +1.69 (108%) | 3/6, max 16.0mm | 0.71 |
+| mask0-fromnaive (raw+죽은 ĉ) | 0.0mm (Tier1 FAIL) | +1.57→+1.12 (dRaw 전부) | +1.68 (dFiLM 0.04) | 4–5/6, max 11.9mm | 0.85 |
+| V1 (병목, 셔플 ĉ) | −0.2mm (wrong sign) | −0.06→−0.11 (0) | −0.06 (0%) | **0/6, max 431mm** | 0.96 |
+| fromnaive v2 best (접지 병목) | **+0.9mm** (12% of committed) | +1.20→**+4.40 (115%)** | +1.57 (94%, 전부 dFiLM) | **6/6, max 4.5mm** | 0.87 |
+| fromnaive v2 last@20k | (미측정) | +0.97→+3.44 | +1.45 (97%) | 6/6, max 4.1mm | 0.81 |
+- P1 출처: `0729_{fromnaive_best,mask0fn_main,v1_main}_std.txt` COMMITTED-desc Δdz. 논문 표는
+  **mm만 표기** (% 금지 — P1 분모 −7.8mm/frame ≠ P2 분모 −1.7mm/frame, % 병렬은 오독 유발).
+  probe_film_authority.py 헤더 "(counterfactual on training data)"는 stale 하드코딩 라벨 —
+  실제 에피소드 = state probe와 동일한 **val ep0** (frames 0..218, first-contact ~141) 확인 08-12.
 - loss: v2 0.14762 vs mask0fn **0.14750 (4째 자리 동일, bypass 재현)**; V1 0.17081(+16%, 정직 표기).
 - naive 형태는 ckpt 의존 (best 감소 / last 완만 상승) → 견고 판별축 3개: 기울기 크기(~10×) /
   100% 상쇄선 통과 여부 / 폐루프 결과 (naive-last 오픈루프↑인데 폐루프 악화 3/6·16mm).

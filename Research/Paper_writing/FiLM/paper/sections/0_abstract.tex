@@ -10,7 +10,7 @@ contact-force limit, and a critical transition (stop descending on contact) obse
 through force---a naively fine-tuned VLA receiving the full wrench presses through contact in
 every trial and never stops on its own. We present a recipe that makes the policy use force
 where it matters: a condition vector \chat{} computed from signals the policy already receives,
-injected through FiLM with the raw wrench masked---a grounded bottleneck that
+injected through FiLM with the raw wrench masked---a grounded pathway that
 adds routing, not information---trained on press-retreat demonstrations that press to a varied
 force target and retreat before the seal. Forcing \chat{} at inference measures its causal authority, and a controlled
 ablation shows each ingredient is necessary: unmasked, the pathway trains causally dead
