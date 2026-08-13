@@ -47,8 +47,7 @@ finding. The conditioned policies in this paper are separately trained instances
 design: the robot picks (Sec.~\ref{sec:robot}) and the replication pair quoted in
 Sec.~\ref{sec:offline-quintuple} use an earlier calibration; the recipe ablation and the live
 counterfactuals (Sec.~\ref{sec:robot-live}) use offsets re-estimated from the measured contact
-distribution plus the unsaturated $\chat_{\mathrm{fmag}}$ channel. An uncalibrated transplant
-onto a different architecture fails outright (Sec.~\ref{sec:discussion}).} Two properties are essential. \emph{Computed, not
+distribution plus the unsaturated $\chat_{\mathrm{fmag}}$ channel.} Two properties are essential. \emph{Computed, not
 learned:} \chat{} is a fixed function of observed signals, so its physical meaning cannot drift
 during training---which is what makes forcing \chat{} at inference a well-defined intervention
 rather than a perturbation of an arbitrary latent. \emph{Zero new information:} every channel is a deterministic
@@ -63,6 +62,7 @@ and seal separate is what later lets the probes attribute authority to specific 
 \chat{} enters the policy through FiLM modulation~\cite{perez2018film} (initialized to
 identity), at the state token entering the VLM backbone.\footnote{Injecting at the
 action-expert input instead acquired consistently less authority in preliminary experiments.}
+% 08-13 사용자 결정: action-injection은 이 각주에서만 언급 (본문/§VII 언급 금지 유지).
 The policy still receives the force information---only the structure of its delivery changes.
 Because \chat{} is computed \emph{from} the wrench, leaving the raw wrench in the state would
 hand the policy the same signal twice, once in each form; we therefore mask the wrench
@@ -103,7 +103,8 @@ memorized a contact template should respond most near the template and fade beyo
 sweep's \emph{slope sign} is the paper's central discriminator.
 
 \textbf{(P4) Closed-loop press simulation.} Open-loop probes cannot show consequences. We place
-the frozen policy in a closed loop: commanded descent advances a virtual
+the frozen policy in a closed loop at each episode's nominal first-contact timing: commanded
+descent advances a virtual
 penetration depth, a linear-stiffness force model raises the simulated wrench accordingly, and
 the seal event is withheld---simulating the operationally critical misalignment scenario in
 which no press depth ever produces a seal. Outcomes: whether the policy stops before the force

@@ -57,7 +57,7 @@ Policy & Force access & Forcing (P1) & Transplant (P2) & Dose-response (P3) & Pr
 \midrule
 naive VLA          & raw wrench       & --- & \makecell{$+1.63$ (105\%)\\{\scriptsize own $-1.55$}} & \makecell{$+1.41\rightarrow+1.12$ (36$\rightarrow$28\%) $\downarrow$\\{\scriptsize own $-3.94$}} & max 14.9\,mm \\
 \addlinespace
-conditioned policy & grounded pathway & \makecell{$\mathbf{+0.9}$\\{\scriptsize own $-7.8$}} & \makecell{$+1.57$ (94\%)\\{\scriptsize own $-1.67$}} & \makecell{$+1.20\rightarrow\mathbf{+4.40}$ (31$\rightarrow$\textbf{115\%}) $\uparrow$\\{\scriptsize own $-3.84$}} & \textbf{max 4.5\,mm} \\
+conditioned policy & grounded pathway & \makecell{$\mathbf{+0.9}$\\{\scriptsize own $-7.8$}} & \makecell{$+1.57$ (94\%)\\{\scriptsize own $-1.67$}} & \makecell{$+1.20\rightarrow\mathbf{+4.40}$ (31$\rightarrow$\textbf{115\%}) $\uparrow$\\{\scriptsize own $-3.84$}} & \textbf{max 9.8\,mm} \\
 \bottomrule
 \end{tabular}
 \end{table*}
@@ -97,14 +97,16 @@ are not artifacts of checkpoint selection: no naive checkpoint we examined excee
 cancellation at any dose, while the grounded brake remains monotone to the end of training.
 
 \textbf{(P4) Press simulation: consequences.} Closing the loop under the seal-never press
-turns the response forms into outcomes: the conditioned policy stops before the force limit
-in $6/6$ episodes (max penetration $4.5$\,mm); the naive policy presses to the limit (max
-$14.9$\,mm). Later naive checkpoints respond \emph{more} in open loop yet fare \emph{worse}
-here, because a response that saturates below full cancellation cannot stop a stiff press
-regardless of its size. The seal-granted control variant localizes the failure: given a seal
-event at shallow depth the naive policy stops normally ($0.5$\,mm over-travel)---withhold the
-seal and it presses through. Its stopping is real but bound to the \emph{seal event}; the
-conditioned policy's is bound to \emph{force}.
+turns the response forms into outcomes. Every conditioned episode settles by $9.8$\,mm of
+penetration, with contact force at or below $7.1$\,N when the simulation ends. The naive
+policy settles in four of six episodes but runs away in two---still descending when the step
+budget ends, at up to $14.9$\,mm with force climbing through $13.1$\,N; its later checkpoints
+respond \emph{more} in open loop yet fare \emph{worse} here ($3/6$, max $16.0$\,mm), because a
+response that saturates below full cancellation cannot stop a stiff press regardless of its
+size. The seal-granted control variant localizes the failure: given a seal event at shallow
+depth the naive policy stops normally ($0.5$\,mm over-travel)---withhold the seal and it
+presses through. Its stopping is real but bound to the \emph{seal event}; the conditioned
+policy's is bound to \emph{force}.
 
 \subsection{Ablating the recipe: the mask and the grounding}
 \label{sec:offline-quintuple}
@@ -123,7 +125,7 @@ Policy & Force access & Forcing (P1) & Transplant (P2) & Dose-response (P3) & Pr
 \midrule
 FiLM, wrench kept        & raw + dead \chat{}  & \makecell{$0.0$\\{\scriptsize own $-7.7$}} & \makecell{$+1.68$\\{\scriptsize own $-1.52$}} & \makecell{$+1.57\rightarrow+1.12$\\{\scriptsize own $-3.77$}} & max 11.9\,mm \\
 \addlinespace
-FiLM, mask, shuffled \chat{} & ungrounded pathway & \makecell{$-0.2$\\{\scriptsize own $-8.2$}} & \makecell{$-0.06$ (0\%)\\{\scriptsize own $-1.35$}} & \makecell{$-0.06\rightarrow-0.11$ ($\approx$0)\\{\scriptsize own $-1.35$}} & \textbf{max 431\,mm} \\
+FiLM, mask, shuffled \chat{} & ungrounded pathway & \makecell{$-0.2$\\{\scriptsize own $-8.2$}} & \makecell{$-0.06$ (0\%)\\{\scriptsize own $-1.35$}} & \makecell{$-0.06\rightarrow-0.11$ ($\approx$0)\\{\scriptsize own $-1.35$}} & \textbf{max 57.2\,mm} \\
 \bottomrule
 \end{tabular}
 \end{table*}
@@ -148,20 +150,22 @@ held-out imitation error ($0.85$ vs.\ $0.87$\,mm/step for this pair).}
 \textbf{Remove the grounding, and the pathway is worse than raw access.} The shuffled control
 has the same added parameters, the same continued training, the same pathway---and zero
 response at every dose ($-0.2$\,mm under forcing; flat dose-response), with the worst
-closed-loop outcome in the study ($0/6$, max penetration $431$\,mm). Grounding, not capacity,
+closed-loop outcome in the study: no episode settles, all six still descending at the step
+budget, $19$--$23$\,N past the force limit, up to $57$\,mm deep. Grounding, not capacity,
 is the active ingredient: the mask removed the raw route, and the noise-trained \chat{}
 replaced it with nothing.
 
 \subsection{Scale does not change the class}
 \label{sec:offline-pi05}
 
-\todo{HOLD (08-11): pi0 offline re-run in progress --- replace the numbers in this subsection
-when it lands (RESULTS\_LINEUP A3)}
-Fine-tuning $\pi_{0.5}$ ($3.6$B parameters, $8\times$ SmolVLA)~\cite{pi05} on the same
-demonstrations reproduces the naive-policy signature: strong on-manifold transplant response
-($65\%$), a dose-response that saturates shallowly (never exceeding $37\%$ cancellation,
-approaching no full stop at any dose), and closed-loop collapse in the seal-never press
-simulation ($0/6$, max penetration $86$\,mm---worse than the smaller model), at equal-or-better
-imitation error. Neither parameter count nor a different VLA architecture converts template
-responding into force-bound braking; the failure class is a property of the objective-plus-data,
-not of model scale.
+Fine-tuning $\pi_0$~\cite{pi0} and $\pi_{0.5}$~\cite{pi05} ($3$B-class, ${\sim}8\times$
+SmolVLA) on the same demonstrations reproduces the failure at scale, in two forms.
+$\pi_{0.5}$ shows the template signature outright: a strong on-manifold transplant response
+($65\%$) whose dose-response saturates shallowly ($17\%\rightarrow25\%$). $\pi_0$'s response
+rises with dose ($20\%\rightarrow80\%$) yet stays below full cancellation---and below what
+stopping a stiff press requires. Both collapse in the seal-never press: no episode settles,
+all still descending when the step budget ends, at max penetrations of $48$ and $19.6$\,mm
+(versus $14.9$ for the naive SmolVLA, and $9.8$, settled, for the conditioned policy), at
+comparable imitation error ($0.89$--$1.03$\,mm per step). Neither parameter count nor
+architecture converts raw force access into force-bound braking; what changes the class is
+the conditioning pathway, not scale.

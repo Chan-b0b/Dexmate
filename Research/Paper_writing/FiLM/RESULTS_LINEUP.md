@@ -64,8 +64,29 @@ authority"). π0.5 실험의 주입점 서술은 "action-expert injection"으로
 - 접촉-순간(반응형) 권한은 전 구성 7–10% — 성공 기제는 anticipatory 행동 + 사후 게이팅 (물리 산술 ~5N/mm과 정합).
 
 ### A3. π0.5 (3.6B) — 스케일/아키텍처 일반성 (텍스트만)
-**⚠ 08-11 HOLD: pi0 offline 실험 재수행 중 (사용자) — 결과 나올 때까지 아래 수치로 §V-D
-확정하지 말 것. 신규 결과로 대체 예정.**
+**08-13 사용자 결정 ②: P4 press-sim은 off1(nominal timing)로 논문 전체 통일.** 배경: 기존
+표가 offset 혼용이었음 (naive 14.9=off1, grounded 4.5=off30, shuffled 431=off30 — naive 최악
+vs grounded 최선 비교였음). off1 통일 수치 (best): naive 4/6 max 14.9 (2eps 미안착, 13.1N
+상승 중) / wrench-kept 5/6 max 11.9 / shuffled 0/6 max 57.2 (전 eps 19–23N) / grounded 전
+eps ≤9.8mm 안착 (≤7.1N) / naive-last 3/6 max 16.0 / π0.5-naive 0/6 max 48.0 / π0-naive 0/6
+max 19.6 (13.0–15.9N 하강 중). **off30 수치는 논문 인용 금지** (별개 unexpected-height
+시나리오 — 아카이브). seal-granted 컨트롤은 원래 off1이라 유지. §V-C 확정: π0.5(템플릿
+포화 17→25%) + π0(도스 상승 20→80%이나 <100%) 둘 다 0/6 — "failure at scale, in two forms".
+**08-13 사용자 결정 ③: §VII "Grounding is not free" 문단 삭제** — π0/π0.5 film 이식 결과는
+논문 미보고 (EVIDENCE §3.8–3.9 아카이브). §IV 각주의 "uncalibrated transplant fails
+outright (Sec.VII)" 문장도 제거.
+**08-13 사용자 결정 ①: FiLM은 state-injection만 논문에서 다룸 — action-injection은 §IV 각주
+한 곳에서만 언급 (본문·§VII 금지).** 집행: §IV 각주(action-expert 예비실험) 유지 = 유일한
+언급처; §VII grounding-not-free를 π0 state-site 증거로 교체 (π0.5 film(suffix) 결과는 논문
+인용 금지 — EVIDENCE §3.8은 아카이브); "injection site must be re-engineered" →
+"calibration must be re-engineered".
+**⚠ 08-12 π0 배치 도착 (EVIDENCE §3.9) — §V-C 서술 재조정 필요 (사용자 결정 대기)**:
+π0 naive는 naive 시그니처가 아님 (ramp 20→80% 증가, sim off30 5/6 hold@~13N; 단 off1
+0/6, retreat 없음). π0 film은 state/action 양 사이트 모두 접지 실패 (state: ramp flat,
+자기 naive보다 깊은 27N 압입 — 단 fmag 채널 없는 미조정 이식) → "접지는 공짜가 아니다"
+확장 재료. 기존 π0.5-기반 "scale does not change the class" 문구는 π0에 안 맞음 —
+후보 재서술: "아키텍처 불문 보정된 브레이크는 안 생김; raw 접근의 최선은 limit-인접
+hold(13N), 시작조건 민감".
 - pi05_naive: transplant 65–97% (템플릿 존재), ramp ≤37% (얕은 포화), press-sim 사실상 0/6 max 86mm (SmolVLA naive보다 악화), val err 0.69–0.89.
 - pi05_film (suffix, 구캘리브레이션): 전 도스 권한 0 (contact 포화에도), press-sim 0/6 max 94–102mm — V1 시그니처 재현 → "접지는 공짜가 아니다" (Discussion).
 

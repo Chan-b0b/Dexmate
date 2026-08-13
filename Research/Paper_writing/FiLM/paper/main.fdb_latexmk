@@ -1,13 +1,13 @@
 # Fdb version 4
-["bibtex main"] 1786521585.20068 "main.aux" "main.bbl" "main" 1786521633.19006 0
-  "./refs.bib" 1786435208.47356 7013 379217c5ace1c7718124728dcac8ee01 ""
+["bibtex main"] 1786581836.46654 "main.aux" "main.bbl" "main" 1786581837.06392 0
+  "./refs.bib" 1786581724.49672 7272 192267fcceacd9224cfa2eeeeb95bec5 ""
   "/usr/share/texlive/texmf-dist/bibtex/bst/ieeetran/IEEEtran.bst" 1440712899 57748 7c8250ecf02814ce6ddc0cdbb63df1dd ""
-  "main.aux" 1786521632.99386 10817 a775e3f187bc171600964d55809644a0 "pdflatex"
+  "main.aux" 1786581836.87291 10850 785d724463e851d05387e380012f21b6 "pdflatex"
   (generated)
   "main.bbl"
   "main.blg"
   (rewritten before read)
-["pdflatex"] 1786521632.63406 "main.tex" "main.pdf" "main" 1786521633.19018 0
+["pdflatex"] 1786581836.5276 "main.tex" "main.pdf" "main" 1786581837.06403 0
   "/etc/texmf/web2c/texmf.cnf" 1786408945.4201 475 c0e671620eb5563b2130f56340a5fde8 ""
   "/usr/share/texlive/texmf-dist/fonts/enc/dvips/base/8r.enc" 1165713224 4850 80dc9bab7f31fb78a000ccfed0e27cab ""
   "/usr/share/texlive/texmf-dist/fonts/map/fontname/texfonts.map" 1577235249 3524 cb3e574dea2d1052e39280babc910dc8 ""
@@ -130,18 +130,18 @@
   "/var/lib/texmf/web2c/pdftex/pdflatex.fmt" 1786409037 8212342 6b18bb3393f2a47b363d52a33258b249 ""
   "figs/architecture.pdf" 1786500919.40044 26740 8de4f1d09af16c75a5846bcc4c4a24ea ""
   "figs/robot_force_traces.pdf" 1786433617.71994 16643 122672fc22ea26c7a07f826240857ef3 ""
-  "main.aux" 1786521632.99386 10817 a775e3f187bc171600964d55809644a0 "pdflatex"
-  "main.bbl" 1786521585.27673 5510 0d0f2f2dbaa5bd0e3b40071ec7a74fdd "bibtex main"
-  "main.out" 1786521632.99386 3047 4a92a19aa5e54a512ab0fa186d087d9a "pdflatex"
+  "main.aux" 1786581836.87291 10850 785d724463e851d05387e380012f21b6 "pdflatex"
+  "main.bbl" 1786581836.52428 5775 74333b23375ce5bb8bef5e559abd3e01 "bibtex main"
+  "main.out" 1786581836.87329 3047 4a92a19aa5e54a512ab0fa186d087d9a "pdflatex"
   "main.tex" 1786521522.57979 1731 7580507f378bcd2b0c59bbf2a66fb70f ""
   "sections/0_abstract.tex" 1786515058.88812 2087 9424bbcf3579a501df8ef669502d1308 ""
   "sections/1_intro.tex" 1786515045.73118 8352 54a2f4467d9d331004499a010c24dd65 ""
   "sections/2_related.tex" 1786515090.09493 5611 d7eaba95075c9667593345217978feb2 ""
   "sections/3_task.tex" 1786499252.75065 4195 6b4185d35c2eda4f125d7810a7d0fe92 ""
-  "sections/4_method.tex" 1786517576.65131 8260 e026b6a9412f137ffe6abf616aa173c8 ""
-  "sections/5_offline.tex" 1786521621.79528 11319 84002996aa7175b0cbe076db16f99f29 ""
-  "sections/6_robot.tex" 1786515088.22253 7793 41c244f228497c5a889abdbdcf9e8041 ""
-  "sections/7_discussion.tex" 1786515101.00502 3722 dca044e9dc4356e3b5aae30aa9c14cdc ""
+  "sections/4_method.tex" 1786581797.30023 8316 704d2207080e7d18dd4caeddadf4cdcb ""
+  "sections/5_offline.tex" 1786581784.60424 11720 bfb3884fd04b5095b94b3272f9eebc8a ""
+  "sections/6_robot.tex" 1786581806.03895 7791 bf3495479f714d1f5f974a6a567c1ada ""
+  "sections/7_discussion.tex" 1786581823.95721 2993 2b7160b69586b09aebb4ace2f89740b1 ""
   "sections/8_conclusion.tex" 1786515103.02166 1273 970f49a787f8bf6db3c293419870dfcf ""
   (generated)
   "main.aux"

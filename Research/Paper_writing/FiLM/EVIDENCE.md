@@ -321,6 +321,49 @@ cond=contact,fz,seal mask1 FZ_OFF=2.1):
    (SmolVLA의 suffix<prefix·재캘리브레이션 필수와 일관) — Discussion "접지는 공짜가
    아니다" 문단 확정 재료. 잔여: last ramp12 2건(형식적, 진행 중).
 
+### 3.9 pi0 라운드 — A3 재실험 도착 (로컬 회수 08-12 14:47, `vla/probes/0729_*pi0naive*|pi0film*`)
+
+**공정성**: sim 설정 전 모델 동일 (stiffness 1.0N/mm, f_base 6.8N, fzdelta, max_steps 40) —
+SmolVLA/π0.5 수치와 직접 비교 가능. eval은 val 6 eps 1169 frames.
+
+**pi0_naive_0729** (best; last도 유사):
+
+| probe | best | last |
+|---|---|---|
+| pc_fc | +1.81 (80% of −2.26) | — |
+| ramp8→12 | +0.92→+3.71 (**20→80%, 증가**) | +0.47→+2.63 (16→92%, 증가) |
+| sim off30 | 5/6 정지, mean 8.4 max 9.6mm, **\|F\|end 12.4–13.9N** (ep0 timeout도 8.1mm hold) | — |
+| sim off1 | **0/6, mean 17.0 max 19.6mm** | — |
+| val err | 1.03mm | — |
+
+판독: **π0.5와 다름 — naive 시그니처(fade/포화)가 아키텍처 보편이 아님**. π0 naive는
+dose-monotone하고 committed-descent 시작(off30)에선 ~13N에서 hold (limit 15N 코앞,
+시연 힘의 ~5배). 단 approach 시작(off1)에선 0/6으로 붕괴 — 시작조건 민감. full stop이
+아니라 hold이고 retreat 없음.
+
+**pi0_film_frombase_{state,action}_0729** (mask1, cond=contact,fz,seal — **fmag 채널 없음**,
+F0=6 tau=4 fz_off=2.1, stats=val — 구성상 SmolVLA 완전 레시피가 아님):
+
+| | pc_fc | ramp8→12 | sim off30 | sim off1 | val err |
+|---|---|---|---|---|---|
+| state (우리 사이트) | +0.50 (31%) | +0.28→+0.28 (**flat ~8%**) | 5/6이나 **max 28.3mm/27.2N (limit 초과 2eps)** | 5/6, max 18.3mm | 0.93 |
+| action | +0.20 (11%) | +0.06→+0.16 (~0) | **0/6, max 91.3mm** | 0/6, max 37.4mm | 0.88 |
+
+판독: ① action-site = π0.5 시그니처 재현 (완전 무권한 + 최악 침투). ② **state-site도
+접지 실패** — SmolVLA에서 통한 사이트조차 이 캘리브레이션으론 ramp flat, 자기 naive보다
+깊은 압입(27N > 13.9N). "접지는 공짜가 아니다" 3번째 사례이자 site 불문 확장.
+③ 모방 동급(0.88–1.03) 일관. ④ 주의: fmag(비포화 채널) 부재 — dose-단조성의 설계
+원천이 빠진 구성이라 "레시피가 π0에서 실패"가 아니라 "미조정 이식이 실패"로 읽어야 함.
+
+**§V-C 함의 — 08-13 해소 (P4 off1 통일)**: P4를 off1(nominal timing, 스크립트 기본값)로
+논문 전체 통일하면서 π0 서사 정리 완료. off1에서 naive 계열은 스케일이 클수록 악화
+(SmolVLA 14.9 → π0 19.6 → π0.5 48.0mm; π0·π0.5 0/6 전 eps 하강 중) → §V-C "failure at
+scale, in two forms" (π0.5 템플릿 포화 17→25% / π0 도스 상승 20→80%이나 full cancellation
+미달). π0-naive의 off30 hold(5/6 @~13N)와 π0-filmstate 결과는 논문 미인용 아카이브.
+**주의 (발견 08-13)**: 구 표는 offset 혼용이었음 — naive 14.9(off1) vs grounded 4.5(off30),
+shuffled 431(off30). off1 통일 후 grounded는 "전 eps ≤9.8mm 안착(≤7.1N)", shuffled 57.2mm
+(19–23N), wrench-kept 11.9mm.
+
 ## 4. 0727 실패 분석 (Discussion 재료 — fidelity trap)
 
 2026-07-29 로봇 평가, `smolvla_film_0721_0727_prefix_mask1` 8런 중 7 실패 분해:
