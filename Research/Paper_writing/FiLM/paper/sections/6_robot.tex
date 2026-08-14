@@ -63,13 +63,12 @@ conditioned policy with identical counterfactual states. Two sessions matter
 
 \begin{figure}[t]
 \centering
-% \includegraphics[width=\linewidth]{figs/live_counterfactuals}
-\todo{live counterfactual figure: fair-dose bars + high-dose crossover curves
-(assets: vla/live\_film\_probes 08-06 runs, \_vs\_naive.png)}
-\caption{On-robot counterfactuals (P5), naive vs.\ recalibrated conditioned policy on
-identical frozen observations. Left: at demonstration-level doses the naive response is equal
-or larger. Right: raising the dose to $+6/+9/+12$\,N reverses the ordering between $6$ and
-$9$\,N---the offline crossover, reproduced on the physical system.}
+\input{figs/live_counterfactuals}
+\caption{On-robot counterfactuals (P5): identical frozen observations, wrench transplanted
+to a fixed normal-force dose (circles: ten-pose session; squares: three-pose session; faint
+dots: individual poses). (a)~The response ordering reverses between $6$ and $9$\,N---the
+offline crossover on the physical system. (b)~FiLM modulation magnitude rises monotonically
+with dose.}
 \label{fig:live}
 \end{figure}
 
