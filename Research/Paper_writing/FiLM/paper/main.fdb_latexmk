@@ -1,15 +1,14 @@
 # Fdb version 4
-["bibtex main"] 1786671596.72536 "main.aux" "main.bbl" "main" 1786671806.80085 0
+["bibtex main"] 1786681080.53496 "main.aux" "main.bbl" "main" 1786681081.43598 0
   "./refs.bib" 1786581724.49672 7272 192267fcceacd9224cfa2eeeeb95bec5 ""
   "/usr/share/texlive/texmf-dist/bibtex/bst/ieeetran/IEEEtran.bst" 1440712899 57748 7c8250ecf02814ce6ddc0cdbb63df1dd ""
-  "main.aux" 1786671806.61221 10924 ee33de1eb3440c1d840b4f81bbbca07f "pdflatex"
+  "main.aux" 1786681081.23374 10750 a37d790bef2b47f3c0e27d0d3d27e057 "pdflatex"
   (generated)
   "main.bbl"
   "main.blg"
   (rewritten before read)
-["pdflatex"] 1786671805.97513 "/home/maverick/Humanoid/Dexmate/Research/Paper_writing/FiLM/paper/main.tex" "main.pdf" "main" 1786671806.80094 0
+["pdflatex"] 1786681080.61516 "main.tex" "main.pdf" "main" 1786681081.43607 0
   "/etc/texmf/web2c/texmf.cnf" 1786408945.4201 475 c0e671620eb5563b2130f56340a5fde8 ""
-  "/home/maverick/Humanoid/Dexmate/Research/Paper_writing/FiLM/paper/main.tex" 1786671581.24575 1811 12496fb6279fcdc54efc539f8b7aef45 ""
   "/usr/share/texlive/texmf-dist/fonts/enc/dvips/base/8r.enc" 1165713224 4850 80dc9bab7f31fb78a000ccfed0e27cab ""
   "/usr/share/texlive/texmf-dist/fonts/map/fontname/texfonts.map" 1577235249 3524 cb3e574dea2d1052e39280babc910dc8 ""
   "/usr/share/texlive/texmf-dist/fonts/tfm/adobe/times/ptmb7t.tfm" 1136768653 2172 fd0c924230362ff848a33632ed45dc23 ""
@@ -237,11 +236,11 @@
   "/var/lib/texmf/fonts/map/pdftex/updmap/pdftex.map" 1786408961.01466 5472669 54eaf61a88b6b7896ebd0dac973cb29c ""
   "/var/lib/texmf/web2c/pdftex/pdflatex.fmt" 1786409037 8212342 6b18bb3393f2a47b363d52a33258b249 ""
   "figs/architecture.pdf" 1786500919.40044 26740 8de4f1d09af16c75a5846bcc4c4a24ea ""
-  "figs/live_counterfactuals.tex" 1786671697.46567 5319 0595f352ca14465f19d50b74db729733 ""
+  "figs/live_counterfactuals.tex" 1786681079.65756 2842 1e4700062e97b1bc5dcb1e08473f007c ""
   "figs/robot_force_traces.pdf" 1786433617.71994 16643 122672fc22ea26c7a07f826240857ef3 ""
-  "main.aux" 1786671806.61221 10924 ee33de1eb3440c1d840b4f81bbbca07f "pdflatex"
-  "main.bbl" 1786671596.78541 5775 74333b23375ce5bb8bef5e559abd3e01 "bibtex main"
-  "main.out" 1786671806.61221 3047 4a92a19aa5e54a512ab0fa186d087d9a "pdflatex"
+  "main.aux" 1786681081.23374 10750 a37d790bef2b47f3c0e27d0d3d27e057 "pdflatex"
+  "main.bbl" 1786681080.61067 5775 74333b23375ce5bb8bef5e559abd3e01 "bibtex main"
+  "main.out" 1786681081.23374 3047 4a92a19aa5e54a512ab0fa186d087d9a "pdflatex"
   "main.tex" 1786671581.24575 1811 12496fb6279fcdc54efc539f8b7aef45 ""
   "sections/0_abstract.tex" 1786515058.88812 2087 9424bbcf3579a501df8ef669502d1308 ""
   "sections/1_intro.tex" 1786515045.73118 8352 54a2f4467d9d331004499a010c24dd65 ""
@@ -249,7 +248,7 @@
   "sections/3_task.tex" 1786499252.75065 4195 6b4185d35c2eda4f125d7810a7d0fe92 ""
   "sections/4_method.tex" 1786581797.30023 8316 704d2207080e7d18dd4caeddadf4cdcb ""
   "sections/5_offline.tex" 1786581784.60424 11720 bfb3884fd04b5095b94b3272f9eebc8a ""
-  "sections/6_robot.tex" 1786671586.01595 7658 d7a8d5c3495d7298f012c843147b6c6f ""
+  "sections/6_robot.tex" 1786681067.47179 7464 dc3a7a10f9ac1b5d241e79053fb347f0 ""
   "sections/7_discussion.tex" 1786581823.95721 2993 2b7160b69586b09aebb4ace2f89740b1 ""
   "sections/8_conclusion.tex" 1786515103.02166 1273 970f49a787f8bf6db3c293419870dfcf ""
   (generated)

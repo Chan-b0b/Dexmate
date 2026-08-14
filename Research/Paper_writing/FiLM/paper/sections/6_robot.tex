@@ -65,8 +65,7 @@ conditioned policy with identical counterfactual states. Two sessions matter
 \centering
 \input{figs/live_counterfactuals}
 \caption{On-robot counterfactuals (P5): identical frozen observations, wrench transplanted
-to a fixed normal-force dose (circles: ten-pose session; squares: three-pose session; faint
-dots: individual poses). (a)~The response ordering reverses between $6$ and $9$\,N---the
+to a fixed normal-force dose. (a)~The response ordering reverses between $6$ and $9$\,N---the
 offline crossover on the physical system. (b)~FiLM modulation magnitude rises monotonically
 with dose.}
 \label{fig:live}
@@ -99,11 +98,10 @@ the scenario in which the seal never arrives: its most powerful brake is bound t
 signal. Similar in loss, similar at the demonstrated doses, categorically different where the
 task is decided.
 
-Three validity notes. Force-torque baselines were re-anchored at a pre-descent hover before
+Two validity notes. Force-torque baselines were re-anchored at a pre-descent hover before
 each probe session, and absolute transplant targets were drift-shifted so both policies
 received the same physical dose; live conditioned-policy magnitudes are conservative lower
 bounds, as some frozen states are slightly off-manifold for its input distribution. The naive
 policy's closed-loop attempts were run at a single stack height---its failure mode is uniform
 and force-driven, but the height-generalization evidence applies to the conditioned policy
-only. High-dose probes cover three poses; we report them as targeted supplementary
-measurements, not a survey.
+only.
