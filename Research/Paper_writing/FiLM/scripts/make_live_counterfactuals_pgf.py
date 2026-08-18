@@ -58,9 +58,17 @@ for path, clearances, keys in SOURCES:
                             for p in poses]))
         bet.append(np.mean([p["scenarios"][key]["film"]["beta"]["abs_mean"]
                             for p in poses]))
-    if clearances is None:               # run4: own mean descent per frame
-        descent_ref = float(np.mean(
-            [-p["scenarios"]["real"]["dpos_m"][2] * 1000 for p in poses]))
+    if clearances is None:
+        # net-retreat reference = the STRICTER of the two policies' own mean
+        # descent steps (run4: film 4.12, naive 4.27 mm — within 4%). Above
+        # the line = net retreat under either baseline; at film's own 4.12
+        # the naive endpoint (+4.18) would cross a threshold that is not its
+        # own (its own is 4.27, which it does not reach).
+        descent_ref = max(
+            float(np.mean([-p["scenarios"]["real"]["dpos_m"][2] * 1000
+                           for p in poses])),
+            float(np.mean([-p["baseline_scenarios"]["real"]["dpos_m"][2] * 1000
+                           for p in poses])))
 
 
 def coords(xs, ys, fmt="({:.2f},{:.2f})"):

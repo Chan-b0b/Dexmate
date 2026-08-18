@@ -33,8 +33,18 @@ We collect $100$ training episodes ($19{,}445$ frames) and hold out $6$ validati
 ($1{,}169$ frames) with a scripted expert designed to \emph{decorrelate} force from its habitual
 correlates: each episode descends with suction on, presses to a randomized force target drawn
 from $[8,15]$\,N, retreats $5$--$10$\,mm from the contact plane, then hovers and lifts
-immediately on seal. Episodes are collected at two different stack heights, so the contact
-plane itself moves across the dataset. Every episode thus demonstrates the counterfactual the task requires:
+immediately on seal. The expert is IK-planned, not teleoperated: it streams per-tick
+end-effector IK along a fixed descent profile and ends the press on the measured wrench
+itself, so kinematic noise is absent by construction and the only variation across episodes
+is the designed one---the sampled force target and retreat distance, the case position, and
+the stack height. This is also what makes ``the demonstrated force range'' that the probes of
+Sec.~\ref{sec:offline} extrapolate beyond a controlled quantity rather than a byproduct of
+operator habit; the decorrelation above is executable at all only because the expert can
+press to a \emph{sampled} force. Episodes are collected at two different stack heights, so the contact
+plane itself moves across the dataset.
+\memo{08-18: ``two stack heights'' must stay exact (demos = L1/L5 bimodal) --- \S VI's
+held-out-height claim (L3 $3/3$, ``contain only the other two'') leans on it. Re-verify the
+height coverage of the NEW multi-arch dataset when retraining lands, and sync both sentences.} Every episode thus demonstrates the counterfactual the task requires:
 force rises $\rightarrow$ stop $\rightarrow$ move back up, \emph{before} any seal event, at a
 force level that varies independently of depth. This is the data-side prescription whose
 rationale we develop in Sec.~\ref{sec:discussion}; here it matters that the naive policy and

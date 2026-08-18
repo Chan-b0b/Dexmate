@@ -87,13 +87,13 @@ its observed value to a target pattern---either all channels saturated (\emph{fu
 calibrated contact-onset pattern matching measured first-contact statistics (\emph{contact-moment
 forcing}). Applicable to conditioned models only.
 
-\textbf{(P2) State transplant (open loop).} The force-bearing dimensions of a \emph{measured}
-first-contact state are transplanted into pre-contact descent frames. This
+\textbf{(P2) State transplant (open loop).} The six wrench dimensions of a \emph{measured}
+first-contact state are transplanted into pre-contact descent frames; the seal bit keeps its
+pre-contact value of zero. This
 probe applies to any policy, including the naive policy---it is what puts both policies on the
 same scale. Routing the transplant selectively, to the \chat{} computation alone
 ($d_{\mathrm{FiLM}}$) or the raw state alone ($d_{\mathrm{raw}}$), attributes the response to
-each route. \todo{verify exact transplanted dims (wrench+seal vs full state) in
-probe\_state\_authority.py before submission}
+each route.
 
 \textbf{(P3) Dose-response sweep.} The transplanted wrench is rescaled to target magnitudes
 ($8$, $10$, $12$\,N), tracing the policy's response as a function of force \emph{dose}. The
