@@ -1,0 +1,13 @@
+cd LGES ./run_dashboard_demo.sh
+
+python -m LGES.ik_demo.chassis_sequence --gripper --auto-move
+한 다음에, 키보드로, 
+l 0.6 (왼쪽 0.6m) / r 0.5 (오른쪽 0.5m) 이런식으로 초기 위치 (source box) 잡고
+d + enter
+
+주의할 점
+첫 간지 놓을 때 박스 옮길 준비
+
+
+limit 걸렸을 때 브레이크 푸는거
+/home/dexmate/LGES/Dexmate/LGES/case_battery_demo/disable_brakes.py

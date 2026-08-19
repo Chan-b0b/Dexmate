@@ -71,7 +71,7 @@ def main() -> None:
     with Robot(configs=configs) as robot:
         if not robot.sensors.head_camera.wait_for_active(timeout=5.0):
             print("Warning: camera streams may not be active")
-        set_head_pitch(robot, angle=30.0)
+        set_head_pitch(robot, angle=15.0)
 
         win = "case detector"
         cv2.namedWindow(win, cv2.WINDOW_NORMAL)

@@ -962,7 +962,7 @@ def run_live(checkpoint: Path, tasks: list[str], *, commit: bool,
     with Robot(configs=robot_configs) as bot, SuctionMover(bot) as mover:
         if not bot.sensors.head_camera.wait_for_active(timeout=5.0):
             print("  (head camera may not be active)")
-        set_head_pitch(bot, angle=30.0)  # BEV homography + training view
+        set_head_pitch(bot, angle=15.0)  # BEV homography + training view
 
         release = mover.software_estop_active()
         if release and input("Release software E-Stop? [y/N]: ").strip().lower() != "y":

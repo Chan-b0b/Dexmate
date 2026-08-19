@@ -44,7 +44,7 @@ FLOOR_Z_M: float | None = None  # <-- set to a measured value for best results
 # stack anchor: layer tops sit above it by the ik_demo layer pitch. Distinct
 # from FLOOR_Z_M above, which is a camera-frame depth for the old detector.
 # Orange ~0.5687, paper ~0.5641 — within noise, so ONE shared value is used.
-FLOOR_Z_BASE_M: float = 0.566
+FLOOR_Z_BASE_M: float = 0.72
 # Per-layer stack pitch (m), from ik_demo (measured ~0.0131, config 0.0138).
 LAYER_PITCH_M: float = 0.0138
 
@@ -58,7 +58,7 @@ LAYER_PITCH_M: float = 0.0138
 # ----------------------------------------------------------------------------
 # base_link floor ROI the BEV canvas covers (orange box + margin; paper fits in).
 # Box center ~ (x 0.87, y 0.06); orange footprint 0.67 (x) x 0.38 (y).
-BEV_X_RANGE: tuple[float, float] = (0.50, 1.70)   # base x (forward) extent, m
+BEV_X_RANGE: tuple[float, float] = (0.30, 1.45)   # base x (forward) extent, m
 BEV_Y_RANGE: tuple[float, float] = (-0.40, 0.40)  # base y (left) extent, m
 BEV_PX_PER_M: int = 600                            # canvas resolution
 # Two box types; only footprint differs (floor_z is shared). Paper TBD.

@@ -1,10 +1,12 @@
-"""Bin-detection overlay for the dashboard — a separate, isolated process.
+"""Case-detection (BEV) overlay for the dashboard — a separate, isolated process.
 
-Reads the RGB frame the publisher already spools (``frame.jpg``), runs the
-trained YOLO bin detector on it, draws the highest-confidence bin box, and
-writes an annotated ``detect.jpg`` (+ ``detect.json`` metadata) back to the
-spool. The dashboard server serves those and the page shows the overlay under
-the depth image.
+Reads the RGB frame the publisher already spools (``frame.jpg``) and the
+joints from ``state.json``, warps the frame to the metric top-down (BEV)
+plane and runs the trained YOLO-OBB case detector there
+(case_detection/detect_case_bev.py — same pipeline as case_detection/live_bev.py),
+draws the case oriented box + base pose on the BEV image, and writes it back
+to the spool as ``detect.jpg`` (+ ``detect.json`` metadata). The dashboard
+server serves those and the page shows the overlay under the depth image.
 
 Why a separate process (not part of the demo):
   * The demo process drives the real-time arm control loop. torch/ultralytics
@@ -14,7 +16,7 @@ Why a separate process (not part of the demo):
     fully decoupled and lets it run unchanged over a recorded session.
 
     python -m case_battery_demo.dashboard.detector                 # live spool
-    python -m case_battery_demo.dashboard.detector --spool DIR --weights X.pt
+    python -m case_battery_demo.dashboard.detector --spool DIR --layer 3
 """
 
 from __future__ import annotations
@@ -22,20 +24,24 @@ from __future__ import annotations
 import argparse
 import json
 import os
+import sys
 import threading
 import time
 
 import cv2
 import numpy as np
 
-from . import camera_geometry
-
-# Default to the trained bin detector shipped in case_detection/.
+# detect_case_bev.py (case_detection/) does bare `import config`/`import bev`,
+# so it must be imported with that package dir on sys.path — same as
+# case_detection/live_bev.py does for itself.
 _LGES_DIR = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-DEFAULT_WEIGHTS = os.path.join(
-    _LGES_DIR, "case_detection", "runs", "detect", "bin", "weights", "bin_detector.pt"
-)
+_CASE_DETECTION_DIR = os.path.join(_LGES_DIR, "case_detection")
+sys.path.insert(0, _CASE_DETECTION_DIR)
+from detect_case_bev import detect_case_bev, load_model  # noqa: E402
+
+DEFAULT_WEIGHTS = os.path.join(_CASE_DETECTION_DIR, "runs", "obb", "case", "weights", "best.pt")
 DEFAULT_SPOOL_DIR = "/tmp/cns_dashboard"
+DEFAULT_LAYER = 5
 
 _GREEN = (0, 255, 0)
 _RED = (0, 0, 255)
@@ -48,28 +54,39 @@ def _atomic_write(path: str, data: bytes) -> None:
     os.replace(tmp, path)
 
 
-class BinDetector:
-    """Polls the spooled frame, runs the bin detector, writes the overlay."""
+def _grid(disp: np.ndarray, cfg) -> None:
+    """Draw a 10 cm base-frame grid on the BEV image (dark green)."""
+    x0, x1 = cfg.BEV_X_RANGE
+    y0, y1 = cfg.BEV_Y_RANGE
+    s = cfg.BEV_PX_PER_M
+    for X in np.arange(np.ceil(x0 * 10) / 10, x1, 0.1):
+        u = int((X - x0) * s)
+        cv2.line(disp, (u, 0), (u, disp.shape[0]), (0, 90, 0), 1)
+    for Y in np.arange(np.ceil(y0 * 10) / 10, y1, 0.1):
+        v = int((Y - y0) * s)
+        cv2.line(disp, (0, v), (disp.shape[1], v), (0, 90, 0), 1)
+
+
+class CaseDetector:
+    """Polls the spooled frame, runs the BEV case detector, writes the overlay."""
 
     def __init__(
         self,
         spool_dir: str = DEFAULT_SPOOL_DIR,
         weights: str = DEFAULT_WEIGHTS,
-        conf: float = 0.40,
+        layer: int = DEFAULT_LAYER,
         hz: float = 15.0,
         jpeg_quality: int = 80,
     ) -> None:
         self.spool_dir = spool_dir
         self._weights = weights
-        self._conf = float(conf)
+        self._layer = int(layer)
         self._period = 1.0 / max(hz, 1.0)
         self._jpeg_quality = int(jpeg_quality)
         self._frame_path = os.path.join(spool_dir, "frame.jpg")
-        self._depth_raw_path = os.path.join(spool_dir, "depth_raw.png")
         self._state_path = os.path.join(spool_dir, "state.json")
         self._detect_path = os.path.join(spool_dir, "detect.jpg")
         self._detect_json = os.path.join(spool_dir, "detect.json")
-        self._model = None
         self._thread: threading.Thread | None = None
         self._stop = threading.Event()
         self._seq = 0
@@ -78,17 +95,9 @@ class BinDetector:
 
     # -- lifecycle ---------------------------------------------------------
 
-    def _load_model(self):
-        from ultralytics import YOLO  # heavy import, kept in this process only
-        if not os.path.exists(self._weights):
-            raise FileNotFoundError(f"bin weights not found: {self._weights}")
-        print(f"[detector] loading {self._weights} …")
-        self._model = YOLO(self._weights)
-        print("[detector] model ready")
-
-    def start(self) -> "BinDetector":
+    def start(self) -> "CaseDetector":
         if self._thread is None:
-            self._thread = threading.Thread(target=self._run, name="bin-detector", daemon=True)
+            self._thread = threading.Thread(target=self._run, name="case-detector", daemon=True)
             self._thread.start()
         return self
 
@@ -98,7 +107,7 @@ class BinDetector:
             self._thread.join(timeout=2.0)
             self._thread = None
 
-    def __enter__(self) -> "BinDetector":
+    def __enter__(self) -> "CaseDetector":
         return self.start()
 
     def __exit__(self, *_) -> None:
@@ -108,7 +117,8 @@ class BinDetector:
 
     def _run(self) -> None:
         try:
-            self._load_model()
+            load_model(self._weights)
+            print("[detector] model ready")
         except Exception as e:  # noqa: BLE001
             print(f"[detector] cannot start: {e}")
             return
@@ -136,41 +146,37 @@ class BinDetector:
         if bgr is None:
             return
 
-        # frame.jpg is BGR (publisher encoded a BGR array); YOLO wants BGR too.
-        res = self._model.predict(bgr, conf=self._conf, verbose=False)[0]
-        found, box, conf = self._best_box(res)
+        joints = self._read_joints()
+        if joints is None:
+            return
+        q_torso, q_head = joints
 
-        # Bin-centre geometry: sample the spooled raw depth at the box centre
-        # (mapped by fraction, so the resized RGB and native depth needn't share
-        # a resolution), then deproject + transform into base_link using the same
-        # intrinsics/FK as perception.py. base_height is the base_link Z, directly
-        # comparable to the demo's CASE_PLACE_R target z.
-        center_depth = None
-        base_height = None
-        disp = bgr.copy()
-        if found:
-            x, y, w, h = (int(v) for v in box)
-            cv2.rectangle(disp, (x, y), (x + w, y + h), _GREEN, 2)
-            cv2.putText(disp, f"bin {conf:.2f}", (x, max(14, y - 8)),
-                        cv2.FONT_HERSHEY_SIMPLEX, 0.6, _GREEN, 2)
-            cx, cy = x + w / 2.0, y + h / 2.0
-            H_rgb, W_rgb = bgr.shape[:2]
-            mm = self._load_depth_mm()
-            if mm is not None:
-                hd, wd = mm.shape[:2]
-                # native depth/RGB pixel — the intrinsics are at this resolution
-                u = cx / W_rgb * (wd - 1)
-                v = cy / H_rgb * (hd - 1)
-                center_depth = self._sample_depth(mm, u, v)
-                if center_depth is not None:
-                    base_height = self._base_height(u, v, center_depth)
+        import config as cfg  # case_detection/config.py, on sys.path since module import
+        # frame.jpg is downscaled by ik_demo.dashboard_publish for browser bandwidth;
+        # the BEV homography's intrinsics (camera_geometry.ZED_*) are calibrated at
+        # cfg.IMG_W x cfg.IMG_H (the native stream size), so resize back up before
+        # warping or the projected geometry samples outside the smaller array.
+        h, w = bgr.shape[:2]
+        if (w, h) != (cfg.IMG_W, cfg.IMG_H):
+            bgr = cv2.resize(bgr, (cfg.IMG_W, cfg.IMG_H))
+
+        # frame.jpg is BGR (publisher encoded a BGR array); detect_case_bev wants RGB.
+        rgb = cv2.cvtColor(bgr, cv2.COLOR_BGR2RGB)
+        det = detect_case_bev(rgb, q_torso, q_head, layers_remaining=self._layer,
+                              weights=self._weights)
+
+        disp = cv2.cvtColor(det.bev, cv2.COLOR_RGB2BGR)
+        _grid(disp, cfg)
+        if det.found:
+            (cx, cy) = det.bev_center_px
+            box = cv2.boxPoints(((cx, cy), det.dims_px, det.base_yaw_deg)).astype(np.int32)
+            cv2.drawContours(disp, [box], 0, _GREEN, 2)
             cv2.circle(disp, (int(cx), int(cy)), 4, _GREEN, -1)
-            # if center_depth is not None:
-            #     cv2.putText(disp, f"{center_depth * 1000:.0f}mm", (int(cx) + 8, int(cy) - 8),
-            #                 cv2.FONT_HERSHEY_SIMPLEX, 0.55, _GREEN, 2)
+            cv2.putText(disp, f"case conf={det.conf:.2f}  yaw={det.base_yaw_deg:.0f}deg",
+                        (10, 24), cv2.FONT_HERSHEY_SIMPLEX, 0.6, _GREEN, 2)
         else:
-            cv2.putText(disp, "bin: not found", (10, 26),
-                        cv2.FONT_HERSHEY_SIMPLEX, 0.7, _RED, 2)
+            cv2.putText(disp, "case: not found", (10, 24),
+                        cv2.FONT_HERSHEY_SIMPLEX, 0.6, _RED, 2)
 
         ok, out = cv2.imencode(".jpg", disp, [cv2.IMWRITE_JPEG_QUALITY, self._jpeg_quality])
         if not ok:
@@ -180,44 +186,13 @@ class BinDetector:
         _atomic_write(self._detect_json, json.dumps({
             "seq": self._seq,
             "stamp": time.time(),
-            "found": found,
-            "conf": None if conf is None else round(float(conf), 3),
-            "box": None if box is None else [int(v) for v in box],
-            "center_depth_m": None if center_depth is None else round(center_depth, 4),
-            "base_height_m": None if base_height is None else round(base_height, 4),
+            "found": det.found,
+            "conf": round(float(det.conf), 3) if det.found else None,
+            "base_x_m": round(float(det.base_xy[0]), 4) if det.found else None,
+            "base_y_m": round(float(det.base_xy[1]), 4) if det.found else None,
+            "base_yaw_deg": round(float(det.base_yaw_deg), 1) if det.found else None,
+            "top_face_z_m": round(float(det.top_face_z), 4),
         }).encode("utf-8"))
-
-    def _load_depth_mm(self):
-        """Spooled raw depth as a uint16 (mm) array at native resolution, or None."""
-        try:
-            with open(self._depth_raw_path, "rb") as f:
-                raw = f.read()
-        except OSError:
-            return None
-        mm = cv2.imdecode(np.frombuffer(raw, np.uint8), cv2.IMREAD_UNCHANGED)
-        if mm is None or mm.ndim != 2:
-            return None
-        return mm
-
-    @staticmethod
-    def _sample_depth(mm, u: float, v: float, win: int = 2) -> float | None:
-        """Median valid depth (metres) in a small window around native pixel (u, v)."""
-        px, py = int(round(u)), int(round(v))
-        patch = mm[max(0, py - win):py + win + 1, max(0, px - win):px + win + 1]
-        valid = patch[patch > 0]
-        if valid.size == 0:
-            return None
-        return float(np.median(valid)) / 1000.0
-
-    def _base_height(self, u: float, v: float, depth: float) -> float | None:
-        """base_link Z (m) of the bin-centre point: deproject then torso/head FK."""
-        joints = self._read_joints()
-        if joints is None:
-            return None
-        q_torso, q_head = joints
-        pt_cam = camera_geometry.deproject_pixel(u, v, depth)
-        pt_base = camera_geometry.transform_zed_point_to_base(pt_cam, q_torso, q_head)
-        return float(pt_base[2])
 
     def _read_joints(self):
         """(q_torso, q_head), joint-name-ordered, from the spooled state.json, or None."""
@@ -232,29 +207,19 @@ class BinDetector:
             return None
         return [torso[k] for k in sorted(torso)], [head[k] for k in sorted(head)]
 
-    @staticmethod
-    def _best_box(res):
-        """Return (found, (x,y,w,h) | None, conf | None) for the top box."""
-        boxes = getattr(res, "boxes", None)
-        if boxes is None or len(boxes) == 0:
-            return False, None, None
-        confs = boxes.conf.cpu().numpy()
-        i = int(np.argmax(confs))
-        x1, y1, x2, y2 = boxes.xyxy.cpu().numpy()[i]
-        return True, (x1, y1, x2 - x1, y2 - y1), float(confs[i])
-
 
 def main() -> None:
-    parser = argparse.ArgumentParser(description="Dashboard bin-detection overlay")
+    parser = argparse.ArgumentParser(description="Dashboard case-detection (BEV) overlay")
     parser.add_argument("--spool", default=DEFAULT_SPOOL_DIR,
                         help="spool dir holding frame.jpg (where detect.jpg is written)")
-    parser.add_argument("--weights", default=DEFAULT_WEIGHTS, help="YOLO bin detector weights")
-    parser.add_argument("--conf", type=float, default=0.40, help="detection confidence threshold")
+    parser.add_argument("--weights", default=DEFAULT_WEIGHTS, help="YOLO-OBB case detector weights")
+    parser.add_argument("--layer", type=int, default=DEFAULT_LAYER,
+                        help="layers remaining in the stack (sets the BEV warp plane)")
     parser.add_argument("--hz", type=float, default=15.0, help="max detection rate")
     args = parser.parse_args()
 
-    det = BinDetector(spool_dir=os.path.abspath(args.spool), weights=args.weights,
-                      conf=args.conf, hz=args.hz)
+    det = CaseDetector(spool_dir=os.path.abspath(args.spool), weights=args.weights,
+                       layer=args.layer, hz=args.hz)
     print(f"[detector] watching {det._frame_path}  (Ctrl-C to stop)")
     det.start()
     try:

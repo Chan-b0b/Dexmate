@@ -134,7 +134,7 @@ graph LR
 
     subgraph Sep["분리된 프로세스들"]
         SRV["dashboard.server<br/>(stdlib 웹서버 :8080)"]
-        DET["dashboard.detector<br/>(YOLO 빈 검출)"]
+        DET["dashboard.detector<br/>(YOLO-OBB 케이스 검출, BEV)"]
         BARIMG["dashboard.barcode<br/>(리더 영상 IMAGE.SEND)"]
     end
 

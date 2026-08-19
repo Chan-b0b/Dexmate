@@ -165,7 +165,7 @@ def main() -> None:
         if not robot.sensors.head_camera.wait_for_active(timeout=5.0):
             print("Warning: camera streams may not be active")
         if not args.no_align:
-            set_head_pitch(robot, angle=30.0)
+            set_head_pitch(robot, angle=15.0)
 
         loop = _keyboard_loop if args.keyboard else _timed_loop
         saved = loop(robot, out, crops, args)

@@ -55,8 +55,9 @@ def _stop(bot) -> None:
         0.0, wait_time=_LIB_CMD_CLAMP_S + cfg.CHASSIS_STOP_STREAM_S)
 
 
-def _pre_steer(bot, vx: float, vy: float, wz: float = 0.0) -> None:
-    """Point both wheels at the leg's steering angles BEFORE the timed drive.
+def _pre_steer(bot, vx: float, vy: float, wz: float = 0.0) -> np.ndarray | None:
+    """Point both wheels at the leg's steering angles BEFORE the timed drive,
+    and return the per-wheel signed speed that matches the angle we picked.
 
     dexcontrol's own sequential steering is supposed to hold a pure-steer
     command for 1.0 s first, but that hold passes through the same
@@ -66,39 +67,57 @@ def _pre_steer(bot, vx: float, vy: float, wz: float = 0.0) -> None:
 
     Angles replicate chassis._compute_wheel_control exactly (note the NEGATED
     atan2): base angle or its pi-flip (the wheel-speed sign absorbs the flip),
-    whichever is closer to the wheel's current angle — the subsequent
-    set_velocity() then sees ~zero steering error, keeps our choice, and
-    drives single-phase. Reads private chassis geometry attrs; if a dexcontrol
-    update renames them, pre-steering is skipped with a warning (the time
-    compensation still applies) rather than failing the leg.
+    whichever is closer to the wheel's current angle. Any two legs 90 deg
+    apart (e.g. strafe -> straight) leave a wheel sitting exactly on the
+    bisector between that next leg's base/alt solutions — a dead tie that a
+    hair of encoder noise can break either way. Calling the leg's own
+    move_straight/move_sideways/turn afterwards re-derives base/alt from
+    scratch and can land on the opposite side of that tie from what we just
+    steered to, snapping the wheel 180 deg the instant the drive command
+    lands. Returning our own choice here lets the caller drive with
+    set_wheel_velocity (holds steering, no angle recompute) instead, so
+    there's only ever one tie-break decision, not two that can disagree.
+    Reads private chassis geometry attrs; if a dexcontrol update renames
+    them, pre-steering is skipped with a warning (the time compensation
+    still applies) rather than failing the leg.
+
+    Returns:
+        Per-wheel signed speed [left, right] for set_wheel_velocity, or None
+        if pre-steering was skipped — callers should fall back to their
+        normal move_*/turn call in that case.
     """
     ch = bot.chassis
     try:
         if wz != 0.0:
-            vecs = (wz * ch._left_wheel_ang_vel_vector, wz * ch._right_wheel_ang_vel_vector)
+            scale = wz * ch._center_to_wheel_dist
+            vecs = (scale * ch._left_wheel_ang_vel_vector, scale * ch._right_wheel_ang_vel_vector)
         else:
             vecs = (np.array([vx, vy]), np.array([vx, vy]))
         max_ang = ch._max_steering_angle
     except AttributeError as e:
         logger.warning("pre-steer skipped (dexcontrol chassis internals changed?): {}", e)
-        return
+        return None
     target = []
+    signed_speed = []
     for vec, cur in zip(vecs, ch.steering_angle):
+        speed = float(np.linalg.norm(vec))
         base = float(-np.arctan2(vec[1], vec[0]))
         alt = base + np.pi if base < 0 else base - np.pi
-        ang = base if abs(base - cur) <= abs(alt - cur) else alt
-        target.append(float(np.clip(ang, -max_ang, max_ang)))
+        use_base = abs(base - cur) <= abs(alt - cur)
+        target.append(float(np.clip(base if use_base else alt, -max_ang, max_ang)))
+        signed_speed.append(speed if use_base else -speed)
     target = np.asarray(target)
+    signed_speed = np.asarray(signed_speed)
     deadline = time.monotonic() + cfg.CHASSIS_PRESTEER_TIMEOUT_S
     while True:
         ch.set_steering_angle(target)   # re-send each poll: latched-target insurance
         err = float(np.max(np.abs(ch.steering_angle - target)))
         if err <= cfg.CHASSIS_PRESTEER_TOL_RAD:
             logger.info("pre-steer done: [{:+.2f}, {:+.2f}] rad", target[0], target[1])
-            return
+            return signed_speed
         if time.monotonic() >= deadline:
             logger.warning("pre-steer timeout (err {:.3f} rad) — driving anyway", err)
-            return
+            return signed_speed
         time.sleep(0.05)
 
 
@@ -118,8 +137,11 @@ def strafe_left(bot, distance_m: float = None, speed: float = None) -> None:
         wait_time = distance_m / speed + cfg.CHASSIS_CMD_DEAD_TIME_S
         logger.info("Strafe LEFT: {} m @ {:.3f} m/s = {:.1f} s (incl. {:.1f} s cmd dead time)",
                     distance_m, speed, wait_time, cfg.CHASSIS_CMD_DEAD_TIME_S)
-        _pre_steer(bot, 0.0, speed)
-        bot.chassis.move_sideways(speed, wait_time=wait_time)
+        signed_speed = _pre_steer(bot, 0.0, speed)
+        if signed_speed is not None:
+            bot.chassis.set_wheel_velocity(signed_speed, wait_time=wait_time)
+        else:
+            bot.chassis.move_sideways(speed, wait_time=wait_time)
         _stop(bot)   # streamed stop, steering kept
     else:
         wait_time = cfg.CHASSIS_STRAFE_TIME_S
@@ -146,8 +168,11 @@ def strafe_right(bot, distance_m: float = None, speed: float = None) -> None:
         wait_time = distance_m / speed + cfg.CHASSIS_CMD_DEAD_TIME_S
         logger.info("Strafe RIGHT: {} m @ {:.3f} m/s = {:.1f} s (incl. {:.1f} s cmd dead time)",
                     distance_m, speed, wait_time, cfg.CHASSIS_CMD_DEAD_TIME_S)
-        _pre_steer(bot, 0.0, -speed)
-        bot.chassis.move_sideways(-speed, wait_time=wait_time)
+        signed_speed = _pre_steer(bot, 0.0, -speed)
+        if signed_speed is not None:
+            bot.chassis.set_wheel_velocity(signed_speed, wait_time=wait_time)
+        else:
+            bot.chassis.move_sideways(-speed, wait_time=wait_time)
         _stop(bot)   # streamed stop, steering kept
     else:
         wait_time = cfg.CHASSIS_STRAFE_TIME_S
@@ -174,8 +199,11 @@ def move_forward(bot, distance_m: float = None, speed: float = None) -> None:
         wait_time = distance_m / speed + cfg.CHASSIS_CMD_DEAD_TIME_S
         logger.info("Move FORWARD: {} m @ {:.3f} m/s = {:.1f} s (incl. {:.1f} s cmd dead time)",
                     distance_m, speed, wait_time, cfg.CHASSIS_CMD_DEAD_TIME_S)
-        _pre_steer(bot, speed, 0.0)
-        bot.chassis.move_straight(speed, wait_time=wait_time)
+        signed_speed = _pre_steer(bot, speed, 0.0)
+        if signed_speed is not None:
+            bot.chassis.set_wheel_velocity(signed_speed, wait_time=wait_time)
+        else:
+            bot.chassis.move_straight(speed, wait_time=wait_time)
         _stop(bot)   # streamed stop, steering kept
     else:
         wait_time = cfg.CHASSIS_STRAFE_TIME_S
@@ -202,8 +230,11 @@ def move_backward(bot, distance_m: float = None, speed: float = None) -> None:
         wait_time = distance_m / speed + cfg.CHASSIS_CMD_DEAD_TIME_S
         logger.info("Move BACKWARD: {} m @ {:.3f} m/s = {:.1f} s (incl. {:.1f} s cmd dead time)",
                     distance_m, speed, wait_time, cfg.CHASSIS_CMD_DEAD_TIME_S)
-        _pre_steer(bot, -speed, 0.0)
-        bot.chassis.move_straight(-speed, wait_time=wait_time)
+        signed_speed = _pre_steer(bot, -speed, 0.0)
+        if signed_speed is not None:
+            bot.chassis.set_wheel_velocity(signed_speed, wait_time=wait_time)
+        else:
+            bot.chassis.move_straight(-speed, wait_time=wait_time)
         _stop(bot)   # streamed stop, steering kept
     else:
         wait_time = cfg.CHASSIS_STRAFE_TIME_S
@@ -228,8 +259,11 @@ def turn_ccw(bot, angle_deg: float = None, speed: float = None) -> None:
         wait_time = abs(np.deg2rad(angle_deg)) / speed + cfg.CHASSIS_CMD_DEAD_TIME_S
         logger.info("Turn CCW: {} deg @ {:.2f} rad/s = {:.1f} s (incl. {:.1f} s cmd dead time)",
                     angle_deg, speed, wait_time, cfg.CHASSIS_CMD_DEAD_TIME_S)
-        _pre_steer(bot, 0.0, 0.0, wz=speed)
-        bot.chassis.turn(speed, wait_time=wait_time)
+        signed_speed = _pre_steer(bot, 0.0, 0.0, wz=speed)
+        if signed_speed is not None:
+            bot.chassis.set_wheel_velocity(signed_speed, wait_time=wait_time)
+        else:
+            bot.chassis.turn(speed, wait_time=wait_time)
         _stop(bot)   # streamed stop, steering kept
     else:
         wait_time = cfg.CHASSIS_STRAFE_TIME_S
@@ -248,8 +282,11 @@ def turn_cw(bot, angle_deg: float = None, speed: float = None) -> None:
         wait_time = abs(np.deg2rad(angle_deg)) / speed + cfg.CHASSIS_CMD_DEAD_TIME_S
         logger.info("Turn CW: {} deg @ {:.2f} rad/s = {:.1f} s (incl. {:.1f} s cmd dead time)",
                     angle_deg, speed, wait_time, cfg.CHASSIS_CMD_DEAD_TIME_S)
-        _pre_steer(bot, 0.0, 0.0, wz=-speed)
-        bot.chassis.turn(-speed, wait_time=wait_time)
+        signed_speed = _pre_steer(bot, 0.0, 0.0, wz=-speed)
+        if signed_speed is not None:
+            bot.chassis.set_wheel_velocity(signed_speed, wait_time=wait_time)
+        else:
+            bot.chassis.turn(-speed, wait_time=wait_time)
         _stop(bot)   # streamed stop, steering kept
     else:
         wait_time = cfg.CHASSIS_STRAFE_TIME_S

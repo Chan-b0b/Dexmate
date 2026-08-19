@@ -172,10 +172,10 @@ INDEX_HTML = """<!DOCTYPE html>
       <div class="caption" id="depthcap">depth (m, near→far)</div>
     </div>
     <div class="card">
-      <h2>Bin detection</h2>
+      <h2>Case detection (BEV)</h2>
       <img id="detect" alt="detector not running"/>
-      <div class="caption" id="detectcap">bin detection</div>
-      <div class="bcread" id="detectinfo"><span class="no">target z — · center depth —</span></div>
+      <div class="caption" id="detectcap">case detection</div>
+      <div class="bcread" id="detectinfo"><span class="no">case pose —</span></div>
     </div>
     <div class="card">
       <h2>Barcode reader</h2>
@@ -459,18 +459,18 @@ async function tickDetect(){
     if(d.seq !== detectSeq){ detectSeq = d.seq; $("detect").src = "/detect.jpg?seq=" + d.seq; }
     const age = ((Date.now() - d.stamp*1000)/1000).toFixed(1);
     $("detectcap").textContent = d.found
-      ? `bin detection · conf ${d.conf} · ${age}s ago`
-      : `bin detection · no bin · ${age}s ago`;
-    let bz = "<span class='no'>bin z —</span>";
-    if(d.base_height_m!=null){
-      let delta = "";
-      if(targetZ!=null){ const mm=(d.base_height_m-targetZ)*1000; delta=` (Δ${mm>=0?"+":""}${mm.toFixed(0)} mm)`; }
-      bz = `bin z <b>${d.base_height_m.toFixed(3)} m</b>${delta}`;
+      ? `case detection · conf ${d.conf} · ${age}s ago`
+      : `case detection · no case · ${age}s ago`;
+    let pose = "<span class='no'>case pose —</span>";
+    if(d.found && d.base_x_m!=null){
+      pose = `case X <b>${d.base_x_m.toFixed(3)}</b> Y <b>${d.base_y_m.toFixed(3)}</b> m `
+           + `yaw <b>${d.base_yaw_deg.toFixed(0)}</b>°`;
     }
-    $("detectinfo").innerHTML = `${targetInfo()} · ${bz}`;
+    if(d.top_face_z_m!=null) pose += ` · top_face_z <b>${d.top_face_z_m.toFixed(3)} m</b>`;
+    $("detectinfo").innerHTML = `${targetInfo()} · ${pose}`;
   }catch(e){
-    $("detectcap").textContent = "bin detection · detector not running";
-    $("detectinfo").innerHTML = `${targetInfo()} · <span class='no'>bin z —</span>`;
+    $("detectcap").textContent = "case detection · detector not running";
+    $("detectinfo").innerHTML = `${targetInfo()} · <span class='no'>case pose —</span>`;
   }
 }
 

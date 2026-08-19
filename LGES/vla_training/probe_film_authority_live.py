@@ -422,7 +422,7 @@ def main():
                 raise RuntimeError("arm not ready")
 
             suction_io.suction_off()
-            set_head_pitch(bot, angle=30.0)
+            set_head_pitch(bot, angle=15.0)
             both_arms_home(bot, left=mover)
             moved = True
             _view_park(mover, "live-film-probe")

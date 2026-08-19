@@ -1,0 +1,4 @@
+time,event,station,label,layers,measured_m,predicted_m,resid_mm
+10:34:40,det_yaw,source,case,5,177.7411,-2.2589,conf=0.95
+10:34:40,det_box,source,case,5,312.2510,194.0408,ar=1.61
+10:34:50,anchor,source,case,5,0.9535,,

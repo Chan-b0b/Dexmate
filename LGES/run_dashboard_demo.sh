@@ -42,8 +42,8 @@ python -m case_battery_demo.dashboard.server \
   --no-launch-camera --spool "$SPOOL" --port "$PORT" &
 pids+=($!)
 
-# 3) Bin-detection overlay.
-echo "[run_all] starting bin detector…"
+# 3) Case-detection (BEV) overlay.
+echo "[run_all] starting case detector…"
 python -m case_battery_demo.dashboard.detector --spool "$SPOOL" &
 pids+=($!)
 

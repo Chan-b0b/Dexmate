@@ -48,12 +48,12 @@ def main() -> None:
         # Move to intermediate crouching position
         # if not bot.torso.is_pose_reached("crouch45_medium"):
         #     bot.torso.go_to_pose("crouch45_medium", wait_time=4)
-        current_angles = np.asarray(bot.torso._get_state()["pos"], dtype=float)
+        current_angles = np.asarray(bot.torso.get_state()["pos"], dtype=float)
         # Move to target joint angles (60, 160, 30 degrees)
         
         # target_angles = np.deg2rad([60,120,30])
 
-        target_angles = np.deg2rad([60,160,30])
+        target_angles = np.deg2rad([65,155,20])
 
 
         # Set velocity proportional to joint error with conservative bounds.

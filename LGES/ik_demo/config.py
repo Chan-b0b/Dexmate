@@ -48,7 +48,7 @@ REACH_TOL_M: float = 0.01
 # IK-side joint-range margin: solve/validate inside this fraction of each
 # joint's URDF position range (centered), keeping solutions off the hard
 # stops on every joint. URDF and dexcontrol's hardware clamps are untouched.
-JOINT_RANGE_FRAC: float = 0.95
+JOINT_RANGE_FRAC: float = 0.92
 
 # ---------------------------------------------------------------------------
 # Arm with the suction end-effector
@@ -71,8 +71,8 @@ GRASP_ORIENTATION_RPY: tuple[float, float, float] = (np.pi, 0.0, 0.0)
 #
 # Values are conservative starting points — TUNE on the robot.
 # ---------------------------------------------------------------------------
-SPEED_SCALE_LEFT: float = 1.0       # multiplier on every cap below, left (suction) arm
-SPEED_SCALE_RIGHT: float = 0.5      # multiplier on every cap below, right (gripper) arm
+SPEED_SCALE_LEFT: float = 1.2        # multiplier on every cap below, left (suction) arm
+SPEED_SCALE_RIGHT: float = 0.2      # multiplier on every cap below, right (gripper) arm
 # (0.7 = normal; lowered for first slow handoff test)
 
 CONTROL_HZ: float = 200.0          # motion streaming rate (set_joint_pos_vel)
@@ -88,11 +88,11 @@ MAX_JOINT_JERK: float = 30.0        # rad/s^3
 # joints cross at 0), so the arm doesn't fully stop at every taught waypoint.
 # The full fraction applies only when both adjacent hops move the joint at
 # least BLEND_FULL_DIST — shorter hops scale down to avoid overshoot.
-JOINT_BLEND_FRAC: float = 0.3           # 0 = stop at every waypoint (old behavior)
+JOINT_BLEND_FRAC: float = 0.5           # 0 = stop at every waypoint (old behavior)
 JOINT_BLEND_FULL_DIST_RAD: float = 0.2  # per-joint hop size for the full fraction
 
 # Cartesian (move_ee: sensing legs), linear.
-MAX_EE_LINEAR_VEL: float = 0.25     # m/s
+MAX_EE_LINEAR_VEL: float = 0.3     # m/s
 MAX_EE_LINEAR_ACCEL: float = 1.0    # m/s^2
 MAX_EE_LINEAR_JERK: float = 5.0     # m/s^3
 # Cartesian, angular.
@@ -105,14 +105,14 @@ MAX_EE_ANGULAR_JERK: float = 20.0   # rad/s^3
 # ---------------------------------------------------------------------------
 # Base-frame Z the cup tip is raised to for collision-free sideways transport;
 # must clear the source stack and both box walls. (measured 2026-06-09)
-SAFE_TRANSPORT_Z: float = 1.10
+SAFE_TRANSPORT_Z: float = 1.15
 # Absolute EE z the straight-up (xy-held, move_ee_vertical) lift leg ends at:
 # 0.15 m above the layer-2 contact = FLOOR_Z_BASE 0.566 + 2*LAYER_PITCH 0.0138
 # + SUCTION_LENGTH 0.176 + 0.15 ~= 0.92 — clear of the case walls from any
 # layer's pick without dragging the held part sideways. The remaining ascent
 # to SAFE_TRANSPORT_Z is a faster joint-space move_ee (its sideways arc is
 # harmless once clear).
-LIFT_CLEAR_EE_Z: float = 0.95
+LIFT_CLEAR_EE_Z: float = 1.1
 # Best-effort ascent after a lift leg fell short (the per-tick vertical stream
 # can dead-end on a diverging IK branch right at the reach boundary while the
 # column is statically reachable): the joint-space recovery move only runs when
@@ -149,7 +149,10 @@ SUCTION_LENGTH_M: float = 0.176
 # a STACK of layers is handled automatically (the descent finds whatever's on
 # top). The measured contact z per layer is what tells us the layer pitch.
 # ---------------------------------------------------------------------------
-SOURCE_CASE_CENTER: tuple[float, float, float, float] = (0.87, 0.454781, 0.81, 0.0)  # x,y,z,yaw (top layer)
+SOURCE_CASE_CENTER: tuple[float, float, float, float] = (0.87, 0.454781, 0.964, 0.0)  # x,y,z,yaw (top layer)
+# z = 0.81 + 0.154 (FLOOR_Z_BASE_M raise 0.566->0.72) — APPROXIMATE, not yet
+# re-measured on the robot; refine with a descend-to-contact contact_ee_z at
+# a full (5-layer) source stack.
 GRASP_YAW: float = 1.92                       # cup approach yaw, relative to the case frame
 HALF_SLOT_SPACING_M: float = 0.08           # slots at (0, ±this) around the slot-pair center
 # Case-local (dx, dy, dz) offsets from the case center.
@@ -204,11 +207,12 @@ TAUGHT_POSES: dict[str, tuple[float, ...]] = resolve_poses()
 # stalls short) and as the stance the demo returns to. The demo runs with the
 # torso at TORSO_JOINTS.
 HOME_JOINTS_LEFT: tuple[float, ...] = (-2.2555, 1.3993, 2.6261, -2.1348, -0.2685, 0.9856, -1.3780)
-HOME_JOINTS_RIGHT: tuple[float, ...] = (-0.155076, -0.443368, 0.191845, -1.6711, -0.1628, 1.3960, -0.1480)
+HOME_JOINTS_RIGHT: tuple[float, ...] = (0.2515, -0.6051, 0.2380, -1.6147, -0.4827, 1.2241, 0.0514)
+
 # Torso joint angles (rad) the demo/teaching runs at. Taught base_link poses are
 # only reachable at this torso pose (torso moves the arm base). arm.py reads the
 # live torso when a robot is attached; this is the headless / validation value.
-TORSO_JOINTS: tuple[float, float, float] = (1.04719755, 2.7925268, 0.52359878)  # deg [60, 160, 30]
+TORSO_JOINTS: tuple[float, float, float] = (1.13446401, 2.70526034, 0.34906585)  # deg [60, 160, 30]
 
 # ---------------------------------------------------------------------------
 # Suction hardware (weblogic HTTP API + DI0 vacuum monitor)
@@ -225,7 +229,7 @@ BLOW_OFF_ID: int = 5089
 # Two-signal pick: wrench vertical force = contact, DI0 vacuum = seal.
 # ---------------------------------------------------------------------------
 TARE_SAMPLES: int = 20                      # wrench baseline samples (no contact)
-DESCENT_APPROACH_SPEED_M_S: float = 0.20    # fast free-air descent (cup-tip)
+DESCENT_APPROACH_SPEED_M_S: float = 0.4    # fast free-air descent (cup-tip)
 DESCENT_CREEP_SPEED_M_S: float = 0.03       # slow creep in the contact zone
 DESCENT_RAMP_S: float = 0.2                 # ease descent speed in from 0 (no jerk
                                             # from the rest->descend handoff)
@@ -241,6 +245,8 @@ FORCE_HARD_LIMIT_PLACE_N: float = 20.0      # place abort (battery in cup). Must
                                             # normal seating contact registers as
                                             # contact (seat+release), not a hard abort.
 VACUUM_SEAL_TIMEOUT_S: float = 8.0          # DI0 takes ~3-4s to latch
+PICK_SEAL_RETRIES: int = 2                  # on vacuum_timeout: lift DESCENT_CREEP_GAP_M
+                                            # and creep-seal again, up to this many times
 SEAL_PRELIFT_M: float = 0.00               # relieve contact press before suction on
 RELEASE_PRELIFT_M: float = 0.014            # lift before the blow-off release
 PLACE_Z_BUFFER_M: float = 0.10              # accept a seat within this of the taught z
@@ -322,8 +328,9 @@ ROBOTIQ_GRIP_MIN_GAP: int = 5
 # A battery whose agreed barcode is in TARGET_BARCODES is diverted to the
 # right-hand gripper instead of seated in the case. Empty list = never divert.
 # ---------------------------------------------------------------------------
-TARGET_BARCODES: list[str] = ["UDCG7B0289", "UDCG7B0291"]
+# TARGET_BARCODES: list[str] = ["UDCG7B0289", "UDCG7B0291"]
 
+TARGET_BARCODES: list[str] = ["hi"]
 # Barcode-gated battery pick: scan during the fast (suction-off) descent down to
 # creep_z. If read there -> suction ON, creep to contact, seal. If NOT read ->
 # sweep AT the raised plane (no tilt), bounded to the battery's side of the
@@ -361,7 +368,7 @@ GRIPPER_PREGRASP_STANDOFF_M: float = 0.08   # back off along the approach axis, 
 # hover height — so it clears the right arm's place motion. Orientation is kept
 # as-is. Shifted from y=0.50 toward BAT_SLOT_1's hover xy (moved right) per
 # reach_sweep: reachable at (x=0.90, y=-0.078725, z=1.10), err=0.0mm. (TUNE)
-HANDOFF_LEFT_CLEAR_EE_POS: tuple[float, float, float] = (0.90, -0.078725, 1.10)
+HANDOFF_LEFT_CLEAR_EE_POS: tuple[float, float, float] = (0.90, -0.078725, 1.20)
 # Right-arm EE place sequence, run AFTER the gripper grips the suction-held
 # battery and suction releases. Each step is (label, is_relative, (x,y,z) m,
 # (roll,pitch,yaw) rad in base_link). REL steps add to the last COMMANDED pose
@@ -416,8 +423,8 @@ CHASSIS_MANUAL: bool = True
 # HOME_LIFT_MIN_EE_Z (i.e. down in/near a box), first lift it STRAIGHT UP to
 # HOME_LIFT_EE_Z (same xy/orientation), then run the joint move home. EE-frame
 # base_link z values, m.
-HOME_LIFT_MIN_EE_Z: float = 0.95
-HOME_LIFT_EE_Z: float = 1.05
+HOME_LIFT_MIN_EE_Z: float = 1.1
+HOME_LIFT_EE_Z: float = 1.1
 CHASSIS_STRAFE_SPEED_MS: float = 0.1   # m/s magnitude (move_sideways: + left, - right)
 # Speed for the LONG station<->station legs only (auto-move); small centering /
 # adjust corrections stay at CHASSIS_STRAFE_SPEED_MS — at higher speeds a
@@ -425,7 +432,7 @@ CHASSIS_STRAFE_SPEED_MS: float = 0.1   # m/s magnitude (move_sideways: + left, -
 # is absorbed by centering + the per-direction leg learning. dexcontrol clips
 # to the robot's max_lin_vel (~0.5). If the carried case slips on the cup at
 # higher accel (watch the placement), lower this back.
-CHASSIS_LEG_SPEED_MS: float = 0.2
+CHASSIS_LEG_SPEED_MS: float = 0.25
 CHASSIS_TURN_SPEED_RADS: float = 0.2   # rad/s magnitude for in-place yaw (turn: + ccw, - cw)
 CHASSIS_STRAFE_TIME_S: float = 7.2      # seconds per leg (~distance = speed*time)
 CHASSIS_SETTLE_S: float = 1.0           # settle pause after a strafe, before detecting
@@ -433,7 +440,7 @@ CHASSIS_SETTLE_S: float = 1.0           # settle pause after a strafe, before de
 # source<->target leg is a fixed open-loop DISTANCE at CHASSIS_STRAFE_SPEED_MS
 # (overrides CHASSIS_MANUAL). Station spacing is known ~0.6-0.7 m; detection
 # recenters at each visit, so the leg only needs to land the case in view/reach.
-CHASSIS_AUTO_STRAFE_DIST_M: float = 0.7
+CHASSIS_AUTO_STRAFE_DIST_M: float = 0.8
 # Auto-adjust on a failed reach pre-check (auto-move only): turn the chassis so
 # the detected case yaw matches the taught reference (yaw 0), then translate so
 # the case center lands on the reference (x from SOURCE_CASE_CENTER at the
@@ -544,7 +551,7 @@ ARM_VIEW_PARK_JOINTS: tuple[float, ...] = HOME_JOINTS_LEFT
 # unreachable or None. (TUNE y; z should clear both box walls like SAFE_TRANSPORT_Z.)
 # Offline reach scan (reach_sweep, z=1.10): y=0.30 -> x[0.69,1.0]; y=0.40 ->
 # x[0.82,1.0]; y=0.50 -> x[0.86,1.0]. Keep x inside the window for the chosen y.
-ARM_VIEW_PARK_EE_POS: tuple[float, float, float] | None = (0.90, 0.40, 1.10)
+ARM_VIEW_PARK_EE_POS: tuple[float, float, float] | None = (0.90, 0.40, 1.20)
 
 # Online FiLM authority probe: safe, non-contact height sweep above the detected
 # case top. Values are cup-tip clearances; the probe converts them to EE z with
@@ -561,7 +568,7 @@ VLA_FILM_PROBE_FZ_DELTAS_N: tuple[float, ...] = (-3.0, 3.0)
 # of the expected layer — must solve reachable (err<=REACH_TOL_M, in limits, no
 # self-collision). A near-boundary detection (e.g. x~1.03) otherwise sends the
 # streamed descent through a near-singular thrash (observed: 126.8N crash).
-DESCENT_CHECK_BOTTOM_EE_Z: float = 0.74     # ~ box floor 0.566 + SUCTION_LENGTH 0.176
+DESCENT_CHECK_BOTTOM_EE_Z: float = 0.886     # ~ box floor 0.71 + SUCTION_LENGTH 0.176
 DESCENT_CHECK_STEP_M: float = 0.02          # z step of the pre-flight sweep
 # Default target case center (base_link x, y, z_EE, yaw) used for the FIRST case
 # placement, when no case is detected at the target yet (TUNE x/y).
@@ -569,12 +576,12 @@ DESCENT_CHECK_STEP_M: float = 0.02          # z step of the pre-flight sweep
 # LENGTH), NOT a top-face z. 0.7545 = measured seat contact of the first case on
 # the empty target floor (2026-07-03), matching the model floor 0.566 + pitch
 # 0.0138 + suction 0.176 = 0.756 within ~1mm. Descend-to-contact still refines.
-TARGET_DEFAULT_CASE_CENTER: tuple[float, float, float, float] = (0.92, 0.0, 0.7545, 0.0)
+TARGET_DEFAULT_CASE_CENTER: tuple[float, float, float, float] = (0.92, -0.02, 0.87, 0.0)
 # Closed-loop seed place: the place center comes from a bin detection AFTER the
 # align strafe, plus this bias — the bbox-center projection reads the bin ~47mm
 # FORWARD of its true center (front wall + plane mismatch; measured on-robot
 # 2026-08-06, hand-centered cup vs detection). Detect fail -> the default pose.
-SEED_BIN_CENTER_OFFSET: tuple[float, float] = (-0.0469, +0.0009)
+SEED_BIN_CENTER_OFFSET: tuple[float, float] = (-0.12, +0.05)
 # Misseat gate for the seed place: contact more than this ABOVE the taught seat
 # z means the case landed on the bin wall/rim, not the floor (walls sit several
 # cm higher; taught z is hand-measured, drift-free at this fixed station).
@@ -585,7 +592,7 @@ SEED_MISSEAT_TOL_M: float = 0.025
 # stack height (the BEV warp-plane geometry biases the detected center along
 # the camera ray as the top face rises). Applies to the case AND the layer's
 # battery seats (same detection, same bias). 0.0 disables.
-PLACE_X_LAYER_TRIM_M: float = 0.0   # was 0.008 for the MODEL-plane regime; with the
+PLACE_X_LAYER_TRIM_M: float = 0.000   # was 0.008 for the MODEL-plane regime; with the
                                     # measured plane + PLACE_X_PLANE_TRIM the per-layer
                                     # bias is gone (0806: target dual_x flat +7..+11mm
                                     # across L1-L4) and the trim showed a clean forward
@@ -600,7 +607,7 @@ PLACE_X_LAYER_TRIM_M: float = 0.0   # was 0.008 for the MODEL-plane regime; with
 # into the place + target detection +6.6..+7.8mm) — both L1 batteries landed
 # ~+13mm too far +x, battery_2 on the divider. This pulls it back. Verify with
 # the dual_x CSV rows + seat quality on the next run; 0.0 disables.
-PLACE_X_PLANE_TRIM_M: float = -0.013
+PLACE_X_PLANE_TRIM_M: float = -0.01
 # Constant yaw trim (rad, base CCW+) on TARGET place wrists: the part arrives
 # systematically twisted on the cup (unobservable — the system never sees the
 # battery; 0805: both batteries landed ~2deg twisted, the empty case conformed
@@ -608,7 +615,7 @@ PLACE_X_PLANE_TRIM_M: float = -0.013
 # loaded case couldn't for battery_2 -> jam at +26mm). This pre-rotates the
 # wrist to land the part square. +0.031 (~+1.8deg) cancels the 0805 estimate;
 # if a test run doubles the twist instead, flip the sign. 0.0 disables.
-PLACE_YAW_TRIM_RAD: float = 0.0 #낮출수록 CW
+PLACE_YAW_TRIM_RAD: float = 0.01 #낮출수록 CW
 # Post-place verification (CASE places): after the release, park the arm to
 # clear the head view and re-detect the just-placed case BEFORE the chassis
 # moves — landed-vs-intended (dx, dy, dyaw) in one base frame (CSV
@@ -626,7 +633,7 @@ PLACE_VERIFY_DETECT: bool = True
 # tuned trim broke on the 0806 restage). Every place contact also snapshots
 # the tared 6-axis wrench + commanded-vs-measured EE yaw (CSV contact_wrench /
 # contact_yaw) — Phase 2 uses the mz sign to pick the search direction first.
-PLACE_RECOVER_ATTEMPTS: int = 10
+PLACE_RECOVER_ATTEMPTS: int = 6
 PLACE_RECOVER_YAW_PATTERN_RAD: tuple[float, ...] = (0.026, -0.026, 0.052, -0.052)
 PLACE_RECOVER_LIFT_M: float = 0.010         # re-orient height above the failed contact
 # Phase 2 — force-guided translation: on a misseat contact with a tared lateral
@@ -634,13 +641,13 @@ PLACE_RECOVER_LIFT_M: float = 0.010         # re-orient height above the failed 
 # free side (0806 L4 bat1: fx=-5.8N and the operator's verdict was "move -x"),
 # so step XY along that force direction (yaw kept) instead of the next yaw
 # step. Total XY excursion from the commanded pose is capped by XY_MAX.
-PLACE_RECOVER_XY_STEP_M: float = 0.003
-PLACE_RECOVER_FORCE_MIN_N: float = 1.5  # was 3.0 — a FLAT landing (part on top of a
+PLACE_RECOVER_XY_STEP_M: float = 0.005
+PLACE_RECOVER_FORCE_MIN_N: float = 1.0  # was 3.0 — a FLAT landing (part on top of a
                                         # divider) converts almost no press into
                                         # lateral push, so weak-but-real signals
                                         # were filtered and recovery went yaw-only
                                         # (0806 bat2). Noise floor ~0.5N.
-PLACE_RECOVER_XY_MAX_M: float = 0.015   # was 0.009 — TOTAL displacement cap; with a
+PLACE_RECOVER_XY_MAX_M: float = 0.02   # was 0.009 — TOTAL displacement cap; with a
                                         # mixed-direction force the per-axis reach was
                                         # ~4mm and the cap silently dropped recovery to
                                         # yaw-only (0806 bat1 "needed more -y")
@@ -667,5 +674,41 @@ PLACE_RECOVER_YAW_MAX_RAD: float = 0.070    # |cumulative yaw offset| cap (~4 de
 # +4..+12mm FORWARD of intended (place_chk_x), so backward is the prior. On a
 # flat landing mz is (r x f) junk — ignore it until the pattern is spent.
 PLACE_RECOVER_BLIND_XY_M: tuple[tuple[float, float], ...] = (
-    (0.01, 0.0), (0.02, 0.0), (0.023, 0.0),
-    (0.02, -0.003), (0.02, +0.003), (0.015, 0.0))
+    (0.01, 0.0), (0.02, 0.0), (-0.01, 0.0), (-0.02, 0.0),
+    (0.01, -0.01), (0.01, +0.01))
+# Admittance descent (suction.place(admittance=True)): x/y/yaw comply with the
+# tared lateral force/torque WHILE descending, instead of holding xy fixed and
+# only reacting after a full contact via PLACE_RECOVER above. Pure damping (no
+# spring-back term) so the part settles wherever the slot guides it. Deadbanded
+# at the PLACE_RECOVER_FORCE_MIN_N / PLACE_RECOVER_MZ_MIN_NM noise floors above
+# (measured ~0.5N) so sensor noise before real contact contributes zero drift;
+# cumulative offset capped at PLACE_RECOVER_XY_MAX_M / YAW_MAX_RAD (same
+# backstop as the discrete recovery). Gains unverified on the robot — start
+# stiff (small compliance) and soften from there.
+ADMITTANCE_D_LAT: float = 400.0        # N per (m/s) — lateral (x,y) damping
+ADMITTANCE_D_YAW: float = 4.0          # Nm per (rad/s) — yaw damping
+
+# Case misseat recovery (suction.place(case_search=True)): case jigs are
+# scattered enough that a misseat's lateral force has no reliable DIRECTION to
+# step toward (unlike battery slots — see PLACE_RECOVER above), so instead of
+# stepping discretely, hold a light downward press and actively SEARCH x,y
+# while pressing — first a straight x-only sweep, then an outward spiral.
+# "Found the slot" = a sudden z sink (the press-force servo drops z far more
+# than its own max step in one window) happening TOGETHER WITH a fz drop off
+# the maintained press — both signals required, so one noisy sample can't
+# trigger early. All gains unverified on the robot.
+CASE_SEARCH_PRESS_N: float = 5.0            # target light press force during search
+CASE_SEARCH_PRESS_KP: float = 0.004         # z-servo gain, (m/s) per N of error
+CASE_SEARCH_PRESS_MAX_SPEED_M_S: float = 0.02
+CASE_SEARCH_SINK_WINDOW_S: float = 0.15     # rolling window for the sink check
+CASE_SEARCH_SINK_DZ_M: float = 0.004        # z sink within the window -> signal 1
+CASE_SEARCH_SINK_FZ_DROP_N: float = 3.0     # fz drop off the press within the
+                                            # window -> signal 2 (both required)
+CASE_SEARCH_X_RANGE_M: float = 0.03         # phase 1: x-only sweep, +-this
+CASE_SEARCH_SPEED_M_S: float = 0.01         # lateral search travel speed
+CASE_SEARCH_SPIRAL_PITCH_M: float = 0.006   # phase 2: spiral radius growth/turn
+CASE_SEARCH_SPIRAL_MAX_R_M: float = 0.03    # give up (-> operator gate) past this
+# Must exceed the full sweep+spiral path duration at CASE_SEARCH_SPEED_M_S
+# (sweep 2*X_RANGE/SPEED + spiral ~pi*MAX_R^2/PITCH/SPEED — at the defaults
+# above, ~6s + ~47s), else the spiral gets cut short before MAX_R_M.
+CASE_SEARCH_TIMEOUT_S: float = 60.0

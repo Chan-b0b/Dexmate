@@ -78,15 +78,20 @@ from LGES.ik_demo.config import resolve_poses  # noqa: E402
 from LGES.ik_demo.suction import SuctionMover  # noqa: E402
 from LGES.ik_demo.drivers import suction_io  # noqa: E402
 from LGES.ik_demo.chassis_sequence import (detect, _center_from_det,  # noqa: E402
-                                           descent_reachable, _view_park)
+                                           descent_reachable, _view_park,
+                                           _center_case, _auto_adjust)
+from LGES.ik_demo.move_chassis import move_forward, move_backward  # noqa: E402
 
 RECORD_HZ = 15.0
-TOUCH_N_RANGE = (8.0, 15.0)      # press force before the retreat (tared vertical N)
-RETREAT_M_RANGE = (0.005, 0.01)  # contact-referenced suction-hover height (m)
+TOUCH_N_RANGE = (12.0, 15.0)      # press force before the retreat (tared vertical N)
+RETREAT_M_RANGE = (0.005, 0.008)  # contact-referenced suction-hover height (m)
+CENTER_TOL_M = 0.04   # tighter than ik_demo's shared CHASSIS_CENTER_TOL_M (0.05 m)
+X_CENTER_TOL_M = 0.04      # forward/back deadband vs SOURCE_CASE_CENTER x
+X_CENTER_MAX_MOVES = 5     # matches ik_demo's CHASSIS_CENTER_MAX_MOVES
 _KST = timezone(timedelta(hours=9))
 OUT_DIR = (Path(__file__).resolve().parents[1] / "recordings"
            / datetime.now(_KST).strftime("%Y%m%d"))
-PHASE = "case_pick"
+PHASE = "case_pick_val"
 INSTRUCTION = "pick up the case with the suction cup"  # must match training phrasing
 
 
@@ -255,6 +260,7 @@ class EpisodeRecorder:
         shutil.rmtree(self._last_final, ignore_errors=True)
         logger.warning("[record] ✗ discarded {}", self._last_final.name)
         self.kept = max(0, self.kept - 1)
+        self._ep_index = max(0, self._ep_index - 1)
         self._last_final = None
 
     # -- sampler thread --------------------------------------------------------
@@ -348,21 +354,54 @@ def _recover_to_transport(mover: SuctionMover) -> None:
 
 
 def _cycle(bot, mover: SuctionMover, rec: EpisodeRecorder, layers: int) -> None:
-    det = detect(bot, layers)
+    # Tight chassis centering on the detected case (yaw -> 0, y -> CENTER_TOL_M
+    # of CHASSIS_CENTER_CASE_Y_M) before computing the pick pose, same as
+    # ik_demo's run_item — then a reach-check + auto-adjust fallback in case
+    # centering alone still leaves the pose out of reach.
+    y_ref = cfg.CHASSIS_CENTER_CASE_Y_M - resolve_poses((0.0, 0.0, 0.0, 0.0))["CASE_PICK"][1]
+    det = _center_case(bot, layers, "collect", "source", None, y_ref, tol_m=CENTER_TOL_M)
     if det is None or not det.found:
         logger.warning("no case detected — reposition and try again")
         return
-    center = _center_from_det(det)
-    logger.info("case @ base xy=({:.3f},{:+.3f}) yaw={:.1f}deg conf={:.2f} top_face_z={:.4f}",
-                det.base_xy[0], det.base_xy[1], det.base_yaw_deg, det.conf, det.top_face_z)
-    pick_pose = resolve_poses(center)["CASE_PICK"]
-    if not descent_reachable(mover, pick_pose):
-        logger.warning("pick pose out of reach — move the case/chassis and try again")
-        return
+    # _center_case only handles yaw + lateral (y); close the forward/back (x)
+    # gap too, same dx convention as chassis_sequence._auto_adjust (+ = case
+    # too far ahead -> move forward).
+    for _ in range(X_CENTER_MAX_MOVES):
+        dx = det.base_xy[0] - cfg.SOURCE_CASE_CENTER[0]
+        if abs(dx) <= X_CENTER_TOL_M:
+            break
+        dx = float(np.clip(dx, -cfg.CHASSIS_ADJUST_MAX_TRANSLATE_M, cfg.CHASSIS_ADJUST_MAX_TRANSLATE_M))
+        logger.info("centering case x: {} {:.3f} m (ref x {:.2f})",
+                    "forward" if dx > 0 else "backward", abs(dx), cfg.SOURCE_CASE_CENTER[0])
+        (move_forward if dx > 0 else move_backward)(bot, distance_m=abs(dx))
+        det = detect(bot, layers)
+        if det is None or not det.found:
+            logger.warning("case lost during x-centering — reposition and try again")
+            return
+    adjusts = 0
+    while True:
+        center = _center_from_det(det)
+        logger.info("case @ base xy=({:.3f},{:+.3f}) yaw={:.1f}deg conf={:.2f} top_face_z={:.4f}",
+                    det.base_xy[0], det.base_xy[1], det.base_yaw_deg, det.conf, det.top_face_z)
+        pick_pose = resolve_poses(center)["CASE_PICK"]
+        if descent_reachable(mover, pick_pose):
+            break
+        if adjusts >= cfg.CHASSIS_ADJUST_MAX_ATTEMPTS:
+            logger.warning("pick pose out of reach after {} auto-adjusts — move the "
+                           "case/chassis and try again", adjusts)
+            return
+        adjusts += 1
+        logger.warning("pick pose out of reach — auto-adjust {}/{}",
+                       adjusts, cfg.CHASSIS_ADJUST_MAX_ATTEMPTS)
+        _auto_adjust(bot, det, (cfg.SOURCE_CASE_CENTER[0], y_ref))
+        det = detect(bot, layers)
+        if det is None or not det.found:
+            logger.warning("case lost after auto-adjust — reposition and try again")
+            return
     # Layer-INDEPENDENT descent: feed pick() the max-stack contact z regardless
     # of the detected layer, so the fast->creep handoff — where suction turns
-    # ON — happens at the SAME EE z (0.81 + DESCENT_CREEP_GAP = 0.86) on every
-    # episode. The creep then runs until real contact/seal, so the phase
+    # ON — happens at the SAME EE z (SOURCE_CASE_CENTER z + DESCENT_CREEP_GAP)
+    # on every episode. The creep then runs until real contact/seal, so the phase
     # transition in the data is driven by contact, not a vision-correlated
     # height. (Assumes stacks of <= 5 layers; the detected z is still recorded
     # below for analysis. Worst-case creep, layer 1: ~10 cm, ~5 s.)
@@ -421,7 +460,7 @@ def _main() -> None:
     with Robot(configs=configs) as bot:
         if not bot.sensors.head_camera.wait_for_active(timeout=5.0):
             logger.warning("head camera may not be active")
-        set_head_pitch(bot, angle=30.0)  # BEV homography expects ~30 deg
+        set_head_pitch(bot, angle=15.0)  # BEV homography expects ~15 deg
         with SuctionMover(bot) as m:
             release = m.software_estop_active()
             if release and input("Release software E-Stop? [y/N]: ").strip().lower() != "y":

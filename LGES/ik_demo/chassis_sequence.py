@@ -557,7 +557,8 @@ class ChassisNav:
 
 def _center_case(bot, layers: int, label: str, station: str,
                  nav: "ChassisNav | None", y_ref: float,
-                 plane_z: "float | None" = None):
+                 plane_z: "float | None" = None,
+                 tol_m: "float | None" = None):
     """Navigation-based case centering (--auto-move): detect the case, then
     turn in place so its yaw reads 0 deg (same [-90,90) wrap as
     _center_from_det; deadband/clamp = CHASSIS_ADJUST_MIN/MAX_TURN_DEG) and
@@ -572,7 +573,8 @@ def _center_case(bot, layers: int, label: str, station: str,
     item-to-item ref change (nav.ref_change) so re-alignments don't teach the
     legs; turns are not tracked. Returns the LAST detection (a None /
     not-found detection returns immediately for the caller's normal handling;
-    already-centered costs exactly one detect)."""
+    already-centered costs exactly one detect). `tol_m` overrides
+    cfg.CHASSIS_CENTER_TOL_M for callers that want a tighter/looser deadband."""
     from .move_chassis import strafe_left, strafe_right, turn_ccw, turn_cw
     skip_learn = False
     if nav is not None:
@@ -581,6 +583,7 @@ def _center_case(bot, layers: int, label: str, station: str,
         if skip_learn:
             logger.info("[{}] arrival at {} unattributable (divert/blind place) — "
                         "correcting position without teaching the legs", label, station)
+    tol = cfg.CHASSIS_CENTER_TOL_M if tol_m is None else tol_m
     deliberate = nav.ref_change(y_ref) if nav is not None else 0.0
     det = detect(bot, layers, plane_z)
     for _ in range(int(cfg.CHASSIS_CENTER_MAX_MOVES)):
@@ -606,13 +609,13 @@ def _center_case(bot, layers: int, label: str, station: str,
         th = float(np.deg2rad(turn))
         x, y = det.base_xy
         dy = float(-np.sin(th) * x + np.cos(th) * y) - y_ref
-        if turn == 0.0 and abs(dy) <= cfg.CHASSIS_CENTER_TOL_M:
+        if turn == 0.0 and abs(dy) <= tol:
             return det
         if turn != 0.0:
             logger.info("[{}] centering case at {}: turn {} {:.1f} deg (case yaw {:+.1f})",
                         label, station, "ccw" if turn > 0 else "cw", abs(turn), yaw)
             (turn_ccw if turn > 0 else turn_cw)(bot, angle_deg=abs(turn))
-        if abs(dy) > cfg.CHASSIS_CENTER_TOL_M:
+        if abs(dy) > tol:
             dy = float(np.clip(dy, -cfg.CHASSIS_ADJUST_MAX_TRANSLATE_M,
                                cfg.CHASSIS_ADJUST_MAX_TRANSLATE_M))
             logger.info("[{}] centering case at {}: strafe {} {:.3f} m (ref y {:+.3f})",
@@ -765,7 +768,7 @@ def _align_to_bin(bot, label: str, target_y: "float | None" = None,
     net = 0.0
     prev_y: "float | None" = None   # measured bin y before the previous move
     prev_move = 0.0                 # previous commanded strafe (+left)
-    for attempt in (1, 2):
+    for attempt in (1, 2, 3, 4, 5):
         rgb = _head_rgb(bot)
         xy = None if rgb is None else dbn.find_bin_base_xy(
             rgb, *_joints(bot), plane_z=cfg.DIVERT_BIN_PLANE_Z_M)
@@ -856,7 +859,7 @@ def run_item(bot, mover: SuctionMover, label: str, pose_key: str,
              src_layers: int, tgt_layers: int, gripper: "GripperMover | None" = None,
              scan: bool = False, auto: bool = False,
              leg: "ChassisNav | None" = None,
-             zt: "ZTracker | None" = None) -> bool:
+             zt: "ZTracker | None" = None, admittance: bool = False) -> bool:
     """One item's full left->pick->right->place->left cycle.
 
     `src_layers` / `tgt_layers` are the CURRENT stack heights for this layer
@@ -866,7 +869,10 @@ def run_item(bot, mover: SuctionMover, label: str, pose_key: str,
     position instead of the case place. With `auto` (--auto-move), chassis
     legs are automatic and a failed reach pre-check auto-adjusts from the
     detection (up to CHASSIS_ADJUST_MAX_ATTEMPTS) before falling back to the
-    interactive keyboard prompt."""
+    interactive keyboard prompt. `admittance` (--admittance) makes the target
+    place comply x/y/yaw to contact force while descending, instead of holding
+    xy fixed and only reacting via _misseat_recover after a full contact —
+    see suction.place(admittance=)."""
     logger.info("=== item: {} ({}) src_layers={} tgt_layers={} ===",
                 label, pose_key, src_layers, tgt_layers)
     # Per-item centering ref: put THIS item's grab/seat point (its case-local
@@ -1127,7 +1133,9 @@ def run_item(bot, mover: SuctionMover, label: str, pose_key: str,
     # empty) — the return strafe below starts right away and the view park
     # (target z = SAFE_TRANSPORT_Z) finishes the rise in parallel
     pres = mover.place(place_pose, expected_z=exp_z, misseat_tol_m=mtol,
-                       lift_to_clear=True)
+                       lift_to_clear=True,
+                       admittance=admittance and label.startswith("battery"),
+                       case_search=admittance and label == "case")
     if zt is not None and pres is not None:
         # contact diagnostics: tared base wrench + cmd-vs-measured EE yaw at
         # the (final) contact, and the recovery outcome if any retries ran
@@ -1203,13 +1211,14 @@ def run_item(bot, mover: SuctionMover, label: str, pose_key: str,
 
 
 def run(bot, mover: SuctionMover, gripper: "GripperMover | None" = None,
-        scan: bool = False, auto: bool = False) -> bool:
+        scan: bool = False, auto: bool = False, admittance: bool = False) -> bool:
     """Layer loop: each layer runs the full item set (case + 2 batteries), then
     the stacks step (source -1, target +1) so the BEV warp plane tracks the
     shrinking source / growing target. Loops until the source is exhausted.
-    `gripper`/`scan`/`auto` are passed through to run_item (barcode divert /
-    --auto-move); with `auto`, arrival residuals feed back into learned
-    per-direction leg distances (ChassisNav) used by every later strafe leg."""
+    `gripper`/`scan`/`auto`/`admittance` are passed through to run_item
+    (barcode divert / --auto-move / --admittance); with `auto`, arrival
+    residuals feed back into learned per-direction leg distances (ChassisNav)
+    used by every later strafe leg."""
     # The OPERATOR positions the chassis at the SOURCE station once (keyboard,
     # move_chassis grammar — replaces the old fixed initial left leg); each
     # item returns here at its end, so a failed pick just stops (no
@@ -1231,7 +1240,8 @@ def run(bot, mover: SuctionMover, gripper: "GripperMover | None" = None,
             logger.info("=== layer {}: source stack {}, target stack {} ===", layer, src, tgt)
             for label, key in ITEMS:
                 if not run_item(bot, mover, label, key, src, tgt,
-                                gripper=gripper, scan=scan, auto=auto, leg=leg, zt=zt):
+                                gripper=gripper, scan=scan, auto=auto, leg=leg, zt=zt,
+                                admittance=admittance):
                     logger.error("stopping at layer {} item {} (robot left where it is) — "
                                  "to resume, set SRC_LAYERS_REMAINING={} TGT_LAYERS_REMAINING={}",
                                  layer, label, src, tgt)
@@ -1253,9 +1263,15 @@ def _main() -> None:
     from dexcontrol.core.config import get_robot_config
     from dexcontrol.robot import Robot
 
+    KNOWN_FLAGS = {"--gripper", "--auto-move", "--dashboard", "--admittance"}
+    unknown = [a for a in sys.argv[1:] if a not in KNOWN_FLAGS]
+    if unknown:
+        raise ValueError(f"unknown flag(s) {unknown} — choose from {sorted(KNOWN_FLAGS)}")
+
     use_gripper = "--gripper" in sys.argv   # barcode scan + divert (as sequence.py)
     auto_move = "--auto-move" in sys.argv   # automatic chassis legs + auto-adjust
     use_dashboard = "--dashboard" in sys.argv  # spool camera/joints/EE/wrench (as sequence.py)
+    use_admittance = "--admittance" in sys.argv  # target place complies to contact force (experimental)
 
     logger.warning("=" * 60)
     logger.warning("MOVES THE REAL ARM + SUCTION + CHASSIS (strafe L/R per item):")
@@ -1268,6 +1284,9 @@ def _main() -> None:
                        cfg.CHASSIS_AUTO_STRAFE_DIST_M)
     if use_dashboard:
         logger.warning("Dashboard spool ENABLED — view with run_dashboard_demo.sh.")
+    if use_admittance:
+        logger.warning("Admittance place ENABLED (experimental, unverified gains) — "
+                       "target descent complies x/y/yaw to contact force.")
     logger.warning("Clear the strafe path. E-stop in reach.")
     logger.warning("=" * 60)
     if input("Continue? [y/N]: ").strip().lower() != "y":
@@ -1282,7 +1301,7 @@ def _main() -> None:
             logger.warning("head camera may not be active")
         # Tilt the head down so the box is in view (same as live_bev/capture); the
         # BEV homography uses the live joints, so ~30 deg matches the training data.
-        set_head_pitch(bot, angle=30.0)
+        set_head_pitch(bot, angle=15.0)
         publisher = None
         if use_dashboard:
             from .dashboard_publish import DashboardPublisher
@@ -1307,7 +1326,8 @@ def _main() -> None:
                 logger.info("-> both arms safe home")
                 from .go_home import both_arms_home
                 both_arms_home(bot, left=m)
-                ok = run(bot, m, gripper=gripper, scan=use_gripper, auto=auto_move)
+                ok = run(bot, m, gripper=gripper, scan=use_gripper, auto=auto_move,
+                        admittance=use_admittance)
                 logger.info("-> home")
                 m.move_joints(m._home_seed)
                 logger.info("sequence {}", "OK" if ok else "FAILED")

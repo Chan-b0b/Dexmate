@@ -228,6 +228,105 @@ class SuctionMover(ArmMover):
         logger.warning("[suction] max descent ({:.2f}m) without contact", cfg.DESCENT_MAX_M)
         return PickResult(False, "max_descent", z)
 
+    @staticmethod
+    def _deadband(v: float, band: float) -> float:
+        """Clip-and-subtract deadband: 0 inside +-band, excess-over-band outside.
+        Keeps admittance drift at exactly zero under sensor noise (see
+        PLACE_RECOVER_FORCE_MIN_N/MZ_MIN_NM, measured noise floor ~0.5N)."""
+        return 0.0 if abs(v) <= band else v - np.sign(v) * band
+
+    def _descend_to_contact_admittance(self, target_ee_z: float, rpy, force_limit: float,
+                                       start_q: np.ndarray, tick_cb=None) -> PickResult:
+        """Like ``_descend_to_contact``, but x/y/yaw COMPLY with the tared lateral
+        force/torque while descending, instead of holding xy fixed and only
+        reacting after a full contact (see ``_misseat_recover``). z keeps the
+        same fast->creep feed as the plain descent — only x,y,yaw are
+        admittance-driven (selective compliance: the insertion axis stays
+        commanded, the alignment axes yield).
+
+        Pure damping law (no spring-back term): ``d(xy)/dt = f_lat / D_LAT``,
+        ``d(yaw)/dt = mz / D_YAW`` — so the part settles wherever the slot
+        guides it rather than snapping back to the taught pose. Deadbanded at
+        PLACE_RECOVER_FORCE_MIN_N / PLACE_RECOVER_MZ_MIN_NM (same noise floor
+        the discrete recovery already filters on) so ticks before real contact
+        contribute exactly zero drift. Cumulative offset capped at
+        PLACE_RECOVER_XY_MAX_M / YAW_MAX_RAD, same backstop as
+        ``_misseat_recover``.
+
+        Vertical force handling (contact / force_limit / monitor_abort) is
+        unchanged from ``_descend_to_contact`` — only the lateral/yaw command
+        differs.
+        """
+        dt = 1.0 / float(cfg.CONTROL_HZ)
+        prev_q = np.asarray(start_q, dtype=float)
+        pos, _ = self.fk(prev_q)
+        x0, y0, z = float(pos[0]), float(pos[1]), float(pos[2])
+        x, y = x0, y0
+        yaw0 = rpy[2]
+        yaw_off = 0.0
+        creep_z = target_ee_z + cfg.DESCENT_CREEP_GAP_M
+        descended = 0.0
+        elapsed = 0.0
+
+        def _halt(q):
+            self._arm.set_joint_pos_vel(np.asarray(q), np.zeros(len(q)))
+
+        while descended < cfg.DESCENT_MAX_M:
+            speed = self._descent_speed(z, creep_z, elapsed)
+            z_next = z - speed * dt
+
+            fm = self.contact_wrench()
+            if fm is not None:
+                f, mo = fm
+                fx = self._deadband(float(f[0]), cfg.PLACE_RECOVER_FORCE_MIN_N)
+                fy = self._deadband(float(f[1]), cfg.PLACE_RECOVER_FORCE_MIN_N)
+                mz = self._deadband(float(mo[2]), cfg.PLACE_RECOVER_MZ_MIN_NM)
+                x += fx / cfg.ADMITTANCE_D_LAT * dt
+                y += fy / cfg.ADMITTANCE_D_LAT * dt
+                yaw_off += mz / cfg.ADMITTANCE_D_YAW * dt
+                dxy = float(np.hypot(x - x0, y - y0))
+                if dxy > cfg.PLACE_RECOVER_XY_MAX_M:
+                    scale = cfg.PLACE_RECOVER_XY_MAX_M / dxy
+                    x, y = x0 + (x - x0) * scale, y0 + (y - y0) * scale
+                yaw_off = float(np.clip(yaw_off, -cfg.PLACE_RECOVER_YAW_MAX_RAD,
+                                        cfg.PLACE_RECOVER_YAW_MAX_RAD))
+
+            rpy_i = (rpy[0], rpy[1], yaw0 + yaw_off)
+            sol = self.solve_pose([x, y, z_next], rpy_i, seed=prev_q, min_motion=True)
+            if sol.pos_err_m > cfg.REACH_TOL_M:
+                _halt(prev_q)
+                return PickResult(False, "unreachable", z)
+            self._arm.set_joint_pos_vel(sol.q, (sol.q - prev_q) / dt)
+
+            f_vert = self.vertical_force()
+            if f_vert is not None:
+                if f_vert > force_limit:
+                    _halt(sol.q)
+                    logger.warning("[suction] hard push {:.1f}N at ee_z={:.4f} — abort", f_vert, z_next)
+                    return PickResult(False, "force_limit", z_next,
+                                      contact_info=self._contact_snapshot(sol.q))
+                if f_vert > cfg.FORCE_CONTACT_THRESHOLD_N:
+                    _halt(sol.q)
+                    logger.info("[suction] contact {:.1f}N at ee_z={:.4f} (admittance xy off "
+                               "{:+.1f},{:+.1f}mm, yaw {:+.1f}deg)", f_vert, z_next,
+                               (x - x0) * 1000.0, (y - y0) * 1000.0, np.rad2deg(yaw_off))
+                    return PickResult(True, "contact", z_next,
+                                      contact_info=self._contact_snapshot(sol.q))
+            if tick_cb is not None and tick_cb(z_next, f_vert):
+                _halt(sol.q)
+                logger.warning("[suction] descent halted by the supervisor at ee_z={:.4f}", z_next)
+                return PickResult(False, "monitor_abort", z_next,
+                                  contact_info=self._contact_snapshot(sol.q))
+
+            descended += (z - z_next)
+            z, prev_q = z_next, sol.q
+            elapsed += dt
+            time.sleep(dt)
+
+        _halt(prev_q)
+        logger.warning("[suction] max descent ({:.2f}m) without contact", cfg.DESCENT_MAX_M)
+        return PickResult(False, "max_descent", z)
+
     # ------------------------------------------------------------------
     # Pick / place
     # ------------------------------------------------------------------
@@ -339,12 +438,34 @@ class SuctionMover(ArmMover):
         suction_io.suction_on()
         return self._seal_and_lift(rpy, lift_to_clear)
 
-    def _seal_and_lift(self, rpy, lift_to_clear: bool = False) -> PickResult:
-        """Suction already ON at creep height: creep-seal, then lift to
-        transport on success (suction off on failure). Shared pick tail.
-        ``lift_to_clear`` stops the lift at the wall-clear height (see
-        _lift_to_transport)."""
+    def _seal_with_retry(self, rpy) -> PickResult:
+        """Creep-seal (suction already ON), retrying a failed seal: on
+        vacuum_timeout — touched but the vacuum never latched — lift back to
+        creep height (suction off, empty cup) and creep-seal again, up to
+        PICK_SEAL_RETRIES times. Only vacuum_timeout retries: force_limit is
+        a safety stop and unreachable is geometry — re-pressing won't help.
+        The tare baseline stays valid (vertical lift, rotation unchanged)."""
         res = self._creep_seal(rpy, self._live_arm_q())
+        for i in range(1, int(cfg.PICK_SEAL_RETRIES) + 1):
+            if res.success or res.reason != "vacuum_timeout":
+                break
+            suction_io.suction_off()
+            pos, _ = self.current_ee_pose()
+            logger.warning("[suction] seal failed (vacuum_timeout) — lift {:.0f}mm "
+                           "and retry {}/{}", cfg.DESCENT_CREEP_GAP_M * 1000.0,
+                           i, int(cfg.PICK_SEAL_RETRIES))
+            if self.move_ee_vertical(pos[2] + cfg.DESCENT_CREEP_GAP_M, rpy) is None:
+                break  # can't lift from here — hand the failure back as-is
+            suction_io.suction_on()
+            res = self._creep_seal(rpy, self._live_arm_q())
+        return res
+
+    def _seal_and_lift(self, rpy, lift_to_clear: bool = False) -> PickResult:
+        """Suction already ON at creep height: creep-seal (with seal retries),
+        then lift to transport on success (suction off on failure). Shared pick
+        tail. ``lift_to_clear`` stops the lift at the wall-clear height (see
+        _lift_to_transport)."""
+        res = self._seal_with_retry(rpy)
         if res.success:
             # Relieve the creep-contact press before lifting (mirrors place()'s
             # RELEASE_PRELIFT_M) — otherwise the lift's first motion has to break
@@ -419,7 +540,8 @@ class SuctionMover(ArmMover):
         return PickResult(True, "sealed", z)
 
     def place(self, pose, expected_z=None, misseat_tol_m=None, tick_cb=None,
-              lift_to_clear: bool = False) -> PickResult:
+              lift_to_clear: bool = False, admittance: bool = False,
+              case_search: bool = False) -> PickResult:
         """Hover above the seat, descend to contact within buffer, release.
         On a failed descent the part is HELD (suction on) until the operator
         confirms the release — unreachable/max_descent can end mid-air, where
@@ -429,7 +551,16 @@ class SuctionMover(ArmMover):
         part landed on the rim/jig instead of dropping into the seat (a proper
         seat sits 5-15mm lower) — held for the operator like a failed descent,
         instead of blindly releasing a misaligned part. Pass it only with a
-        measured-anchored ``expected_z`` (the model plane drifts too much)."""
+        measured-anchored ``expected_z`` (the model plane drifts too much).
+        ``admittance``: comply x/y/yaw to the tared lateral force/torque WHILE
+        descending (see ``_descend_to_contact_admittance``), instead of the
+        default hold-xy-then-discrete-recover behavior. Experimental — unverified
+        on the robot; ``_misseat_recover`` below still runs as a fallback.
+        ``case_search``: on a misseat, use ``_case_press_search`` (light press +
+        x-sweep-then-spiral search) INSTEAD OF ``_misseat_recover`` — for case
+        jigs, where a misseat's lateral force has no reliable direction to step
+        toward. Mutually exclusive in practice with ``admittance`` (that's for
+        battery slots); both unverified on the robot."""
         ee_pos, rpy = self.taught_target(pose)
         ez = float(ee_pos[2]) if expected_z is None else float(expected_z)
         logger.info("[suction] place: approach@transport -> hover -> descend -> release")
@@ -437,8 +568,8 @@ class SuctionMover(ArmMover):
         if q_hover is None:
             return PickResult(False, "unreachable")
         self.tare()  # battery in cup, hovering (no contact yet)
-        res = self._descend_to_contact(ez, rpy, cfg.FORCE_HARD_LIMIT_PLACE_N, q_hover,
-                                       tick_cb=tick_cb)
+        descend = self._descend_to_contact_admittance if admittance else self._descend_to_contact
+        res = descend(ez, rpy, cfg.FORCE_HARD_LIMIT_PLACE_N, q_hover, tick_cb=tick_cb)
         if res.reason == "monitor_abort":
             # the supervising layer (ik_VLM) owns the recovery — return with the
             # part still HELD (suction on): no release, no lift, no operator gate
@@ -451,7 +582,10 @@ class SuctionMover(ArmMover):
                                "(tol {:.0f}mm) — rim-landing, part NOT seated",
                                above * 1000.0, float(misseat_tol_m) * 1000.0)
                 res.reason = "misseat"  # success recomputed from reason below
-        if res.reason == "misseat" and int(cfg.PLACE_RECOVER_ATTEMPTS) > 0:
+        if res.reason == "misseat" and case_search:
+            res = self._case_press_search(ez, rpy, self._live_arm_q(),
+                                          cfg.FORCE_HARD_LIMIT_PLACE_N)
+        elif res.reason == "misseat" and int(cfg.PLACE_RECOVER_ATTEMPTS) > 0:
             res = self._misseat_recover(ez, rpy, float(misseat_tol_m), res)
         if res.final_yaw_rad is not None:
             # recovery re-oriented the wrist — release/prelift/lift at THAT yaw,
@@ -472,6 +606,31 @@ class SuctionMover(ArmMover):
         self._lift_to_transport(rpy, to_clear_only=lift_to_clear)
         res.success = res.reason in ("contact",)
         return res
+
+    def _column_reachable(self, x: float, y: float, rpy, z_top: float, z_bottom: float) -> bool:
+        """IK pre-check for a straight-down column at (x,y) from z_top to
+        z_bottom, warm-chained so successive solves stay on one branch — same
+        check as chassis_sequence.descent_reachable, scoped to an arbitrary
+        column instead of the live EE height. Used by misseat recovery to
+        pre-check a candidate BEFORE physically moving there: a candidate that
+        instead fails partway through the actual re-descent aborts recovery
+        entirely (force_limit-like, see _misseat_recover) — catching it here
+        first lets the caller skip to the next candidate."""
+        zs = np.arange(z_top, z_bottom - 1e-9, -float(cfg.DESCENT_CHECK_STEP_M))
+        if zs[-1] > z_bottom + 1e-9:
+            zs = np.append(zs, z_bottom)
+        seed = None
+        for z in zs:
+            sol = self.solve_pose((x, y, float(z)), rpy, seed=seed, min_motion=seed is not None)
+            ok = (sol.pos_err_m <= cfg.REACH_TOL_M) and sol.in_limits and not sol.in_collision
+            if not ok:
+                logger.warning("[suction] misseat recover column pre-check FAILED at "
+                               "z={:.3f} (err={:.1f}mm, in_lim={}, col={}) for "
+                               "xy=({:.3f},{:+.3f})", z, sol.pos_err_m * 1000,
+                               sol.in_limits, sol.in_collision, x, y)
+                return False
+            seed = sol.q
+        return True
 
     def _misseat_recover(self, ez: float, rpy, tol: float, res: PickResult) -> PickResult:
         """Rim-landing recovery: the part is HELD (suction on) just above the
@@ -569,8 +728,15 @@ class SuctionMover(ArmMover):
                                mode, float(np.rad2deg(cur_off)),
                                float(np.rad2deg(step)))
             lift_z = float(res.contact_ee_z) + float(cfg.PLACE_RECOVER_LIFT_M)
-            self.move_ee_vertical(lift_z, (rpy[0], rpy[1], yaw_now))  # lift at the AS-CONTACTED yaw
             rpy_i = (rpy[0], rpy[1], cur_yaw)
+            if not self._column_reachable(x, y, rpy_i, lift_z, ez):
+                logger.warning("[suction] misseat recover {}/{}: candidate "
+                               "({:.3f},{:+.3f}) yaw={:+.1f}deg unreachable over the "
+                               "re-descent column ({:.3f}->{:.3f}) — skipping to the "
+                               "next step", i, int(cfg.PLACE_RECOVER_ATTEMPTS), x, y,
+                               float(np.rad2deg(cur_yaw)), lift_z, ez)
+                continue
+            self.move_ee_vertical(lift_z, (rpy[0], rpy[1], yaw_now))  # lift at the AS-CONTACTED yaw
             q_up = self.move_ee([x, y, lift_z], rpy_i)  # re-pose at the lifted height
             if q_up is None:
                 continue  # unreachable here — try the next step
@@ -603,6 +769,114 @@ class SuctionMover(ArmMover):
             res = res2
         logger.warning("[suction] misseat recovery exhausted — handing to the operator")
         return res
+
+    @staticmethod
+    def _case_search_path(x0: float, y0: float) -> np.ndarray:
+        """Dense (x,y) waypoints spaced at CASE_SEARCH_SPEED_M_S*dt: first a
+        straight x-only sweep through +-CASE_SEARCH_X_RANGE_M (case jigs are
+        scattered but the taught pose is usually close in y), then an outward
+        spiral out to CASE_SEARCH_SPIRAL_MAX_R_M."""
+        dt = 1.0 / float(cfg.CONTROL_HZ)
+        step = float(cfg.CASE_SEARCH_SPEED_M_S) * dt
+        xs = np.arange(x0 - cfg.CASE_SEARCH_X_RANGE_M,
+                       x0 + cfg.CASE_SEARCH_X_RANGE_M + step, step)
+        sweep = np.stack([xs, np.full_like(xs, y0)], axis=1)
+
+        pts = []
+        theta = 0.0
+        while True:
+            r = float(cfg.CASE_SEARCH_SPIRAL_PITCH_M) * theta / (2.0 * np.pi)
+            if r > float(cfg.CASE_SEARCH_SPIRAL_MAX_R_M):
+                break
+            pts.append((x0 + r * np.cos(theta), y0 + r * np.sin(theta)))
+            theta += step / max(r, float(cfg.CASE_SEARCH_SPIRAL_PITCH_M) / (2.0 * np.pi))
+        spiral = np.asarray(pts) if pts else np.empty((0, 2))
+        return np.concatenate([sweep, spiral], axis=0)
+
+    def _case_press_search(self, ez: float, rpy, start_q: np.ndarray,
+                           force_limit: float) -> PickResult:
+        """Case-only misseat recovery (alternative to ``_misseat_recover``):
+        case jigs are scattered enough that the misseat's lateral force has no
+        reliable DIRECTION to step toward, so instead hold a light downward
+        press (simple P-servo on fz toward CASE_SEARCH_PRESS_N) and actively
+        SEARCH x,y along ``_case_search_path`` while pressing.
+
+        'Found the slot' = a sudden z sink (the press servo has to drop z
+        further than its own max step within CASE_SEARCH_SINK_WINDOW_S)
+        happening TOGETHER WITH an fz drop off the maintained press — both
+        signals required so one noisy sample can't trigger early. On sink,
+        finishes the press to the real seat depth via ``_descend_to_contact``
+        (seeded from the sink pose, so it re-checks contact/hard-limit
+        normally). Exhausting the search path (or CASE_SEARCH_TIMEOUT_S)
+        returns "misseat" — the caller's existing operator gate applies."""
+        dt = 1.0 / float(cfg.CONTROL_HZ)
+        prev_q = np.asarray(start_q, dtype=float)
+        pos, _ = self.fk(prev_q)
+        x0, y0, z = float(pos[0]), float(pos[1]), float(pos[2])
+        yaw = rpy[2]
+        win_n = max(1, int(cfg.CASE_SEARCH_SINK_WINDOW_S * cfg.CONTROL_HZ))
+        z_hist: list[float] = []
+        fz_hist: list[float] = []
+
+        def _halt(q):
+            self._arm.set_joint_pos_vel(np.asarray(q), np.zeros(len(q)))
+
+        def _press_step(z_now: float, fz: "float | None") -> float:
+            """z is a height (descend subtracts) — too much force (fz above
+            target) must RAISE z (back off), too little must LOWER it."""
+            if fz is None:
+                return z_now
+            err = fz - float(cfg.CASE_SEARCH_PRESS_N)   # measured - target
+            step = float(np.clip(cfg.CASE_SEARCH_PRESS_KP * err,
+                                 -cfg.CASE_SEARCH_PRESS_MAX_SPEED_M_S,
+                                 cfg.CASE_SEARCH_PRESS_MAX_SPEED_M_S)) * dt
+            return z_now + step
+
+        def _record_and_check_sunk(z_now: float, fz_now: "float | None") -> bool:
+            z_hist.append(z_now)
+            fz_hist.append(fz_now if fz_now is not None else 0.0)
+            if len(z_hist) > win_n:
+                z_hist.pop(0); fz_hist.pop(0)
+            if len(z_hist) < win_n:
+                return False
+            dz = z_hist[0] - z_hist[-1]      # positive = sank
+            dfz = fz_hist[0] - fz_hist[-1]   # positive = fz dropped
+            return (dz > cfg.CASE_SEARCH_SINK_DZ_M
+                    and dfz > cfg.CASE_SEARCH_SINK_FZ_DROP_N)
+
+        path = self._case_search_path(x0, y0)
+        elapsed = 0.0
+        sunk = False
+        for x, y in path:
+            if elapsed > cfg.CASE_SEARCH_TIMEOUT_S:
+                break
+            fz = self.vertical_force()
+            if fz is not None and fz > force_limit:
+                _halt(prev_q)
+                logger.warning("[suction] case search hard push {:.1f}N — abort", fz)
+                return PickResult(False, "force_limit", z, contact_info=self._contact_snapshot(prev_q))
+            z = _press_step(z, fz)
+            sol = self.solve_pose([float(x), float(y), z], (rpy[0], rpy[1], yaw),
+                                  seed=prev_q, min_motion=True)
+            if sol.pos_err_m > cfg.REACH_TOL_M:
+                elapsed += dt
+                continue  # unreachable search point — skip it, keep searching
+            self._arm.set_joint_pos_vel(sol.q, (sol.q - prev_q) / dt)
+            prev_q = sol.q
+            if _record_and_check_sunk(z, fz):
+                logger.info("[suction] case search: sink detected near ({:.3f},{:+.3f}), "
+                           "z={:.4f}", float(x), float(y), z)
+                sunk = True
+                break
+            elapsed += dt
+            time.sleep(dt)
+
+        if not sunk:
+            _halt(prev_q)
+            logger.warning("[suction] case search exhausted (path/timeout) without a sink")
+            return PickResult(False, "misseat", z, contact_info=self._contact_snapshot(prev_q))
+
+        return self._descend_to_contact(ez, (rpy[0], rpy[1], yaw), force_limit, prev_q)
 
     # ------------------------------------------------------------------
     # Barcode-gated battery pick
@@ -641,7 +915,7 @@ class SuctionMover(ArmMover):
         logger.info("[suction] barcode: {!r}", code)
 
         suction_io.suction_on()
-        res = self._creep_seal(rpy, self._live_arm_q())
+        res = self._seal_with_retry(rpy)
         res.barcode = code
         if res.success:
             # Relieve the creep-contact press before lifting — see pick().

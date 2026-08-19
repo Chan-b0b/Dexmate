@@ -55,7 +55,7 @@ def _main() -> None:
     with Robot(configs=configs) as bot:
         if not bot.sensors.head_camera.wait_for_active(timeout=5.0):
             logger.warning("head camera may not be active")
-        set_head_pitch(bot, angle=30.0)
+        set_head_pitch(bot, angle=15.0)
 
         with SuctionMover(bot) as m:
             release = m.software_estop_active()
