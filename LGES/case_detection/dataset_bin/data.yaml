@@ -1,0 +1,5 @@
+path: /home/dexmate/LGES/Dexmate/LGES/case_detection/dataset_bin
+train: images/train
+val: images/val
+nc: 1
+names: [bin]

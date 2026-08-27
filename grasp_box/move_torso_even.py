@@ -53,7 +53,7 @@ def main() -> None:
         
         # target_angles = np.deg2rad([60,120,30])
 
-        target_angles = np.deg2rad([65,155,20])
+        target_angles = np.deg2rad([60,165,40])
 
 
         # Set velocity proportional to joint error with conservative bounds.

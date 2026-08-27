@@ -1,0 +1,8 @@
+time,event,station,label,layers,measured_m,predicted_m,resid_mm
+10:24:20,det_yaw,source,case,4,1.3141,1.3141,conf=0.96
+10:24:20,det_box,source,case,4,274.6110,190.0474,ar=1.44
+10:24:28,anchor,source,case,4,0.9295,,
+10:24:41,contact_wrench,target,case,1,16.1340,,fx=-3.2;fy=+0.7;mx=-0.01;my=-0.31;mz=+0.160
+10:24:41,contact_yaw,target,case,1,111.4975,111.3220,+0.18deg
+10:24:41,recover_step,target,case,1,,,a1;corner;dyaw=+0.0deg;dxy=(-40.1/+40.0)mm;contact;z=-2.7mm;fx=-2.3;fy=+0.3;mz=n/a
+10:24:41,anchor,target,case,1,0.8673,,

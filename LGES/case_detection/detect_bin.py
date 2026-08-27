@@ -48,6 +48,52 @@ def find_bin_model(rgb: np.ndarray, weights: str | None = None) -> tuple[int, in
     return (int(x1), int(y1), int(x2 - x1), int(y2 - y1))
 
 
+_bev_model = None
+
+
+def load_bev_model(weights: str | None = None):
+    """Load (once) the trained BEV YOLO-OBB bin model."""
+    global _bev_model
+    if _bev_model is None:
+        from ultralytics import YOLO  # noqa: PLC0415 (optional heavy dep)
+        path = Path(weights or cfg.BIN_OBB_MODEL_PATH)
+        if not path.is_absolute():
+            path = Path(__file__).resolve().parent / path
+        if not path.exists():
+            raise FileNotFoundError(
+                f"BEV bin OBB weights not found at {path}. Train first "
+                f"(train.py, target bin on the BEV set) and set cfg.BIN_OBB_MODEL_PATH.")
+        _bev_model = YOLO(str(path))
+    return _bev_model
+
+
+def find_bin_bev(rgb: np.ndarray, q_torso, q_head, plane_z: float,
+                 weights: str | None = None) -> "tuple[float, float, float] | None":
+    """Bin OBB on the metric BEV canvas -> (base X, base Y, yaw_deg), or None.
+
+    Replaces find_bin_base_xy for runtime use: the raw-frame bbox center
+    inverted through the homography carried a measured +47mm x bias (front
+    wall + plane mismatch); in BEV the OBB center maps LINEARLY to base XY
+    for anything ON the warp plane (pass the bin RIM height) and the OBB
+    angle is the bin yaw for free. Highest-conf box wins; yaw is the
+    long-axis convention, [0,180), mapped to base (as detect_case_bev)."""
+    import bev  # sibling module (flat package imports, path set above)
+    mapper = bev.build_mapper(q_torso, q_head, float(plane_z))
+    bev_img = mapper.warp(rgb)
+    model = load_bev_model(weights)
+    res = model.predict(cv2.cvtColor(bev_img, cv2.COLOR_RGB2BGR),
+                        conf=cfg.BIN_OBB_CONF, verbose=False)[0]
+    if res.obb is None or len(res.obb) == 0:
+        return None
+    i = int(np.argmax(res.obb.conf.cpu().numpy()))
+    cx, cy, w, h, r = res.obb.xywhr.cpu().numpy()[i]
+    X, Y = mapper.bev_px_to_base(float(cx), float(cy))
+    deg = float(np.rad2deg(float(r)))
+    if w < h:
+        deg += 90.0
+    return X, Y, float(mapper.bev_yaw_to_base(deg % 180.0))
+
+
 def find_bin_base_xy(rgb: np.ndarray, q_torso, q_head, plane_z: float,
                      weights: str | None = None) -> tuple[float, float] | None:
     """Bin bbox center projected to base_link (X, Y) on the z=plane_z plane,
@@ -66,5 +112,29 @@ def find_bin_base_xy(rgb: np.ndarray, q_torso, q_head, plane_z: float,
 
 
 if __name__ == "__main__":
+    # self-test: python detect_bin.py <frame.npz> [plane_z]
+    # npz with q_torso/q_head also runs the BEV OBB and saves the annotated
+    # canvas (bin_bev_selftest.png) — use it to SEE what the model boxed when
+    # the reported base xy looks wrong.
     f = np.load(sys.argv[1])
-    print("bin bbox:", find_bin_model(f["rgb"]))
+    print("bin bbox (raw frame):", find_bin_model(f["rgb"]))
+    if "q_torso" in f.files:
+        import bev  # sibling module
+        plane = float(sys.argv[2]) if len(sys.argv) > 2 else 0.55
+        mapper = bev.build_mapper(f["q_torso"], f["q_head"], plane)
+        bev_img = mapper.warp(f["rgb"])
+        res = load_bev_model().predict(cv2.cvtColor(bev_img, cv2.COLOR_RGB2BGR),
+                                       conf=cfg.BIN_OBB_CONF, verbose=False)[0]
+        vis = cv2.cvtColor(bev_img, cv2.COLOR_RGB2BGR).copy()
+        if res.obb is not None and len(res.obb):
+            polys = res.obb.xyxyxyxy.cpu().numpy()
+            confs = res.obb.conf.cpu().numpy()
+            for k, (poly, c) in enumerate(zip(polys, confs)):
+                cx, cy = poly.mean(axis=0)
+                X, Y = mapper.bev_px_to_base(float(cx), float(cy))
+                print(f"  obb[{k}] conf={c:.2f} base_xy=({X:.3f},{Y:+.3f})")
+                cv2.polylines(vis, [poly.astype(np.int32)], True, (0, 0, 255), 2)
+        else:
+            print("  no BEV OBB detection")
+        cv2.imwrite("bin_bev_selftest.png", vis)
+        print(f"BEV canvas (plane_z={plane}) -> bin_bev_selftest.png")

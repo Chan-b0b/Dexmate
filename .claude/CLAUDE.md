@@ -8,6 +8,8 @@ Behavioral guidelines to reduce common LLM coding mistakes. Merge with project-s
 
 **Don't assume. Don't hide confusion. Surface tradeoffs.**
 
+**HARD RULE — Ask, don't guess:** If any part of the request is ambiguous (which file, expected behavior, parameter values, scope), STOP and ask the user before implementing. Never fill gaps with plausible-looking assumptions. A question costs seconds; a wrong guess costs a rework.
+
 Before implementing:
 - State your assumptions explicitly. If uncertain, ask.
 - If multiple interpretations exist, present them - don't pick silently.

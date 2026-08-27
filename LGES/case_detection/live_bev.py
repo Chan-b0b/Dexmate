@@ -89,7 +89,7 @@ def main() -> None:
     ap = argparse.ArgumentParser()
     ap.add_argument("--layer", type=int, default=1,
                     help="layers remaining (sets the warp plane top_face_z(layer))")
-    ap.add_argument("--angle", type=float, default=15.0, help="head-down align angle")
+    ap.add_argument("--angle", type=float, default=24.0, help="head-down align angle")
     ap.add_argument("--render-every", type=int, default=3,
                     help="draw/imshow only every N frames (detection still runs every "
                          "frame); raise it if the display (esp. remote VNC/X11) is the bottleneck")

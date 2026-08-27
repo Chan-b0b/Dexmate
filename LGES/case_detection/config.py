@@ -58,8 +58,8 @@ LAYER_PITCH_M: float = 0.0138
 # ----------------------------------------------------------------------------
 # base_link floor ROI the BEV canvas covers (orange box + margin; paper fits in).
 # Box center ~ (x 0.87, y 0.06); orange footprint 0.67 (x) x 0.38 (y).
-BEV_X_RANGE: tuple[float, float] = (0.30, 1.45)   # base x (forward) extent, m
-BEV_Y_RANGE: tuple[float, float] = (-0.40, 0.40)  # base y (left) extent, m
+BEV_X_RANGE: tuple[float, float] = (0.20, 1.60)   # base x (forward) extent, m
+BEV_Y_RANGE: tuple[float, float] = (-0.45, 0.45)  # base y (left) extent, m
 BEV_PX_PER_M: int = 600                            # canvas resolution
 # Two box types; only footprint differs (floor_z is shared). Paper TBD.
 BOX_FOOTPRINT_M: dict[str, tuple[float, float]] = {
@@ -129,9 +129,24 @@ OBB_CONF: float = 0.40
 # ----------------------------------------------------------------------------
 BIN_MODEL_PATH: str = "runs/detect/bin/weights/bin_detector.pt"
 BIN_MODEL_CONF: float = 0.40
+# Learned BEV BIN OBB (detect_bin.find_bin_bev) — runs on the metric BEV
+# canvas like the case detector, so the box center maps LINEARLY to base XY
+# (none of the raw-frame bbox projection bias, measured +47mm x) and the OBB
+# angle gives the bin yaw for free. Used by ik_demo's bin align + seed place.
+BIN_OBB_MODEL_PATH: str = "runs/obb/bin/weights/best.pt"
+BIN_OBB_CONF: float = 0.40
 # When True, detect_case_obb crops using the learned bin model (else: cfg.BIN_ROI
 # if set, else HSV find_bin). Priority at runtime: BIN_ROI > bin model > HSV.
 USE_BIN_MODEL: bool = True
+
+# ----------------------------------------------------------------------------
+# Box type per target — read by BOTH the SAM2 BEV labeler (label format) and
+# train.py (pretrained checkpoint + task) so they always match.
+# True = oriented box (OBB, 8-value labels), False = axis-aligned (5-value).
+# Flipping a target's value makes its existing labels the wrong format:
+# re-label (or convert) before training.
+# ----------------------------------------------------------------------------
+TRAIN_OBB: dict[str, bool] = {"case": True, "bin": True}
 
 # ----------------------------------------------------------------------------
 # SAM2 auto-labeling (sam2_autolabel.py) — runs offline on a GPU box, not at

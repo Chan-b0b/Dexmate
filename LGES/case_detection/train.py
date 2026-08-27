@@ -11,15 +11,18 @@ Trains from a small pretrained OBB checkpoint. Result: runs/obb/case/weights/bes
 from __future__ import annotations
 
 import argparse
+import sys
 from pathlib import Path
 
 HERE = Path(__file__).resolve().parent
+sys.path.insert(0, str(HERE))
+import config as cfg
 
 
 def main() -> None:
     ap = argparse.ArgumentParser()
     ap.add_argument("--target", choices=["case", "bin"], default="case",
-                    help="case = oriented-box detector; bin = axis-aligned detector")
+                    help="which detector to train (box type from cfg.TRAIN_OBB)")
     ap.add_argument("--data", default=None, help="data.yaml (default dataset_<target>/data.yaml)")
     ap.add_argument("--model", default=None, help="pretrained checkpoint (default per target)")
     ap.add_argument("--epochs", type=int, default=150)
@@ -27,11 +30,12 @@ def main() -> None:
     ap.add_argument("--batch", type=int, default=16)
     args = ap.parse_args()
 
-    # case -> oriented boxes (OBB); bin -> regular axis-aligned detection.
-    if args.target == "case":
-        model, project, cfg_path = args.model or "yolov8n-obb.pt", "obb", "OBB_MODEL_PATH"
+    # Box type comes from cfg.TRAIN_OBB so labels (SAM2) and task always match.
+    if cfg.TRAIN_OBB[args.target]:
+        model, project = args.model or "yolov8n-obb.pt", "obb"
     else:
-        model, project, cfg_path = args.model or "yolov8n.pt", "detect", "BIN_MODEL_PATH"
+        model, project = args.model or "yolov8n.pt", "detect"
+    cfg_path = "OBB_MODEL_PATH" if args.target == "case" else "BIN_MODEL_PATH"
     data = args.data or f"dataset_{args.target}/data.yaml"
 
     from ultralytics import YOLO

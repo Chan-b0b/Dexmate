@@ -31,15 +31,15 @@ finds the real grab/seat height.
 Optional flags (sequence.py parity):
 
     --gripper    battery picks scan the barcode during the descent (pick_gated);
-                 a TARGET_BARCODES match is handed to the right-arm gripper at
-                 the TARGET position (after the strafe right) instead of being
-                 seated in the case. Before the handoff the chassis aligns to
-                 the detected divert bin (detect_bin; bin center -> base_link
-                 y = DIVERT_BIN_TARGET_Y_M, fixed-strafe fallback if no bin)
-                 and strafes back after. The right-arm PLACE runs
-                 SYNCHRONOUSLY (a mid-place strafe would drag it through the
-                 bin); the right-arm home + left view park afterwards overlap
-                 the return strafes (_park_during_legs).
+                 a TARGET_BARCODES match is carried LEFT from the source
+                 (fixed DIVERT_CASE_STRAFE_LEFT_M strafe, open-loop) and
+                 suction-placed into the DIVERT CASE there (BEV-detected,
+                 aligned like a normal place) instead of being seated in the
+                 target case. Slot order is remembered across the run: the
+                 first target goes to the LEFT slot (BAT_SRC_2), the second to
+                 the RIGHT slot (BAT_SRC_1); at most two are expected. The
+                 chassis then strafes back right to the source. A failed
+                 detect/reach falls back to the normal target-case place.
     --auto-move  chassis legs run automatically: fixed CHASSIS_AUTO_STRAFE_DIST_M
                  strafes (overrides CHASSIS_MANUAL). At every station visit the
                  chassis first CENTERS the detected case — turn to case yaw
@@ -56,7 +56,7 @@ Optional flags (sequence.py parity):
 Run as a PACKAGE so the ik config and the case_detection config don't collide
 on the shared name `config`:
 
-    python -m LGES.ik_demo.chassis_sequence [--gripper] [--auto-move] [--dashboard]
+    python -m LGES.ik_demo.chassis_sequence [--gripper] [--auto-move] [--dashboard] [--state-publish]
 
 Needs a trained BEV detector (case_detection cfg.OBB_MODEL_PATH).
 """
@@ -674,6 +674,22 @@ def _view_park(mover: SuctionMover, label: str) -> None:
         _, rpy = mover.current_ee_pose()
         parked = mover.move_ee(tuple(cfg.ARM_VIEW_PARK_EE_POS), tuple(rpy)) is not None
         if not parked:
+            # move_ee's single min-motion solve from the live q strands on the
+            # start column's elbow branch (observed 49-113mm short, varying
+            # with the start pose, INCLUDING targets inside points that
+            # solved) — retry from the home seed, which reaches the park's
+            # own branch, before giving up to the full joint park
+            sol = mover.solve_pose(tuple(cfg.ARM_VIEW_PARK_EE_POS), tuple(rpy),
+                                   seed=np.asarray(cfg.ARM_VIEW_PARK_JOINTS,
+                                                   dtype=np.float64),
+                                   min_motion=False)
+            if (sol.pos_err_m <= cfg.REACH_TOL_M and sol.in_limits
+                    and not sol.in_collision):
+                logger.info("[{}] view park reached via the home-seed branch "
+                            "(min-motion solve was short)", label)
+                mover.move_joints(sol.q)
+                parked = True
+        if not parked:
             logger.warning("[{}] Cartesian view-park unreachable — joint park fallback", label)
     if not parked:
         mover.move_joints(np.asarray(cfg.ARM_VIEW_PARK_JOINTS, dtype=np.float64))
@@ -716,15 +732,36 @@ def _arms_home(bot, mover: SuctionMover) -> None:
     both_arms_home(bot, left=mover)
 
 
-def _detect_bin_xy(bot) -> "tuple[float, float] | None":
-    """One bin detection (head camera, full frame) at the current chassis
-    position, projected to base_link at DIVERT_BIN_PLANE_Z_M."""
+def _detect_bin_xy(bot, n: "int | None" = None) -> "tuple[float, float] | None":
+    """Bin detection on the metric BEV canvas (detect_bin.find_bin_bev, OBB),
+    warped at the bin RIM plane DIVERT_BIN_PLANE_Z_M — the box center maps
+    linearly to base xy, none of the raw-frame projection bias. Up to `n`
+    fresh-frame attempts (default cfg.SEED_BIN_DETECT_N), combined by
+    per-axis MEDIAN over the successful ones — one missed/jittery frame can't
+    push the caller to its fallback or drag the center (mirrors _refine_det
+    for cases). Returns None only when EVERY frame misses."""
     import detect_bin as dbn  # case_detection sibling (path set at module import)
-    rgb = _head_rgb(bot)
-    if rgb is None:
+    n = int(cfg.SEED_BIN_DETECT_N if n is None else n)
+    pts: list[tuple[float, float]] = []
+    yaws: list[float] = []
+    for _ in range(max(1, n)):
+        rgb = _head_rgb(bot)
+        det = None if rgb is None else dbn.find_bin_bev(
+            rgb, *_joints(bot), plane_z=cfg.DIVERT_BIN_PLANE_Z_M)
+        if det is not None:
+            pts.append((float(det[0]), float(det[1])))
+            yaws.append(float(det[2]))
+    if not pts:
         return None
-    xy = dbn.find_bin_base_xy(rgb, *_joints(bot), plane_z=cfg.DIVERT_BIN_PLANE_Z_M)
-    return None if xy is None else (float(xy[0]), float(xy[1]))
+    xs = [p[0] for p in pts]
+    ys = [p[1] for p in pts]
+    if len(pts) > 1:
+        logger.info("bin detected on {}/{} frames: xy=({:.3f},{:+.3f}) "
+                    "yaw={:.1f}deg (spread x {:.0f} / y {:.0f} mm)", len(pts), n,
+                    float(np.median(xs)), float(np.median(ys)),
+                    float(np.median(yaws)),
+                    (max(xs) - min(xs)) * 1000, (max(ys) - min(ys)) * 1000)
+    return float(np.median(xs)), float(np.median(ys))
 
 
 # Last measured bin-align gain (projected-y change / commanded strafe). It
@@ -770,7 +807,7 @@ def _align_to_bin(bot, label: str, target_y: "float | None" = None,
     prev_move = 0.0                 # previous commanded strafe (+left)
     for attempt in (1, 2, 3, 4, 5):
         rgb = _head_rgb(bot)
-        xy = None if rgb is None else dbn.find_bin_base_xy(
+        xy = None if rgb is None else dbn.find_bin_bev(
             rgb, *_joints(bot), plane_z=cfg.DIVERT_BIN_PLANE_Z_M)
         if xy is None:
             if attempt == 1:
@@ -855,24 +892,104 @@ def _divert_sync(mover: SuctionMover, gripper: GripperMover, label: str) -> "boo
     return True
 
 
+def _divert_case_place(bot, mover: SuctionMover, label: str, slot_key: str,
+                       auto: bool, leg: "ChassisNav | None",
+                       zt: "ZTracker | None") -> "bool | None":
+    """Suction-place the held TARGET battery into the DIVERT CASE to the LEFT
+    of the source: fixed DIVERT_CASE_STRAFE_LEFT_M strafe left (open-loop, view
+    park in parallel), BEV-detect the divert case (centered like a normal place
+    under --auto-move, but WITHOUT leg learning — the excursion legs are not
+    ChassisNav legs), place at `slot_key` (BAT_SRC_2 = left slot / BAT_SRC_1 =
+    right slot of the DETECTED case), then strafe back right to the source
+    (view park in parallel). Both excursion legs are unattributable to the
+    learned legs, so leg.skip_next_learn is set for the next centering.
+
+    Returns True once the battery is in the divert case (robot back at the
+    source); False with the battery STILL ON THE CUP after a detect/reach miss
+    (robot back at the source) so the caller can seat it in the target case
+    instead; None if the place failed with the part still held — the run must
+    stop (robot left at the divert case)."""
+    from .move_chassis import strafe_left, strafe_right
+    logger.info("[{}] divert: strafe LEFT {:.2f} m to the divert case (slot {})",
+                label, cfg.DIVERT_CASE_STRAFE_LEFT_M, slot_key)
+    _park_during_legs(label, [lambda: _view_park(mover, label)],
+                      lambda: strafe_left(bot, distance_m=cfg.DIVERT_CASE_STRAFE_LEFT_M))
+    if leg is not None:
+        leg.skip_next_learn = True
+    # slot point on the center line, same per-item ref scheme as run_item
+    y_ref = cfg.CHASSIS_CENTER_CASE_Y_M - resolve_poses((0.0, 0.0, 0.0, 0.0))[slot_key][1]
+    det = (_center_case(bot, cfg.DIVERT_CASE_LAYERS, label, "divert", None, y_ref)
+           if auto else detect(bot, cfg.DIVERT_CASE_LAYERS))
+    place_pose = None
+    if det is not None and det.found:
+        det = _refine_det(bot, cfg.DIVERT_CASE_LAYERS, det)   # median-of-N for the pose
+        _log_det(zt, "divert", label, cfg.DIVERT_CASE_LAYERS, det)
+        logger.info("[{}] divert case @ base xy=({:.3f},{:+.3f}) yaw={:.1f}deg conf={:.2f}",
+                    label, det.base_xy[0], det.base_xy[1], det.base_yaw_deg, det.conf)
+        pose = resolve_poses(_center_from_det(det))[slot_key]
+        if cfg.PLACE_YAW_TRIM_RAD:
+            # same systematic in-hand twist as the target battery place
+            pose = (*pose[:5], pose[5] + cfg.PLACE_YAW_TRIM_RAD)
+        if descent_reachable(mover, pose):
+            place_pose = pose
+        else:
+            logger.warning("[{}] divert slot pose out of reach", label)
+    else:
+        logger.warning("[{}] divert case NOT detected", label)
+    if place_pose is None:
+        if zt is not None:
+            zt.log_event("divert_miss", "divert", label, cfg.DIVERT_CASE_LAYERS)
+        logger.warning("[{}] divert aborted — strafe back right to the source", label)
+        _park_during_legs(label, [lambda: _view_park(mover, label)],
+                          lambda: strafe_right(bot, distance_m=cfg.DIVERT_CASE_STRAFE_LEFT_M))
+        return False
+    # no z anchor for this station — expectation from the detected plane, with
+    # the loose battery-over-case tolerance (seat at most one battery thickness
+    # above the case face)
+    exp_z = det.top_face_z + cfg.SUCTION_LENGTH_M
+    pres = mover.place(place_pose, expected_z=exp_z,
+                       misseat_tol_m=cfg.BATTERY_OVER_CASE_MAX_M,
+                       lift_to_clear=True)
+    if pres is not None and not getattr(pres, "success", True):
+        if zt is not None:
+            zt.log_event("place_" + pres.reason, "divert", label,
+                         cfg.DIVERT_CASE_LAYERS, pres.contact_ee_z, exp_z)
+        if pres.reason == "unreachable" and pres.contact_ee_z is None:
+            # hover leg failed BEFORE the release gate — part still on the cup
+            logger.error("[{}] divert place failed: {} (part still held) — stopping "
+                         "at the divert case", label, pres.reason)
+            return None
+        logger.warning("[{}] divert place failed ({}) — operator resolved it at the "
+                       "gate, continuing", label, pres.reason)
+    logger.info("[{}] diverted to the case slot {} — strafe back right to the source",
+                label, slot_key)
+    _park_during_legs(label, [lambda: _view_park(mover, label)],
+                      lambda: strafe_right(bot, distance_m=cfg.DIVERT_CASE_STRAFE_LEFT_M))
+    return True
+
+
 def run_item(bot, mover: SuctionMover, label: str, pose_key: str,
-             src_layers: int, tgt_layers: int, gripper: "GripperMover | None" = None,
+             src_layers: int, tgt_layers: int,
              scan: bool = False, auto: bool = False,
              leg: "ChassisNav | None" = None,
-             zt: "ZTracker | None" = None, admittance: bool = False) -> bool:
+             zt: "ZTracker | None" = None,
+             divert_slots: "list[str] | None" = None) -> bool:
     """One item's full left->pick->right->place->left cycle.
 
     `src_layers` / `tgt_layers` are the CURRENT stack heights for this layer
     (the layer loop in run() steps them; cfg.SRC/TGT_LAYERS_REMAINING are only
     the starting values). With `scan`, battery picks read the barcode during
-    the descent; a TARGET_BARCODES match diverts to `gripper` at the target
-    position instead of the case place. With `auto` (--auto-move), chassis
-    legs are automatic and a failed reach pre-check auto-adjusts from the
-    detection (up to CHASSIS_ADJUST_MAX_ATTEMPTS) before falling back to the
-    interactive keyboard prompt. `admittance` (--admittance) makes the target
-    place comply x/y/yaw to contact force while descending, instead of holding
-    xy fixed and only reacting via _misseat_recover after a full contact —
-    see suction.place(admittance=)."""
+    the descent; a TARGET_BARCODES match is suction-placed into the DIVERT
+    CASE to the LEFT of the source (_divert_case_place) — `divert_slots` is
+    run()'s remaining slot-key order (left slot first, then right; the used
+    slot is consumed on success). With `auto` (--auto-move), chassis legs are
+    automatic and a failed reach pre-check auto-adjusts from the detection (up
+    to CHASSIS_ADJUST_MAX_ATTEMPTS) before falling back to the interactive
+    keyboard prompt. Every TARGET place corner-seats (suction.place
+    (corner_seat=)): the descent aims off the datum corner and the held part
+    is driven into it, each axis stopping on its own wall contact, so the
+    walls fix its final position — the case drives WHILE descending (tall
+    bin walls), the battery only AFTER contact (low slot walls)."""
     logger.info("=== item: {} ({}) src_layers={} tgt_layers={} ===",
                 label, pose_key, src_layers, tgt_layers)
     # Per-item centering ref: put THIS item's grab/seat point (its case-local
@@ -949,43 +1066,32 @@ def run_item(bot, mover: SuctionMover, label: str, pose_key: str,
     if res.barcode is not None:
         logger.info("[{}] barcode {!r} (target={})", label, res.barcode, is_target(res.barcode))
 
+    # --- DIVERT (barcode-matched battery): suction-place into the divert case
+    #     to the LEFT of the source, remembered slot order (left, then right);
+    #     a miss falls through to the normal target-case place below ---
+    if is_target(res.barcode):
+        if divert_slots:
+            logger.info("[{}] TARGET battery {!r} — diverting to the divert case",
+                        label, res.barcode)
+            diverted = _divert_case_place(bot, mover, label, divert_slots[0],
+                                          auto, leg, zt)
+            if diverted is None:
+                # part still on the cup at the divert case — stop here
+                logger.error("[{}] stopping at the divert case (part still held)", label)
+                return False
+            if diverted:
+                divert_slots.pop(0)
+                return True
+            logger.warning("[{}] divert aborted — seating in the target case instead",
+                           label)
+        else:
+            logger.warning("[{}] TARGET battery {!r} but both divert slots are used — "
+                           "seating in the target case", label, res.barcode)
+
     # --- TARGET: park the arm (clear the head view) IN PARALLEL with the
-    #     strafe right; a barcode-matched battery diverts to the right-arm
-    #     gripper, everything else detects + places in the case ---
+    #     strafe right, then detect + place in the case ---
     _park_during_legs(label, [lambda: _view_park(mover, label)],
                       lambda: strafe(bot, "right", auto, leg))
-    if gripper is not None and is_target(res.barcode):
-        from .move_chassis import strafe_left, strafe_right
-        logger.info("[{}] TARGET battery {!r} — diverting to right-arm gripper",
-                    label, res.barcode)
-        # position the (base_link-fixed) right-arm place over the divert bin:
-        # strafe so the detected bin sits at DIVERT_BIN_TARGET_Y_M; the net
-        # move is strafed back before anything that needs the target geometry
-        back = -_align_to_bin(bot, label)   # +: strafe left to return
-        diverted = _divert_sync(mover, gripper, label)
-        if diverted is None:
-            # battery off the cup but the right arm stalled holding it — stop here
-            logger.error("[{}] stopping on the right side (right arm holds the battery)", label)
-            return False
-        if leg is not None:
-            # bin-align + its return are open-loop and the right-leg arrival was
-            # never measured — the NEXT centering must not teach the legs
-            leg.skip_next_learn = True
-        if diverted:
-            logger.info("[{}] right arm -> home + left view park (parallel "
-                        "with the return strafes)", label)
-            def _return_legs():
-                if abs(back) > 1e-3:
-                    (strafe_left if back > 0 else strafe_right)(bot, distance_m=abs(back))
-                strafe(bot, "left", auto, leg)
-            _park_during_legs(label,
-                              [lambda: gripper.move_joints(gripper._home_seed),
-                               lambda: _view_park(mover, label)],
-                              _return_legs)
-            return True
-        logger.warning("[{}] divert failed — seating in the case instead", label)
-        if abs(back) > 1e-3:
-            (strafe_left if back > 0 else strafe_right)(bot, distance_m=abs(back))
     adjusts = 0
     redetects = 0
     tgt_plane = zt.plane_z("target", tgt_layers) if zt is not None else None
@@ -1012,34 +1118,50 @@ def run_item(bot, mover: SuctionMover, label: str, pose_key: str,
         if seed:
             logger.info("[{}] empty target (first case) -> seed place, no case "
                         "detection", label)
-            seed_xy = tuple(cfg.TARGET_DEFAULT_CASE_CENTER[:2])
+            from .move_chassis import strafe_left, strafe_right
             if auto:
-                # The default pose is base_link-fixed, so without this the
-                # first case inherits the full leg arrival error and the whole
-                # stack builds off it. Strafe so the BIN center sits where the
-                # default pose will land the case center (TARGET_DEFAULT y);
-                # no bin detected -> blind, as before.
+                # Strafe so the BIN center sits where the seed will land the
+                # case center (TARGET_DEFAULT y) — the closed-loop detection
+                # below then only absorbs the small aligned residual.
                 _align_to_bin(bot, label,
                               target_y=cfg.TARGET_DEFAULT_CASE_CENTER[1],
                               fallback_right_m=0.0,
                               max_err_m=cfg.CHASSIS_DETECT_Y_GATE_M)
-                # CLOSED-LOOP seed: one more bin detection AFTER the align, and
-                # the place center comes from it (+ the measured bbox bias,
-                # SEED_BIN_CENTER_OFFSET) — the strafe's accepted residual
-                # (DIVERT_BIN_TOL_M) and the leg's x error then never reach the
-                # placement; the ARM absorbs them (0806: occasional wall-catch,
-                # detected x ~47mm forward of true). Detect fail -> default.
+            # CLOSED-LOOP seed: the place center comes from a bin detection
+            # (+ SEED_BIN_CENTER_OFFSET), trusted AS-IS (no deviation gates —
+            # a bad aim is still caught by the reach pre-check and by the
+            # corner-seat's wall-latch release precondition). Detection is
+            # REQUIRED — there is no blind default-pose place anymore: a
+            # failed detection first walks SEED_BIN_SEARCH_STRAFES_M (auto)
+            # to change the view, then hands the operator the keyboard (move
+            # the chassis, `d` re-detects, `q` stops with the case held).
+            search = [float(s) for s in cfg.SEED_BIN_SEARCH_STRAFES_M]
+            while True:
                 bxy = _detect_bin_xy(bot)
-                if (bxy is not None and abs(bxy[1] - cfg.TARGET_DEFAULT_CASE_CENTER[1])
-                        <= cfg.CHASSIS_DETECT_Y_GATE_M):
+                if bxy is not None:
                     seed_xy = (bxy[0] + cfg.SEED_BIN_CENTER_OFFSET[0],
                                bxy[1] + cfg.SEED_BIN_CENTER_OFFSET[1])
                     logger.info("[{}] seed place from the detected bin: center "
                                 "({:.3f},{:+.3f}) -> place ({:.3f},{:+.3f})", label,
                                 bxy[0], bxy[1], seed_xy[0], seed_xy[1])
-                else:
-                    logger.warning("[{}] bin re-detect failed/rejected — seed at the "
-                                   "default pose", label)
+                    break
+                logger.warning("[{}] seed bin detect failed", label)
+                if auto and search:
+                    move = search.pop(0)
+                    logger.warning("[{}] seed bin search: strafe {} {:.2f} m, "
+                                   "re-detect ({} step(s) left)", label,
+                                   "LEFT" if move > 0 else "RIGHT", abs(move),
+                                   len(search))
+                    (strafe_left if move > 0 else strafe_right)(
+                        bot, distance_m=abs(move))
+                    continue
+                logger.warning("[{}] seed bin NOT found — adjust the chassis "
+                               "(f/b/l/r), `d` to re-detect, `q` to stop "
+                               "(case still held)", label)
+                if not _manual_strafe(bot, "adjust"):
+                    logger.error("[{}] giving up the seed place (case still held)",
+                                 label)
+                    return False
             # Seed at the SOURCE's detected yaw (carried from this item's pick,
             # `center`) instead of base-frame 0: the wrist then does NO
             # de-rotation in transit and the stack mirrors the source stack's
@@ -1107,35 +1229,61 @@ def run_item(bot, mover: SuctionMover, label: str, pose_key: str,
             place_pose = (*place_pose[:5], place_pose[5] + cfg.PLACE_YAW_TRIM_RAD)
             logger.info("[{}] place yaw trim {:+.1f} deg", label,
                         float(np.rad2deg(cfg.PLACE_YAW_TRIM_RAD)))
-        if descent_reachable(mover, place_pose):
-            break
-        # auto-adjust needs a detection to steer by — the no-case default pose
-        # is fixed in base_link, so it goes straight to the keyboard prompt
-        if auto and tdet is not None and tdet.found and adjusts < cfg.CHASSIS_ADJUST_MAX_ATTEMPTS:
-            adjusts += 1
-            logger.warning("[{}] place pose out of reach — auto-adjust {}/{}",
-                           label, adjusts, cfg.CHASSIS_ADJUST_MAX_ATTEMPTS)
-            dy = _auto_adjust(bot, tdet, (cfg.TARGET_DEFAULT_CASE_CENTER[0], y_ref))
-            if leg is not None:
-                leg.learn(dy, "target")
+        # corner-seat aim bias — applied HERE (not in suction.place) so the
+        # reach pre-check below checks the pose that is actually FLOWN: at a
+        # 50mm bias the previously-unchecked shift broke the hover approach
+        # 37mm past the pre-checked column (0824)
+        cs_bias = float(cfg.CASE_CORNER_AIM_BIAS_M if label == "case"
+                        else cfg.BATTERY_CORNER_AIM_BIAS_M)
+        place_pose = (place_pose[0] - np.sign(cfg.CASE_CORNER_DIR[0]) * cs_bias,
+                      place_pose[1] - np.sign(cfg.CASE_CORNER_DIR[1]) * cs_bias,
+                      *place_pose[2:])
+        logger.info("[{}] corner-seat aim bias ({:+.1f},{:+.1f})mm (away from the "
+                    "datum corner)", label,
+                    -np.sign(cfg.CASE_CORNER_DIR[0]) * cs_bias * 1000,
+                    -np.sign(cfg.CASE_CORNER_DIR[1]) * cs_bias * 1000)
+        if not descent_reachable(mover, place_pose):
+            # auto-adjust needs a detection to steer by — the no-case default
+            # pose is fixed in base_link, so it goes straight to the keyboard
+            if auto and tdet is not None and tdet.found and adjusts < cfg.CHASSIS_ADJUST_MAX_ATTEMPTS:
+                adjusts += 1
+                logger.warning("[{}] place pose out of reach — auto-adjust {}/{}",
+                               label, adjusts, cfg.CHASSIS_ADJUST_MAX_ATTEMPTS)
+                dy = _auto_adjust(bot, tdet, (cfg.TARGET_DEFAULT_CASE_CENTER[0], y_ref))
+                if leg is not None:
+                    leg.learn(dy, "target")
+                continue
+            # holding the item — no auto-recovery; reposition + retry, or stop
+            logger.warning("[{}] place pose out of reach — adjust the chassis (f/b/l/r), "
+                           "`d` to re-detect + retry, `q` to stop (item still held)", label)
+            if not (cfg.CHASSIS_MANUAL or auto) or not _manual_strafe(bot, "adjust"):
+                logger.error("[{}] stopping on the right side (item still held)", label)
+                return False
             continue
-        # holding the item — no auto-recovery; reposition + retry, or stop here
-        logger.warning("[{}] place pose out of reach — adjust the chassis (f/b/l/r), "
-                       "`d` to re-detect + retry, `q` to stop (item still held)", label)
-        if not (cfg.CHASSIS_MANUAL or auto) or not _manual_strafe(bot, "adjust"):
-            logger.error("[{}] stopping on the right side (item still held)", label)
+        _dual_plane_probe(bot, tgt_layers, tgt_plane, "target", label, zt)
+        # misseat check only with a measured-anchored expectation (own / sibling /
+        # case anchor, each with its tolerance) — the model plane has been seen off
+        # by more than any of those tolerances (0804 layer 5)
+        # lift_to_clear: place stops the lift at the wall-clear height (0.95, cup
+        # empty) — the return strafe below starts right away and the view park
+        # (target z = SAFE_TRANSPORT_Z) finishes the rise in parallel
+        pres = mover.place(place_pose, expected_z=exp_z, misseat_tol_m=mtol,
+                           lift_to_clear=True,
+                           corner_seat="case" if label == "case" else "battery")
+        if (seed and pres is not None and pres.reason == "unreachable"
+                and pres.contact_ee_z is None):
+            # seed hover approach failed with the case still ON the cup and
+            # nothing moved — give the operator the keyboard instead of
+            # stopping the run; `d` RE-DETECTS the bin (the chassis moved, so
+            # the bin-anchored pose is stale) and retries the whole place
+            logger.warning("[{}] seed place unreachable (case still held) — adjust "
+                           "the chassis (f/b/l/r), `d` to re-detect + retry, "
+                           "`q` to stop", label)
+            if _manual_strafe(bot, "adjust"):
+                continue
+            logger.error("[{}] stopping on the right side (case still held)", label)
             return False
-    _dual_plane_probe(bot, tgt_layers, tgt_plane, "target", label, zt)
-    # misseat check only with a measured-anchored expectation (own / sibling /
-    # case anchor, each with its tolerance) — the model plane has been seen off
-    # by more than any of those tolerances (0804 layer 5)
-    # lift_to_clear: place stops the lift at the wall-clear height (0.95, cup
-    # empty) — the return strafe below starts right away and the view park
-    # (target z = SAFE_TRANSPORT_Z) finishes the rise in parallel
-    pres = mover.place(place_pose, expected_z=exp_z, misseat_tol_m=mtol,
-                       lift_to_clear=True,
-                       admittance=admittance and label.startswith("battery"),
-                       case_search=admittance and label == "case")
+        break
     if zt is not None and pres is not None:
         # contact diagnostics: tared base wrench + cmd-vs-measured EE yaw at
         # the (final) contact, and the recovery outcome if any retries ran
@@ -1210,15 +1358,16 @@ def run_item(bot, mover: SuctionMover, label: str, pose_key: str,
     return True
 
 
-def run(bot, mover: SuctionMover, gripper: "GripperMover | None" = None,
-        scan: bool = False, auto: bool = False, admittance: bool = False) -> bool:
+def run(bot, mover: SuctionMover,
+        scan: bool = False, auto: bool = False) -> bool:
     """Layer loop: each layer runs the full item set (case + 2 batteries), then
     the stacks step (source -1, target +1) so the BEV warp plane tracks the
     shrinking source / growing target. Loops until the source is exhausted.
-    `gripper`/`scan`/`auto`/`admittance` are passed through to run_item
-    (barcode divert / --auto-move / --admittance); with `auto`, arrival
-    residuals feed back into learned per-direction leg distances (ChassisNav)
-    used by every later strafe leg."""
+    `scan`/`auto` are passed through to run_item (barcode divert /
+    --auto-move); with `auto`, arrival residuals feed back into learned
+    per-direction leg distances (ChassisNav) used by every later strafe leg.
+    The divert-case slot order (first target -> left slot, second -> right)
+    is remembered HERE, across items and layers."""
     # The OPERATOR positions the chassis at the SOURCE station once (keyboard,
     # move_chassis grammar — replaces the old fixed initial left leg); each
     # item returns here at its end, so a failed pick just stops (no
@@ -1233,6 +1382,9 @@ def run(bot, mover: SuctionMover, gripper: "GripperMover | None" = None,
         logger.error("start positioning aborted (`q`) — run cancelled")
         return False
     src, tgt = cfg.SRC_LAYERS_REMAINING, cfg.TGT_LAYERS_REMAINING
+    # remaining divert-case slots, consumed by run_item on each successful
+    # divert: first target battery -> LEFT slot, second -> RIGHT slot
+    divert_slots = ["BAT_SRC_2", "BAT_SRC_1"]
     layer = 0
     try:
         while src >= 1:
@@ -1240,8 +1392,8 @@ def run(bot, mover: SuctionMover, gripper: "GripperMover | None" = None,
             logger.info("=== layer {}: source stack {}, target stack {} ===", layer, src, tgt)
             for label, key in ITEMS:
                 if not run_item(bot, mover, label, key, src, tgt,
-                                gripper=gripper, scan=scan, auto=auto, leg=leg, zt=zt,
-                                admittance=admittance):
+                                scan=scan, auto=auto, leg=leg, zt=zt,
+                                divert_slots=divert_slots):
                     logger.error("stopping at layer {} item {} (robot left where it is) — "
                                  "to resume, set SRC_LAYERS_REMAINING={} TGT_LAYERS_REMAINING={}",
                                  layer, label, src, tgt)
@@ -1263,7 +1415,7 @@ def _main() -> None:
     from dexcontrol.core.config import get_robot_config
     from dexcontrol.robot import Robot
 
-    KNOWN_FLAGS = {"--gripper", "--auto-move", "--dashboard", "--admittance"}
+    KNOWN_FLAGS = {"--gripper", "--auto-move", "--dashboard", "--state-publish"}
     unknown = [a for a in sys.argv[1:] if a not in KNOWN_FLAGS]
     if unknown:
         raise ValueError(f"unknown flag(s) {unknown} — choose from {sorted(KNOWN_FLAGS)}")
@@ -1271,22 +1423,30 @@ def _main() -> None:
     use_gripper = "--gripper" in sys.argv   # barcode scan + divert (as sequence.py)
     auto_move = "--auto-move" in sys.argv   # automatic chassis legs + auto-adjust
     use_dashboard = "--dashboard" in sys.argv  # spool camera/joints/EE/wrench (as sequence.py)
-    use_admittance = "--admittance" in sys.argv  # target place complies to contact force (experimental)
+    use_state_publish = "--state-publish" in sys.argv  # mirror joint state to zenoh (e.g. for Isaac mirror)
 
     logger.warning("=" * 60)
     logger.warning("MOVES THE REAL ARM + SUCTION + CHASSIS (strafe L/R per item):")
     for label, key in ITEMS:
         logger.warning("   {} ({})", label, key)
     if use_gripper:
-        logger.warning("Barcode divert ENABLED (target codes -> right gripper, at the target side).")
+        logger.warning("Barcode divert ENABLED (target codes -> divert case, {:.2f} m "
+                       "LEFT of the source; first -> left slot, second -> right).",
+                       cfg.DIVERT_CASE_STRAFE_LEFT_M)
     if auto_move:
         logger.warning("AUTO chassis ENABLED: {:.2f} m legs + detection-based adjust.",
                        cfg.CHASSIS_AUTO_STRAFE_DIST_M)
     if use_dashboard:
         logger.warning("Dashboard spool ENABLED — view with run_dashboard_demo.sh.")
-    if use_admittance:
-        logger.warning("Admittance place ENABLED (experimental, unverified gains) — "
-                       "target descent complies x/y/yaw to contact force.")
+    if use_state_publish:
+        logger.warning("Zenoh joint-state publish ENABLED (arm/head/torso -> state_publish).")
+    logger.warning("Corner-seat places (experimental, unverified): case driven into the "
+                   "bin corner while descending (aim {:+.0f},{:+.0f}mm off); battery "
+                   "driven into the slot corner after contact (aim {:+.0f},{:+.0f}mm off).",
+                   -np.sign(cfg.CASE_CORNER_DIR[0]) * cfg.CASE_CORNER_AIM_BIAS_M * 1000,
+                   -np.sign(cfg.CASE_CORNER_DIR[1]) * cfg.CASE_CORNER_AIM_BIAS_M * 1000,
+                   -np.sign(cfg.CASE_CORNER_DIR[0]) * cfg.BATTERY_CORNER_AIM_BIAS_M * 1000,
+                   -np.sign(cfg.CASE_CORNER_DIR[1]) * cfg.BATTERY_CORNER_AIM_BIAS_M * 1000)
     logger.warning("Clear the strafe path. E-stop in reach.")
     logger.warning("=" * 60)
     if input("Continue? [y/N]: ").strip().lower() != "y":
@@ -1301,11 +1461,15 @@ def _main() -> None:
             logger.warning("head camera may not be active")
         # Tilt the head down so the box is in view (same as live_bev/capture); the
         # BEV homography uses the live joints, so ~30 deg matches the training data.
-        set_head_pitch(bot, angle=15.0)
+        set_head_pitch(bot, angle=24.0)
         publisher = None
         if use_dashboard:
             from .dashboard_publish import DashboardPublisher
             publisher = DashboardPublisher(bot).start()
+        state_publisher = None
+        if use_state_publish:
+            from .state_publish import StatePublisher
+            state_publisher = StatePublisher(bot).start()
         try:
             with SuctionMover(bot) as m:
                 release = m.software_estop_active()
@@ -1314,26 +1478,20 @@ def _main() -> None:
                 if not m.ensure_ready(release_estop=release):
                     logger.error("arm not ready — aborting")
                     return
-                gripper = None
-                if use_gripper:
-                    gripper = GripperMover(bot)
-                    gripper.ensure_ready(release_estop=release)
-                    if not gripper.initialize():
-                        logger.warning("gripper unavailable — divert disabled")
-                        gripper = None
                 # Start clean: BOTH arms safe-homed (lift-if-low first, so an arm
                 # left down in a box by a previous run doesn't sweep the walls).
                 logger.info("-> both arms safe home")
                 from .go_home import both_arms_home
                 both_arms_home(bot, left=m)
-                ok = run(bot, m, gripper=gripper, scan=use_gripper, auto=auto_move,
-                        admittance=use_admittance)
+                ok = run(bot, m, scan=use_gripper, auto=auto_move)
                 logger.info("-> home")
                 m.move_joints(m._home_seed)
                 logger.info("sequence {}", "OK" if ok else "FAILED")
         finally:
             if publisher is not None:
                 publisher.stop()
+            if state_publisher is not None:
+                state_publisher.stop()
 
 
 if __name__ == "__main__":
