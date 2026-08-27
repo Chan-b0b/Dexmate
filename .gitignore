@@ -20,6 +20,7 @@ Research/residual_rl/chassis_probe_logs/**
 **/data/**
 **/out/**
 **/case_detection/**/*.jpg
+**/case_detection/**/*.txt
 
 # Python & cache
 __pycache__/
