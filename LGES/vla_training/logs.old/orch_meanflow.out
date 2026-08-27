@@ -1,7 +1,0 @@
-[mf-orch] launching both MeanFlow runs on GPU 6 (steps=20000 batch=32)
-[mf-orch] smolvla_meanflow_0708: tensorboard --logdir /home/maverick/Dexmate/LGES/vla_training/logs/smolvla_meanflow_0708/tb
-[mf-orch] smolvla_meanflow_0708_abs: tensorboard --logdir /home/maverick/Dexmate/LGES/vla_training/logs/smolvla_meanflow_0708_abs/tb
-[mf-orch] smolvla_meanflow_0708_abs finished rc=0
-[mf-orch] smolvla_meanflow_0708 finished rc=0
-[mf-orch] DONE  meanflow_0708=0 meanflow_0708_abs=0
-[mf-orch] outputs: /home/maverick/Dexmate/LGES/vla_training/outputs/{smolvla_meanflow_0708,smolvla_meanflow_0708_abs}

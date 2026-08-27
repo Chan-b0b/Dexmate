@@ -1,6 +1,0 @@
-[0727] episodes=116 frames=24648 fps=15
-[0727] state=[15] action=[7] (rel) cams=['observation.images.head', 'observation.images.head_depth']
-[0727] |F| hover=4.7N sealed=8.8N (RISE)
-[0727] contact z p10/50/90=[0.765 0.819 1.156] (n=116)
-[0727] FZ_MEDIAN=2.6
-[0727] force profile OK for F0=6/tau=4

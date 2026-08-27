@@ -21,6 +21,13 @@ Research/residual_rl/chassis_probe_logs/**
 **/out/**
 **/case_detection/**/*.jpg
 **/case_detection/**/*.txt
+**/case_detection/**/*.cache
+LGES/vla_training/logs.old/**
+Research/MPC/runs/**
+LGES/case_battery_demo/recordings.zip
+perception.zip
+*.deb
+**/*.synctex.gz
 
 # Python & cache
 __pycache__/

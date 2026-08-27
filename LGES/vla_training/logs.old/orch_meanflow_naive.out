@@ -1,47 +1,0 @@
-[mf-naive] converting naive checkpoints -> meanflow warm starts
-WARNING:root:No accelerated backend detected. Using default cpu, this will be slow.
-WARNING:lerobot.configs.policies:Device 'cuda' is not available. Switching to 'cpu'.
-WARNING:root:No accelerated backend detected. Using default cpu, this will be slow.
-WARNING:lerobot.configs.policies:Device 'cuda' is not available. Switching to 'cpu'.
-`torch_dtype` is deprecated! Use `dtype` instead!
-Loading source policy from /home/maverick/Dexmate/LGES/vla_training/outputs/smolvla_naive_0708/checkpoints/last/pretrained_model ...
-Loading  HuggingFaceTB/SmolVLM2-500M-Video-Instruct weights ...
-Loading weights:   0%|          | 0/489 [00:00<?, ?it/s]Loading weights:  36%|███▌      | 177/489 [00:00<00:00, 1685.54it/s]Loading weights:  78%|███████▊  | 383/489 [00:00<00:00, 1899.09it/s]Loading weights: 100%|██████████| 489/489 [00:00<00:00, 2078.20it/s]
-Reducing the number of VLM layers to 16 ...
-Loading weights from local directory
-Building MeanFlow policy and transferring weights ...
-Reducing the number of VLM layers to 16 ...
-Weights transferred. New zero-initialized params: ['model.action_interval_proj.weight', 'model.action_interval_proj.bias']
-Copied processor files: ['policy_preprocessor.json', 'policy_preprocessor_step_5_normalizer_processor.safetensors', 'policy_postprocessor.json', 'policy_postprocessor_step_0_unnormalizer_processor.safetensors']
-Done. Train with:
-  lerobot-train \
-    --policy.path=/home/maverick/checkpoints/smolvla_meanflow_naive_0708 \
-    --policy.discover_packages_path=smolvla_meanflow \
-    --dataset.repo_id=<your dataset> ...
-WARNING:root:No accelerated backend detected. Using default cpu, this will be slow.
-WARNING:lerobot.configs.policies:Device 'cuda' is not available. Switching to 'cpu'.
-WARNING:root:No accelerated backend detected. Using default cpu, this will be slow.
-WARNING:lerobot.configs.policies:Device 'cuda' is not available. Switching to 'cpu'.
-`torch_dtype` is deprecated! Use `dtype` instead!
-Loading source policy from /home/maverick/Dexmate/LGES/vla_training/outputs/smolvla_naive_0708_abs/checkpoints/last/pretrained_model ...
-Loading  HuggingFaceTB/SmolVLM2-500M-Video-Instruct weights ...
-Loading weights:   0%|          | 0/489 [00:00<?, ?it/s]Loading weights:  40%|████      | 196/489 [00:00<00:00, 1948.39it/s]Loading weights: 100%|██████████| 489/489 [00:00<00:00, 3102.19it/s]
-Reducing the number of VLM layers to 16 ...
-Loading weights from local directory
-Building MeanFlow policy and transferring weights ...
-Reducing the number of VLM layers to 16 ...
-Weights transferred. New zero-initialized params: ['model.action_interval_proj.weight', 'model.action_interval_proj.bias']
-Copied processor files: ['policy_preprocessor.json', 'policy_preprocessor_step_5_normalizer_processor.safetensors', 'policy_postprocessor.json', 'policy_postprocessor_step_0_unnormalizer_processor.safetensors']
-Done. Train with:
-  lerobot-train \
-    --policy.path=/home/maverick/checkpoints/smolvla_meanflow_naive_0708_abs \
-    --policy.discover_packages_path=smolvla_meanflow \
-    --dataset.repo_id=<your dataset> ...
-[mf-naive] launching both runs on GPU 6 (steps=20000 batch=32)
-[mf-naive] smolvla_meanflow_naive_0708: tensorboard --logdir /home/maverick/Dexmate/LGES/vla_training/logs/smolvla_meanflow_naive_0708/tb
-[mf-naive] smolvla_meanflow_naive_0708_abs: tensorboard --logdir /home/maverick/Dexmate/LGES/vla_training/logs/smolvla_meanflow_naive_0708_abs/tb
-[mf-naive] smolvla_meanflow_naive_0708_abs finished rc=0
-[tb_log] wrote 19 step records -> /home/maverick/Dexmate/LGES/vla_training/logs/smolvla_meanflow_naive_0708_abs/tb
-[mf-naive] smolvla_meanflow_naive_0708 finished rc=0
-[mf-naive] DONE  rel=0 abs=0
-[tb_log] wrote 19 step records -> /home/maverick/Dexmate/LGES/vla_training/logs/smolvla_meanflow_naive_0708/tb
