@@ -4,7 +4,9 @@ LGES/case_detection/data/**
 LGES/case_detection/dataset_case/**
 LGES/case_detection/labeled_case/**
 LGES/case_detection/checkpoints/**
-LGES/case_detection/runs/**
+LGES/case_detection/runs/**/*.jpg
+LGES/case_detection/runs/**/*.png
+LGES/case_detection/runs/**/*.csv
 LGES/case_detection/*.pt
 Research/condition_driven/rollouts/**
 Research/condition_driven/rollouts_gated/**
