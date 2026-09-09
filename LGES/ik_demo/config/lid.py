@@ -225,6 +225,12 @@ LID_PLACE_START_EE_Z_M: float = 0.405
 # arm base down and over so it does. arm.pin_torso re-models at it, and the
 # stance is restored to TORSO_JOINTS after the release.
 LID_PLACE_TORSO_DEG: tuple[float, float, float] = (14.8, 59.0, -60.3)
+# Torso speed for the lean INTO that stance (lid_place_stance) and the un-lean
+# back to TORSO_JOINTS after the release, as a fraction of the torso's velocity
+# ceiling. Its own knob because the lean is a 75 deg swing on the third joint,
+# which at the shared TORSO_VEL_SCALE (0.2, sized for mm of drift correction)
+# crawls. Every other torso move keeps TORSO_VEL_SCALE.
+LID_TORSO_VEL_SCALE: float = 0.3
 # BEV warp plane for detecting the lid ALREADY ON THE FLOOR at the unload spot
 # = its TOP FACE. Measured: the cup touched down on it at EE z 0.35, one
 # cup-length above, so 0.35 - SUCTION_LENGTH_M.

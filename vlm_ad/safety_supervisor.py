@@ -1,6 +1,6 @@
 """안전 감시 메인 루프.
 
-세 개의 독립적인 판단 경로를 병렬로 돌린다:
+네 개의 독립적인 판단 경로를 병렬로 돌린다:
 
   경로 1) 안전 이상탐지 (위험한가?)
     카메라/힘센서 샘플
@@ -27,7 +27,17 @@
     환산에 필요한 모터 토크 상수가 확인되지 않아 대신 이 경량 방식을 쓴다
     (자세한 이유는 arm_current_monitor.py 참고).
 
-두 경로는 같은 원본 데이터(프레임, 힘/토크)를 재사용하지만 완전히 다른
+  경로 4) 페이로드 낙하 감지 (잡고 있던 물체를 놓쳤는가?)
+    엔드이펙터 센서 (흡착 진공 seal DI0 / Robotiq gOBJ+gPO)
+      -> PayloadDropDetector (EE별 "한 번 잡았다"를 기억하는 무장 상태기)
+      -> 로그 + 콜백만. **로봇을 정지시키지 않는다** - 낙하는 위험 상황이
+         아니라 작업 실패이고, 재파지/재계획/중단은 태스크 쪽 판단이다.
+    앞의 세 경로가 "로봇이 위험한가/진행하는가"를 보는 것과 달리, 이 경로만
+    로봇이 아니라 **페이로드**를 본다. 카메라와 무관하므로 프레임이
+    오래됐을 때도 그대로 동작한다. 하드웨어가 연결되지 않으면 조용히
+    비활성된다 (drop_detectors가 빈 리스트).
+
+경로 1~3은 같은 원본 데이터(프레임, 힘/토크)를 재사용하지만 완전히 다른
 질문을 던지고 다른 조치로 이어지므로 상태(쿨다운, 실패 카운터)를 분리해서
 관리한다.
 
@@ -65,6 +75,7 @@ from __future__ import annotations
 import logging
 import threading
 import time
+from typing import Callable, Sequence
 
 import numpy as np
 
@@ -78,6 +89,7 @@ from config import (
 )
 from anomaly_filter import LightweightAnomalyFilter
 from arm_current_monitor import ArmCurrentAnomalyDetector
+from drop_detector import DropEvent, PayloadDropDetector
 from force_baseline import AdaptiveForceBaseline
 from robot_interface import EmergencyStopFailure, RobotInterface
 from stall_detector import StallDetector
@@ -102,6 +114,8 @@ class SafetySupervisor:
         stall_cfg: StallDetectorConfig | None = None,
         feasibility_policy_cfg: TaskFeasibilityPolicyConfig | None = None,
         force_baseline_cfg: ForceBaselineConfig | None = None,
+        drop_detectors: Sequence[PayloadDropDetector] | None = None,
+        on_drop: Callable[[DropEvent], None] | None = None,
     ) -> None:
         self._robot = robot
         self._filter_cfg = filter_cfg
@@ -144,6 +158,11 @@ class SafetySupervisor:
             "left": ArmCurrentAnomalyDetector(self._force_baseline_cfg),
             "right": ArmCurrentAnomalyDetector(self._force_baseline_cfg),
         }
+
+        # 경로 4: 엔드이펙터 페이로드 낙하 감지. 하드웨어가 없으면 빈 리스트라
+        # 경로 자체가 조용히 비활성된다 (다른 경로에는 영향 없음).
+        self._drop_detectors = list(drop_detectors or ())
+        self._on_drop = on_drop
 
         # 카메라 프레임 신선도 경고 상태 (_check_frame_freshness)
         self._stale_since: float | None = None
@@ -323,6 +342,34 @@ class SafetySupervisor:
         # (움직임/힘 패턴과 무관하게, 관절 하나가 유독 이상한 전류를 쓰는
         # 경우도 있을 수 있으므로).
         self._run_arm_current_path(task_context, anomaly_candidate, stall_candidate)
+
+        # 경로 4: 페이로드 낙하 감지. 카메라와 무관한 경로이므로 프레임이
+        # 오래됐을 때도 그대로 돌아간다.
+        self._run_drop_detection_path()
+
+    def _run_drop_detection_path(self) -> None:
+        """엔드이펙터가 잡고 있던 물체를 놓쳤는지 확인한다.
+
+        정책: 로봇을 정지시키지 않는다. 낙하는 위험 상황이 아니라 작업
+        실패이고, 재파지/재계획/중단은 태스크 쪽이 판단할 일이다. 이 경로는
+        사실만 알린다 (drop_detector.py docstring 참고).
+        """
+        for detector in self._drop_detectors:
+            event = detector.update()
+            if event is None:
+                continue
+
+            logger.error(
+                "물체 낙하 감지: %s - %.1fs 동안 잡고 있다가 놓쳤습니다 "
+                "(%.2fs 확인). 로봇을 정지시키지는 않습니다.",
+                event.ee_name, event.held_for_s, event.missing_for_s,
+            )
+            if self._on_drop is None:
+                continue
+            try:
+                self._on_drop(event)
+            except Exception:  # noqa: BLE001 - 콜백이 감시 루프를 죽이면 안 된다
+                logger.exception("낙하 콜백에서 예외 발생 (%s)", event.ee_name)
 
     def _check_frame_freshness(self, age_s: float | None) -> bool:
         """카메라 프레임이 신선한지 확인하고, 오래됐으면 경고를 남긴다.

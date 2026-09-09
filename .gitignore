@@ -27,6 +27,8 @@ Research/residual_rl/chassis_probe_logs/**
 **/case_detection/**/*.cache
 **/case_detection/**/*.png
 LGES/vla_training/logs.old/**
+vlm_ad/**
+
 Research/MPC/runs/**
 LGES/case_battery_demo/recordings.zip
 perception.zip

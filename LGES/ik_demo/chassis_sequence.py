@@ -1682,7 +1682,7 @@ def lid_place_stance(bot, mover) -> None:
                 "together ===", cfg.LID_PLACE_TORSO_DEG)
     _park_during_legs("lid", moves,
                       lambda: move_torso(bot.torso, torso_target,
-                                         float(cfg.TORSO_VEL_SCALE), 60.0))
+                                         float(cfg.LID_TORSO_VEL_SCALE), 60.0))
     mover.pin_torso(torso_target)          # arrives already there: re-models only
 
 
@@ -2192,7 +2192,7 @@ def run_lid_place(bot, mover: SuctionMover, yaw_delta: float = 0.0) -> bool:
                        lambda: right.move_joints(right._home_seed)],
                       lambda: move_torso(bot.torso,
                                          np.asarray(cfg.TORSO_JOINTS, dtype=float),
-                                         float(cfg.TORSO_VEL_SCALE), 60.0))
+                                         float(cfg.LID_TORSO_VEL_SCALE), 60.0))
     mover.pin_torso()          # arrives already there: re-models only
     return bool(pres.success)
 

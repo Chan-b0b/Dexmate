@@ -9,6 +9,8 @@
 | `vlm_client.py` | VLM 호출 클라이언트 (이상탐지 + 작업차단판단 두 종류) |
 | `vlm_worker.py` | VLM 호출을 워커 스레드로 분리 (감시 루프가 응답을 기다리며 멈추지 않게) |
 | `calibrate_filter.py` | 1차 필터 임계값을 실제 카메라 프레임으로 튜닝하는 도구 (센서 읽기 전용) |
+| `drop_detector.py` | 경로 4 - 엔드이펙터 페이로드 낙하 감지 상태기 (하드웨어 의존 없음) |
+| `end_effector_adapters.py` | 흡착 컵 / Robotiq 그리퍼를 낙하 감지 신호로 맞추는 어댑터 |
 | `tests/` | 회귀 테스트 (`python tests/run_all.py`) - 아래 "테스트" 절 참고 |
 | `stall_detector.py` | 경로 2 - 작업 진행 정지(stall) 패턴 감지 |
 | `force_baseline.py` | 작업별 적응형 힘/전류 기준선 (스칼라+벡터) |
@@ -16,7 +18,7 @@
 | `momentum_observer.py` | (선택, 미완성) URDF 기반 운동량 관측기 - 모터 토크 상수 확인 전까지는 참고용 |
 | `vega_dynamics.py` | (선택) dexmate_urdf에서 Vega 동역학 모델 로드 |
 | `robot_interface.py` | dexcontrol 연동 어댑터 (확인된 API 반영) |
-| `safety_supervisor.py` | 3개 경로를 조율하는 메인 감시 루프 |
+| `safety_supervisor.py` | 4개 경로를 조율하는 메인 감시 루프 |
 | `main.py` | 실행 진입점 |
 | `resume_robot.py` | Software E-Stop 해제 전용 도구 (사람의 명시적 확인 필요) |
 | `requirements.txt` | 의존성 |
@@ -108,6 +110,36 @@ python calibrate_filter.py replay --label normal --only-candidates
 낮은 임계값을 권장값으로 제시한다. 임계값을 올리면 오탐이 줄고 미탐이 늘기
 때문에, 최종 선택은 "이 작업에서 무엇을 놓치면 안 되는지"로 판단해야 한다.
 
+## 페이로드 낙하 감지 (경로 4)
+
+엔드이펙터 센서로 "잡고 있던 물체를 놓쳤다"를 감지한다. **로봇을 정지시키지
+않는다** — 낙하는 위험 상황이 아니라 작업 실패이므로, 로그와 콜백만 남기고
+재파지/재계획/중단은 태스크 쪽이 판단한다 (`main.py`의 `on_drop`에 연결).
+
+흡착과 그리퍼는 하드웨어가 전혀 다르지만 판단 구조가 같아서, `(engaged,
+holding)` 두 신호로 환원한 뒤 같은 상태기를 재사용한다.
+
+| EE | engaged (잡으라고 명령됨) | holding (실제로 잡고 있음) |
+|---|---|---|
+| 흡착 컵 (좌측 팔) | 컨트롤러 `dOutput[N]` | `dInput[0]` 진공 seal (푸시, 즉시) |
+| Robotiq (우측 팔) | `gPR` ≥ 요청 임계값 | `gOBJ==2`, 또는 `gOBJ==3` + 위치 갭 |
+
+**핵심은 파지 실패와 낙하를 구분하는 것이다.** 둘 다 센서상 "engaged인데
+holding 아님"으로 똑같이 보이고, 차이는 한 번이라도 실제로 잡았는지뿐이다.
+그래서 holding을 처음 본 시점에 "무장"하고, 무장 전의 not-holding은 낙하로
+보지 않는다. 센서를 읽을 수 없을 때(`None`)는 판정을 보류한다 — 모른다는
+이유로 낙하로 단정하면 오탐이 된다.
+
+명령 상태를 **하드웨어에서** 읽는 이유: 데모 코드의
+`suction_io.is_suction_commanded_on()`은 `suction_on()`을 호출한 프로세스의
+모듈 전역변수다. 감시를 별도 프로세스로 돌리면 항상 False가 되어 감지가
+영원히 무장되지 않는다. 그래서 컨트롤러 `dOutput`과 그리퍼 `gPR`을 쓴다.
+
+흡착 컨트롤러가 뭘 보내는지 눈으로 보려면:
+```bash
+python end_effector_adapters.py     # dInput/dOutput/toolA 실시간 출력
+```
+
 ## E-Stop 해제 (재개)
 
 **의도적으로 `main.py`/`safety_supervisor.py`에는 자동 해제 로직이 없다.**
@@ -139,6 +171,7 @@ pytest를 쓰지 않는다 - 이 프로젝트에 테스트 프레임워크 의�
 | `test_supervisor_async.py` | 비동기 배선 후에도 정책이 유지되는지 (감속/정지/연속실패/작업차단/절대힘한계) | 아니오 |
 | `test_warmup.py` | 콜드 스타트 워밍업, 워밍업 전용 타임아웃, 모델 id 자기진단 | **예** (없으면 SKIP) |
 | `test_frame_staleness.py` | 오래된 프레임에서 시각 경로만 끄고 힘/전류 경로가 살아있는지 | 아니오 |
+| `test_drop_detector.py` | 낙하 vs 파지 실패 구분, 래치/재무장, 로봇 무조치, 콜백 예외 격리 | 아니오 |
 
 **어느 테스트도 실제 로봇을 필요로 하지 않는다** (전부 가짜 로봇 어댑터).
 `tests/fixtures/head_camera_frame.jpg`는 실제 head_camera left_rgb에서 받은
@@ -178,6 +211,20 @@ pytest를 쓰지 않는다 - 이 프로젝트에 테스트 프레임워크 의�
   우선 사용. 토크 상수를 구하면 momentum observer로 업그레이드 가능.
 - 모든 힘/전류 관련 임계값(`config.py`)은 예시값이므로 실제 로봇/작업에
   맞게 튜닝 필요.
+- **낙하 감지: `suction_pump_output_index`가 미확인이다.** 흡착 컨트롤러가
+  `dOutput` 8채널을 노출하는 것은 확인했지만(흡착 OFF 상태 초기값
+  `[f,T,T,T,T,T,T,T]`), 그중 어느 채널이 펌프인지는 실제로 ON/OFF 해봐야
+  안다. 미설정이면 `is_engaged()`가 `None`을 돌려줘 흡착 경로가 무장되지
+  않는다(기동 시 경고). `python end_effector_adapters.py`를 띄워 놓고 다른
+  창에서 흡착을 ON/OFF 해서 바뀌는 인덱스를 `config.py`에 넣으면 된다.
+- **낙하 감지: 그리퍼 경로는 기본 비활성이다** (`enable_gripper_drop_detection
+  = False`). Robotiq 상태 읽기는 RS485 EE pass-through Modbus 왕복인데, 이
+  채널은 응답을 먼저 읽은 쪽이 가져간다(`robotiq.py`에 stale 응답을 버리는
+  `_flush_responses`가 있는 이유). 데모가 도는 중에 감시 프로세스가 같은
+  채널을 폴링하면 **데모의 상태 읽기를 가로채** `wait_until_done` 등이
+  오동작할 수 있다 - 감시가 감시 대상을 망가뜨리는 셈이다. 흡착은 별도
+  네트워크 컨트롤러라 이 문제가 없다. 그리퍼까지 켜려면 감시를 데모와 같은
+  프로세스에서 돌리는 편이 안전하다.
 - `anomaly_filter.py`의 `flow_magnitude_threshold`(8.0)는 아직 실제 작업
   중의 프레임으로 튜닝되지 않았다. `calibrate_filter.py`로 수집/산출한다
   (아래 "1차 필터 임계값 튜닝" 참고). 힘 스파이크 경로(15N)는 확인됨.
@@ -213,6 +260,9 @@ pytest를 쓰지 않는다 - 이 프로젝트에 테스트 프레임워크 의�
         ├─ 경로 1: LightweightAnomalyFilter → [워커] VLMAnomalyVerifier → stop/slow
         ├─ 경로 2: StallDetector + AdaptiveForceBaseline → [워커] TaskFeasibilityVerifier → pause_task
         └─ 경로 3: ArmCurrentAnomalyDetector (관절별 적응형 기준선) → stop
+
+엔드이펙터 센서 (흡착 진공 seal / Robotiq gOBJ)
+        └─ 경로 4: PayloadDropDetector → 로그 + 콜백 (로봇 조치 없음)
 ```
 
 `[워커]` 표시된 VLM 호출은 **감시 루프 밖(워커 스레드)에서** 일어난다. 감시 루프가

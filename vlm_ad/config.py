@@ -190,6 +190,67 @@ class SafetyPolicyConfig:
 
 
 @dataclass(frozen=True)
+class DropDetectorConfig:
+    """엔드이펙터 센서로 "잡고 있던 물체를 놓쳤다"를 감지하는 설정 (경로 4).
+
+    조치 정책: 낙하를 감지해도 로봇을 정지시키지 않는다. 로그와 콜백만
+    남기고, 재파지/재계획/중단은 태스크 쪽이 판단한다 (사용자 결정).
+    """
+
+    # "잡으라고 명령했는데 잡고 있지 않다"가 이 시간 이상 지속되면 낙하로 확정.
+    # 흡착 DI0는 푸시 방식이라 즉시 반영되지만, 그리퍼는 Modbus 폴링이라
+    # 샘플 간격이 들쭉날쭉하다. 그래서 샘플 개수가 아니라 시간으로 센다.
+    confirm_s: float = 0.3
+
+    # --- 흡착 (좌측 팔) ---------------------------------------------------
+    # 흡착 컨트롤러(weblogic)의 socketio 주소. 원본은
+    # case_battery_demo/config.py의 SUCTION_HOST다. 여기 따로 적는 이유는
+    # vlm_ad가 데모 패키지를 import하지 않고도 흡착 감시는 되게 하려는 것.
+    # 데모 쪽 값을 바꾸면 이 값도 같이 바꿔야 한다.
+    suction_host: str = "192.168.5.1"
+    # 펌프를 구동하는 디지털 출력 인덱스 (dOutput[N]).
+    #
+    # **미확인 - 실물에서 확인해서 채워야 한다.** None이면 흡착 경로는
+    # "engaged 알 수 없음"이 되어 감지가 무장되지 않는다 (기동 시 경고).
+    #
+    # 확인 방법: `python end_effector_adapters.py`로 라이브 모니터를 띄워
+    # 놓고, 다른 창에서 흡착을 ON/OFF 했을 때(데모 또는
+    # case_battery_demo/debug_vacuum.py) 값이 바뀌는 dOutput 인덱스를 찾는다.
+    # 참고로 흡착 OFF 상태에서 측정한 초기값은
+    # dOutput=[false, true, true, true, true, true, true, true] 였다.
+    suction_pump_output_index: int | None = None
+    # 진공 seal(파지 여부)을 알려주는 디지털 입력 인덱스.
+    # case_battery_demo/suction_io.py에서 확인된 값: DI0이 seal 시점에 True로
+    # 뜨고 toolA보다 ~500ms 빠르다. toolA는 seal 판단에 쓰면 안 된다
+    # (OFF 유휴 0.012A > 가동 0.006A라 과거 오탐의 원인).
+    suction_seal_input_index: int = 0
+
+    # --- Robotiq 그리퍼 (우측 팔) ----------------------------------------
+    # **기본 비활성.** 그리퍼 상태 읽기는 RS485 EE pass-through Modbus
+    # 왕복인데, 이 채널은 요청/응답이 한 줄로 흐르고 응답을 먼저 읽은 쪽이
+    # 가져간다 (robotiq.py에 stale 응답을 버리는 _flush_responses가 있는
+    # 이유가 이것이다). 데모(run_demo.py)가 돌고 있는 상태에서 감시
+    # 프로세스가 같은 채널을 폴링하면 **데모의 상태 읽기를 가로챌 수 있고**,
+    # 그러면 데모의 wait_until_done/is_object_grasped가 오동작한다.
+    # 즉 감시가 감시 대상을 망가뜨릴 수 있다.
+    #
+    # 안전한 조합:
+    #   - 흡착 경로만 켜기(기본값): 흡착은 별도 네트워크 컨트롤러라 경합 없음
+    #   - 그리퍼까지 켜려면: 감시를 데모와 **같은 프로세스**에서 돌리거나,
+    #     데모가 그리퍼 상태를 폴링하지 않는 구간에서만 켠다
+    enable_gripper_drop_detection: bool = False
+    # 상태 읽기 최소 간격. RS485 EE pass-through Modbus 왕복이라 감시 루프
+    # 주기(15Hz)마다 읽으면 채널을 과점유한다. 낙하는 confirm_s 안에만
+    # 잡으면 되므로 이보다 자주 읽을 이유가 없다.
+    gripper_poll_interval_s: float = 0.15
+    # gPR(그리퍼가 기억하는 마지막 요청 위치)이 이 값 이상이면 "닫으라고
+    # 명령된 상태"로 본다. gPR을 쓰는 이유: 명령 상태를 하드웨어에서 읽으므로
+    # 어느 프로세스가 명령했든 상관없다 (모듈 전역변수와 달리).
+    # case_battery_demo/config.py 기준 OPEN=0, PARTIAL_OPEN=40, CLOSE=255.
+    gripper_engaged_min_request: int = 60
+
+
+@dataclass(frozen=True)
 class ForceBaselineConfig:
     """작업별 정상 힘 수준을 온라인으로 학습하는 적응형 기준선 설정.
 

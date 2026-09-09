@@ -23,9 +23,14 @@ import logging
 import signal
 import sys
 
-from config import AnomalyFilterConfig, EXPECTED_DEXCONTROL_MINOR_LINE, ForceBaselineConfig, SafetyPolicyConfig, StallDetectorConfig, TaskFeasibilityPolicyConfig, VLMConfig
+from config import AnomalyFilterConfig, DropDetectorConfig, EXPECTED_DEXCONTROL_MINOR_LINE, ForceBaselineConfig, SafetyPolicyConfig, StallDetectorConfig, TaskFeasibilityPolicyConfig, VLMConfig
+from drop_detector import PayloadDropDetector
 from robot_interface import DexcontrolAdapter
 from safety_supervisor import SafetySupervisor
+
+# case_battery_demo 패키지(Robotiq Modbus 구현)를 import하기 위한 부모 경로.
+# 경로 4의 그리퍼 감시에만 쓰이고, 없으면 그 EE만 건너뛴다.
+CASE_BATTERY_DEMO_PARENT = "/home/dexmate/LGES/Dexmate/LGES"
 
 logging.basicConfig(
     level=logging.INFO,
@@ -71,6 +76,72 @@ def _check_dexcontrol_version() -> None:
         logger.info("dexcontrol 버전 확인: %s (예상 라인 %s.x와 일치)", installed, minor_line)
 
 
+def _build_drop_detectors(robot, cfg: DropDetectorConfig):  # noqa: ANN001, ANN202
+    """경로 4(페이로드 낙하 감지)용 EE 센서를 연결한다.
+
+    하드웨어/의존성이 없으면 그 EE만 건너뛴다 - 낙하 감지는 부가 경로이고,
+    이것 때문에 감시 시스템 전체가 안 뜨면 안 된다.
+
+    반환: (detectors, suction_sensors) - suction_sensors는 종료 시
+    소켓을 닫기 위해 돌려준다 (없으면 None).
+    """
+    detectors: list[PayloadDropDetector] = []
+    suction_sensors = None
+
+    # --- 흡착 컵 (좌측 팔) ---
+    try:
+        from end_effector_adapters import SuctionCupSensors
+
+        suction_sensors = SuctionCupSensors(cfg)
+        suction_sensors.start()
+        detectors.append(PayloadDropDetector(suction_sensors, cfg))
+        logger.info("낙하 감지: 흡착 컵 연결 (%s)", cfg.suction_host)
+    except Exception as e:  # noqa: BLE001
+        logger.warning("낙하 감지: 흡착 컵을 연결하지 못했습니다 (%s) - 이 EE는 건너뜁니다", e)
+
+    # --- Robotiq 그리퍼 (우측 팔) ---
+    # 기본 비활성이다. 같은 RS485 pass-through 채널을 데모 프로세스와
+    # 공유하므로 켜면 데모의 상태 읽기를 가로챌 수 있다
+    # (config.enable_gripper_drop_detection 주석 참고).
+    if not cfg.enable_gripper_drop_detection:
+        logger.info(
+            "낙하 감지: Robotiq 그리퍼 경로는 비활성입니다 "
+            "(RS485 채널 경합 - config.enable_gripper_drop_detection 참고)",
+        )
+        if not detectors:
+            logger.warning("낙하 감지: 연결된 EE가 없어 경로 4는 비활성됩니다")
+        return detectors, suction_sensors
+
+    # robotiq.py의 Modbus 프레이밍/CRC/파싱을 재구현하지 않기 위해 데모
+    # 패키지의 클래스를 그대로 쓴다. 그래서 그 패키지가 import 가능해야 한다.
+    try:
+        import sys
+
+        if CASE_BATTERY_DEMO_PARENT not in sys.path:
+            sys.path.insert(0, CASE_BATTERY_DEMO_PARENT)
+        from case_battery_demo.robotiq import RobotiqGripper
+
+        from end_effector_adapters import RobotiqGripperSensors
+
+        gripper = RobotiqGripper(robot, side="right")
+        if not gripper.available():
+            logger.warning(
+                "낙하 감지: Robotiq EE pass-through를 쓸 수 없습니다 "
+                "(그리퍼가 native 인식되면 pass-through가 비활성됨) - 이 EE는 건너뜁니다",
+            )
+        else:
+            detectors.append(PayloadDropDetector(RobotiqGripperSensors(gripper, cfg), cfg))
+            logger.info("낙하 감지: Robotiq 그리퍼 연결 (우측 팔)")
+    except Exception as e:  # noqa: BLE001
+        logger.warning(
+            "낙하 감지: Robotiq 그리퍼를 연결하지 못했습니다 (%s) - 이 EE는 건너뜁니다", e,
+        )
+
+    if not detectors:
+        logger.warning("낙하 감지: 연결된 EE가 없어 경로 4는 비활성됩니다")
+    return detectors, suction_sensors
+
+
 def main() -> None:
     _check_dexcontrol_version()
 
@@ -100,6 +171,9 @@ def main() -> None:
             external_velocity_scale_setter=None,
         )
 
+        drop_cfg = DropDetectorConfig()
+        drop_detectors, suction_sensors = _build_drop_detectors(robot, drop_cfg)
+
         supervisor = SafetySupervisor(
             robot=adapter,
             filter_cfg=AnomalyFilterConfig(),
@@ -108,11 +182,17 @@ def main() -> None:
             stall_cfg=StallDetectorConfig(),
             feasibility_policy_cfg=TaskFeasibilityPolicyConfig(),
             force_baseline_cfg=ForceBaselineConfig(),
+            drop_detectors=drop_detectors,
+            # 낙하 시 실제로 할 일(재파지 요청, 라인 알림, 대시보드 표시 등)을
+            # 여기 연결한다. None이면 로그만 남는다.
+            on_drop=None,
         )
 
         def _handle_sigint(_sig, _frame):  # noqa: ANN001
             logger.info("종료 신호 수신, 감시 루프 정리 중...")
             supervisor.stop_supervisor()
+            if suction_sensors is not None:
+                suction_sensors.stop()
             adapter.shutdown()
             sys.exit(0)
 
