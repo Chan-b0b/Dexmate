@@ -1,0 +1,4 @@
+time,event,station,label,layers,measured_m,predicted_m,resid_mm
+17:35:05,det_yaw,source,case,4,0.1480,0.1480,conf=0.96
+17:35:05,det_box,source,case,4,283.4890,197.0487,ar=1.44
+17:35:40,pick_vacuum_timeout,source,case,4,0.8155,0.8102,+5.3

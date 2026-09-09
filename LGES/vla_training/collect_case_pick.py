@@ -393,7 +393,7 @@ def _cycle(bot, mover: SuctionMover, rec: EpisodeRecorder, layers: int) -> None:
         adjusts += 1
         logger.warning("pick pose out of reach — auto-adjust {}/{}",
                        adjusts, cfg.CHASSIS_ADJUST_MAX_ATTEMPTS)
-        _auto_adjust(bot, det, (cfg.SOURCE_CASE_CENTER[0], y_ref))
+        _auto_adjust(bot, mover, det, pick_pose)
         det = detect(bot, layers)
         if det is None or not det.found:
             logger.warning("case lost after auto-adjust — reposition and try again")

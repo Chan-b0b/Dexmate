@@ -1,0 +1,17 @@
+time,event,station,label,layers,measured_m,predicted_m,resid_mm
+11:36:16,det_yaw,source,case,4,178.3442,-1.6558,conf=0.95
+11:36:16,det_box,source,case,4,283.6862,198.9682,ar=1.43
+11:36:24,anchor,source,case,4,0.7993,,
+11:36:44,contact_wrench,target,case,1,2.6890,,fx=-5.0;fy=+4.6;mx=-0.89;my=-1.01;mz=+0.090
+11:36:44,contact_yaw,target,case,1,178.3162,178.3389,-0.02deg
+11:36:44,recover_step,target,case,1,,,a1;corner;dyaw=+0.0deg;dxy=(-77.2/+0.0)mm;contact;z=-38.0mm;fx=-5.0;fy=+4.7;mz=n/a
+11:36:44,anchor,target,case,1,0.7308,,
+11:36:47,place_chk_x,target,case,1,0.8584,0.8784,-20.0
+11:36:47,place_chk_y,target,case,1,-0.0388,0.0019,-40.7
+11:36:47,place_chk_yaw,target,case,1,178.9105,-1.6558,+0.57deg
+11:36:49,plane,source,battery_1,4,0.6443,0.6552,-10.9
+11:36:51,det_yaw,source,battery_1,4,179.5647,-0.4353,conf=0.96
+11:36:51,det_box,source,battery_1,4,283.0855,193.8490,ar=1.46
+11:36:51,dual_x,source,battery_1,4,0.9075,0.9020,+5.5
+11:36:51,dual_y,source,battery_1,4,0.1123,0.1115,+0.8
+11:36:51,dual_yaw,source,battery_1,4,179.6723,179.2269,+0.45deg

@@ -50,6 +50,33 @@ def suction_on() -> None:
     # logger.info("[Suction] ON (id={})", cfg.SUCTION_ON_ID)
 
 
+def suction_on_async() -> "threading.Thread":
+    """suction_on() OFF the motion critical path.
+
+    ``_run`` costs two HTTP round-trips plus a fixed 0.5s controller settle, and
+    the pick used to sit at a full stop for all of it, right at the handoff from
+    the fast descent to the creep. The creep that follows is
+    DESCENT_CREEP_GAP_M / DESCENT_CREEP_SPEED_M_S long (1.75s at the 0903
+    values), so the pump is running well before the cup can reach the part —
+    the command does not need to complete before the motion resumes. Same
+    pattern as VacuumMonitor.stop() in suction._creep_seal.
+
+    ``is_suction_commanded_on`` flips only once the command has actually gone
+    out. A failure is logged here instead of raising into the caller: the pick
+    then fails on its normal VACUUM_SEAL_TIMEOUT_S path rather than aborting
+    mid-descent.
+    """
+    def _go() -> None:
+        try:
+            suction_on()
+        except Exception as exc:  # noqa: BLE001 — must not kill the motion thread
+            logger.error("[Suction] async ON failed: {} — the pick will fall "
+                         "through to its vacuum-seal timeout", exc)
+    t = threading.Thread(target=_go, daemon=True, name="suction-on")
+    t.start()
+    return t
+
+
 def suction_off() -> None:
     global _suction_commanded_on
     _run(cfg.SUCTION_OFF_ID)

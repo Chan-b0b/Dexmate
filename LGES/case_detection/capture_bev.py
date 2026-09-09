@@ -16,14 +16,18 @@ Aim the head at the target, then:
 
     python capture_bev.py --layer 3 --n 20 --interval 0.3
     python capture_bev.py --layer 3 --keyboard     # SPACE saves, q/Esc quits
+    python capture_bev.py --layer 3 --keyboard --headless  # same, no preview window
     python capture_bev.py --target bin --layer 0   # bin-detector data
 """
 
 from __future__ import annotations
 
 import argparse
+import select
 import sys
+import termios
 import time
+import tty
 from pathlib import Path
 
 import cv2
@@ -97,19 +101,57 @@ def _timed_loop(robot, out, bev_dir, args) -> int:
     return saved
 
 
+def _capture_step(robot, plane_z):
+    """Grab one frame and warp it to BEV, or None if no frame is available yet."""
+    rgb = _get_frame(robot)
+    if rgb is None:
+        return None
+    q_torso, q_head = _joints(robot)
+    bev_img = bev.build_mapper(q_torso, q_head, plane_z).warp(rgb)
+    return rgb, q_torso, q_head, bev_img
+
+
 def _keyboard_loop(robot, out, bev_dir, args) -> int:
-    """Live BEV preview window; SPACE saves the current frame, q/Esc quits."""
+    """SPACE saves the current frame, q/Esc quits.
+
+    Shows a live BEV preview window unless --headless, in which case keys are
+    read raw from the terminal instead (for use over SSH with no display).
+    """
     plane_z = bev.top_face_z(args.layer)
+    saved = 0
+
+    if args.headless:
+        print("Headless (no preview window): SPACE = save, q/Esc = quit")
+        fd = sys.stdin.fileno()
+        old_settings = termios.tcgetattr(fd)
+        tty.setcbreak(fd)
+        try:
+            while saved < args.n:
+                step = _capture_step(robot, plane_z)
+                if step is None:
+                    continue
+                rgb, q_torso, q_head, bev_img = step
+
+                key = sys.stdin.read(1) if select.select([sys.stdin], [], [], 0)[0] else None
+                if key == " ":
+                    _save_frame(out, bev_dir, saved, rgb, bev_img, q_torso, q_head, args.layer)
+                    saved += 1
+                    print(f"[{saved}/{args.n}] saved frame_{saved-1:03d}")
+                elif key in ("q", "\x1b"):
+                    break
+                time.sleep(0.03)
+        finally:
+            termios.tcsetattr(fd, termios.TCSADRAIN, old_settings)
+        return saved
+
     win = "capture_bev"
     cv2.namedWindow(win, cv2.WINDOW_NORMAL)
     print("BEV preview focused: SPACE = save, q/Esc = quit")
-    saved = 0
     while saved < args.n:
-        rgb = _get_frame(robot)
-        if rgb is None:
+        step = _capture_step(robot, plane_z)
+        if step is None:
             continue
-        q_torso, q_head = _joints(robot)
-        bev_img = bev.build_mapper(q_torso, q_head, plane_z).warp(rgb)
+        rgb, q_torso, q_head, bev_img = step
 
         disp = cv2.cvtColor(bev_img, cv2.COLOR_RGB2BGR)
         _grid(disp)
@@ -136,13 +178,16 @@ def main() -> None:
     ap.add_argument("--layer", type=int, default=1,
                     help="layers remaining in the stack (sets the warp plane "
                          "top_face_z(layer) = FLOOR_Z_BASE_M + layer*LAYER_PITCH_M)")
-    ap.add_argument("--target", choices=["case", "bin"], default="case",
+    ap.add_argument("--target", choices=["case", "bin", "box", "show", "cylinder"], default="case",
                     help="which detector this data is for -> data/<target>_bev/<timestamp>/")
     ap.add_argument("--out", default=cfg.DATA_DIR, help="data root (default 'data')")
     ap.add_argument("--angle", type=float, default=24.0, help="head-down align angle")
     ap.add_argument("--no-align", action="store_true", help="skip head alignment")
     ap.add_argument("--keyboard", action="store_true",
                     help="capture on SPACE keypress in a BEV preview window, not by time")
+    ap.add_argument("--headless", action="store_true",
+                    help="with --keyboard, read SPACE/q from the terminal instead of "
+                         "opening a preview window (for headless/SSH sessions)")
     args = ap.parse_args()
 
     # data/<target>_bev/<timestamp>_L<layer>/ so bin vs case captures stay

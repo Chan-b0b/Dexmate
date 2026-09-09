@@ -17,6 +17,7 @@ Research/residual_rl/chassis_probe_logs/**
 # Training outputs, logs, datasets (any folder)
 **/logs/**
 **/datasets/**
+**/datasets_local/**
 **/outputs/**
 **/intervention/
 **/data/**
@@ -24,6 +25,7 @@ Research/residual_rl/chassis_probe_logs/**
 **/case_detection/**/*.jpg
 **/case_detection/**/*.txt
 **/case_detection/**/*.cache
+**/case_detection/**/*.png
 LGES/vla_training/logs.old/**
 Research/MPC/runs/**
 LGES/case_battery_demo/recordings.zip

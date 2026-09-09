@@ -10,9 +10,12 @@
 | `arm.py` | `python -m ik_demo.arm --robot` | 전체 ARM 움직임 검증 |
 | `suction.py` | `python -m ik_demo.suction` | Pick/Place 테스트 |
 | `gripper.py` | `python -m ik_demo.gripper` | 우측 그리퍼 테스트 |
+| `box_pick.py` | `python -m ik_demo.box_pick [--dry]` | 우측 그리퍼 박스 픽 (감지값 대신 손입력 포즈) |
 | `move_chassis.py` | `python -m ik_demo.move_chassis` | 샤시 좌우 이동 |
+| `jog_ee.py` | `python -m ik_demo.jog_ee` | EE 수동 조그 (torso/EE 값 출력 + x y z 입력 이동, 포즈 따기용) |
 | `sequence.py` | `python -m ik_demo.sequence` | 전체 시퀀스 실행 |
-| `chassis_sequence.py` | `python -m ik_demo.chassis_sequence` | 샤시+시퀀스 통합 |
+| `chassis_sequence.py` | `python -m ik_demo.chassis_sequence` | 샤시+시퀀스 통합 — 시작 시 작업 메뉴 (1 이재 / 2 bin 뚜껑 / 3 box 버리기) |
+| `chassis_sequence.py` | `python -m ik_demo.chassis_sequence --box` | 메뉴 3 바로 실행: 우측 그리퍼로 상자 잡고 든 채 수동 이동 → 하역 지점 오른쪽 앞에 내려놓기 |
 
 ## 상세 설명
 
@@ -55,9 +58,32 @@ python -m ik_demo.suction
 ```bash
 python -m ik_demo.gripper
 ```
-- Robotiq Modbus 통신 검증
+- Robotiq Modbus 통신 검증 (팔 EE 패스스루 → USB 어댑터 순으로 자동 시도, `ROBOTIQ_TRANSPORT`)
 - 개폐 사이클 테스트
 - Force feedback 읽기
+
+---
+
+### box_pick.py — 우측 그리퍼 박스 픽 (감지 스텁)
+
+```bash
+python -m ik_demo.box_pick --dry                          # 계획만 (로봇 없음)
+python -m ik_demo.box_pick                                # 기본 포즈에서 허공 테스트
+python -m ik_demo.box_pick --x 0.70 --y -0.35 --top-z 0.60 --yaw-deg 0
+python -m ik_demo.box_pick --keep                         # 끝나고 hover에 멈춤 (그립 확인)
+python -m ik_demo.box_pick --detect --box-long-m 0.62 --dry  # 헤드 카메라 감지 + 계획만 (팔 안 움직임)
+python -m ik_demo.box_pick --detect                          # 감지 + 오른쪽 벽 집기 (잡고 → 10cm 들고 → 내려놓고 → 놓고 → 홈)
+python -m ik_demo.box_pick --detect --home-left              # 왼팔 먼저 홈
+python -m ik_demo.box_pick --detect --box-long-m 0.62 --carry  # 실제로 들어올리기 (chassis_sequence --box 의 집기 단계와 동일)
+```
+- `--detect`: BEV OBB 모델(case_detection/runs/obb/box)로 상자 중심·크기·yaw 감지 → 로봇 오른쪽 긴 벽 중점을 집음 (`BOX_GRASP_EDGE_INSET_M`)
+- `run_box_pick()`이 이 단계 전체(홈 → 감지 → 집기 → 홈)이며, `chassis_sequence --box`(메뉴 3)가 집기 단계에 호출하는 것과 **같은 함수**입니다. 시퀀스 없이 이 단계만 연습할 때 위 명령을 쓰세요
+- `--box-long-m`: 상자 긴 변 실측값. BEV 평면(림 높이)을 크기 일치로 역산. 없으면 `--top-z`를 림 높이로 사용
+- 감지 결과 BEV 이미지는 `case_detection/out/box_detect_*.png`에 저장 (초록 OBB, 빨간 십자 = 그립 지점)
+- 감지 없이: 박스 윗면 중심 (x, y, top_z)과 장축 yaw를 직접 입력
+- 홈 → hover(윗면 15 cm 위) → 수직 하강 → 그리퍼 닫기 → 수직 상승 → (기본) 열고 홈
+- 밑에 아무것도 없으면 `no_object`로 보고하고 그대로 올라옵니다 (허공 테스트)
+- 튠 값: `BOX_FINGER_LENGTH_M`(베이스→손끝 실측), `BOX_GRASP_YAW_OFFSET_RAD`, `BOX_GRASP_DEPTH_M`, `BOX_HOVER_HEIGHT_M`
 
 ---
 
@@ -109,6 +135,16 @@ python -m ik_demo.sequence
 ```bash
 python -m ik_demo.chassis_sequence
 ```
+
+**작업 메뉴** (로봇 연결·양팔 홈 후 표시, 작업 하나 끝나면 다시 메뉴로 돌아옴, `q` 로 종료):
+1. case + battery 이재 → 소스 레이어 수(실제 쌓인 개수) / 타겟 레이어 수 / 마지막 case→bin 여부를 물음 (Enter = 기본값 3 / 1 / 예). case+battery 반복은 소스 − 1 회 (3 → 2회), 그 뒤 맨 아래 case 를 bin 으로
+2. bin 뚜껑 버리기 (`--lid` 와 동일): 상자 앞에서 `d` → 뚜껑 집기 → (필요하면 물러난 뒤) `d` → 토르소 기울임 + 팔 stow → 하차 지점으로 수동 이동 후 `d` → 바닥 뚜껑 위에 놓기
+3. box 버리기 (`--box` 와 동일): 상자 앞에서 `d` → 잡고 듦 → 하역 지점으로 수동 이동 후 `d` → 오른쪽 앞에 내려놓고 홈
+4. case 1개 → bin (`--case-bin` 과 동일): 샤시는 외부에서 위치시킴, 자체 strafe 없음 (팔이 안 닿을 때만 닿는 가장 가까운 위치로 최소 이동). case 앞에서 `d` → 감지(1 layer)·픽·파킹 → bin 앞에서 `d` → **bin 감지** 기반으로 내려놓고 홈
+
+1번의 마지막 case → bin 단계도 bin 안의 case가 아니라 **bin 자체를 감지**해서 놓습니다 (bin 안 case 수 `FINAL_BIN_CASE_LAYERS` 는 놓는 높이 계산에만 쓰임).
+
+`--lid` / `--box` / `--box-lid` / `--case-bin` 플래그를 주면 메뉴 없이 바로 그 작업으로 감. 바코드 분류(구 `--gripper`)와 자동 샤시 이동(구 `--auto-move`)은 항상 켜져 있음. `--dashboard`, `--state-publish` 는 그대로 옵션.
 
 **레이어 루프**: 소스 스택이 소진될 때까지 반복. 레이어마다 (case + battery 1/2) 실행 후 스택 높이 자동 갱신 (source −1, target +1) — BEV warp plane이 실제 top face를 따라감.
 

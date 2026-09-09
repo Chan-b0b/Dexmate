@@ -131,6 +131,79 @@ def top_face_z(layers_remaining: int) -> float:
     return cfg.FLOOR_Z_BASE_M + layers_remaining * cfg.LAYER_PITCH_M
 
 
+def frame_plane_z(npz, override: float | None = None) -> float:
+    """The plane a saved capture frame belongs on, in one place.
+
+    Precedence: an explicit ``override`` (a caller that knows better), else the
+    ``plane_z`` the frame records, else top_face_z(layers_remaining).
+
+    The recorded key matters because a run aimed at something that is NOT a
+    stack top face (a lid on the floor, a pallet) sits at a height that
+    top_face_z(k) cannot express — rewarp_bev.py writes plane_z for exactly
+    that case. Re-deriving the plane from layers_remaining instead would put
+    the labels on a different plane than the bev/*.png they trace, which is a
+    silent scale-about-the-camera-nadir error (see the homothety note above)."""
+    if override is not None:
+        return float(override)
+    keys = npz.files if hasattr(npz, "files") else npz
+    if "plane_z" in keys:
+        return float(npz["plane_z"])
+    k = int(npz["layers_remaining"]) if "layers_remaining" in keys else 1
+    return top_face_z(k if k >= 0 else 1)   # capture.py writes -1 for "unset"
+
+
+# ---------------------------------------------------------------------------
+# Wrong-plane recovery.
+#
+# Warping ONE image at two parallel planes cuts the SAME bundle of camera rays
+# at two heights, so the two BEV results are related by a plain homothety about
+# the camera centre C:
+#
+#     P_to = C_xy + (P_from - C_xy) * (z_to - C_z) / (z_from - C_z)
+#
+# Consequences, all verified on data/bin_bev (calib_bin_plane.py --verify):
+#   * ANGLES ARE PLANE-INVARIANT — a wrong plane never costs yaw.
+#   * LENGTHS scale by the same factor, so a feature of KNOWN physical size
+#     pins its own height (plane_from_size) — this is the only height cue RGB
+#     offers, and it makes the recovery self-calibrating per frame.
+#   * A CENTER detected at the wrong plane needs no re-detection, no re-warp
+#     and no re-training: rescaling it about C_xy is exact.
+#
+# The practical trap this closes: a detector trained on labels of one face
+# (e.g. the bin's inner BOTTOM) but run with plane_z set to another (the bin
+# RIM) reports a center pulled toward the camera nadir by the height ratio —
+# tens of mm of pure x bias, with a clean picture and a confident box.
+# ---------------------------------------------------------------------------
+def camera_centre(q_torso, q_head) -> np.ndarray:
+    """base_link xyz of the ZED left camera — the fixed point of the homothety."""
+    return cg.zed_left_camera_pose_from_joints(q_torso, q_head)[:3, 3]
+
+
+def reproject_plane(xy, z_from: float, z_to: float, cam_centre) -> np.ndarray:
+    """Move a BEV measurement from the plane it was warped at onto another plane.
+
+    ``xy`` is a base-frame (X, Y) read off a BEV warped at ``z_from``; the
+    result is where that same image feature lands on the ``z_to`` plane."""
+    C = np.asarray(cam_centre, dtype=np.float64)
+    k = (float(z_to) - C[2]) / (float(z_from) - C[2])
+    return C[:2] + (np.asarray(xy, dtype=np.float64) - C[:2]) * k
+
+
+def plane_from_size(long_meas_m: float, long_true_m: float, z_warp: float,
+                    cam_centre) -> float:
+    """Height of the detected feature, from how much the warp magnified it.
+
+    The homothety scale IS the size ratio, so a feature whose physical long
+    side is known reports its own plane:
+
+        (z_feat - C_z) = (z_warp - C_z) * long_true / long_meas
+
+    ``long_meas_m`` is the detected long side on the metric BEV canvas
+    (px / cfg.BEV_PX_PER_M), ``long_true_m`` the measured physical one."""
+    Cz = float(np.asarray(cam_centre, dtype=np.float64)[2])
+    return Cz + (float(z_warp) - Cz) * (float(long_true_m) / float(long_meas_m))
+
+
 # ---------------------------------------------------------------------------
 # Self-test: warp a saved floor_measure_*.npz and draw a base-frame grid so the
 # geometry can be checked by eye (grid lines straight + evenly spaced = correct).

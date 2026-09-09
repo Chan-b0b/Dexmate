@@ -68,15 +68,34 @@ def load_bev_model(weights: str | None = None):
 
 
 def find_bin_bev(rgb: np.ndarray, q_torso, q_head, plane_z: float,
-                 weights: str | None = None) -> "tuple[float, float, float] | None":
+                 weights: str | None = None,
+                 cls_id: "int | None" = None,
+                 true_long_m: "float | None" = None,
+                 ) -> "tuple[float, float, float] | None":
     """Bin OBB on the metric BEV canvas -> (base X, base Y, yaw_deg), or None.
 
     Replaces find_bin_base_xy for runtime use: the raw-frame bbox center
     inverted through the homography carried a measured +47mm x bias (front
     wall + plane mismatch); in BEV the OBB center maps LINEARLY to base XY
-    for anything ON the warp plane (pass the bin RIM height) and the OBB
-    angle is the bin yaw for free. Highest-conf box wins; yaw is the
-    long-axis convention, [0,180), mapped to base (as detect_case_bev)."""
+    for anything ON the warp plane and the OBB angle is the bin yaw for free.
+    Highest-conf box wins; yaw is the long-axis convention, [0,180), mapped to
+    base (as detect_case_bev).
+
+    ``cls_id``: keep only boxes of that class before picking the best one.
+    The bin set is 2-class now (data.yaml: 0 = bin, 1 = bin_top / the lid), so
+    an unfiltered highest-conf pick can hand back the wrong object entirely.
+    None = any class (the original behaviour).
+
+    ``true_long_m``: physical long side of the face the LABELS trace, in
+    metres. Supply it and the center no longer depends on ``plane_z`` being
+    right: the detected size gives the face's own height (bev.plane_from_size)
+    and the center is rescaled onto it (bev.reproject_plane), per frame. This
+    matters because the two are easy to get out of step — the 2-class bin set
+    is labeled on the inner BOTTOM face (class 0) and the lid TOP (class 1),
+    while ik_demo calls in at DIVERT_BIN_PLANE_Z_M (the bin RIM), and a plane
+    off by dz drags the reported x by roughly 0.7*dz. Measure it per class with
+    calib_bin_plane.py. Leave None to keep the old behaviour (center read
+    straight off the ``plane_z`` canvas)."""
     import bev  # sibling module (flat package imports, path set above)
     mapper = bev.build_mapper(q_torso, q_head, float(plane_z))
     bev_img = mapper.warp(rgb)
@@ -85,13 +104,26 @@ def find_bin_bev(rgb: np.ndarray, q_torso, q_head, plane_z: float,
                         conf=cfg.BIN_OBB_CONF, verbose=False)[0]
     if res.obb is None or len(res.obb) == 0:
         return None
-    i = int(np.argmax(res.obb.conf.cpu().numpy()))
+    conf = res.obb.conf.cpu().numpy()
+    if cls_id is not None:
+        keep = np.flatnonzero(res.obb.cls.cpu().numpy().astype(int) == int(cls_id))
+        if keep.size == 0:
+            return None
+        i = int(keep[int(np.argmax(conf[keep]))])
+    else:
+        i = int(np.argmax(conf))
     cx, cy, w, h, r = res.obb.xywhr.cpu().numpy()[i]
     X, Y = mapper.bev_px_to_base(float(cx), float(cy))
     deg = float(np.rad2deg(float(r)))
     if w < h:
         deg += 90.0
-    return X, Y, float(mapper.bev_yaw_to_base(deg % 180.0))
+    if true_long_m is not None:
+        # Yaw is plane-invariant, so only the center needs moving.
+        C = bev.camera_centre(q_torso, q_head)
+        long_meas = float(max(w, h)) / cfg.BEV_PX_PER_M
+        z_face = bev.plane_from_size(long_meas, float(true_long_m), float(plane_z), C)
+        X, Y = bev.reproject_plane((X, Y), float(plane_z), z_face, C)
+    return float(X), float(Y), float(mapper.bev_yaw_to_base(deg % 180.0))
 
 
 def find_bin_base_xy(rgb: np.ndarray, q_torso, q_head, plane_z: float,

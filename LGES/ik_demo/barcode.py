@@ -2,8 +2,9 @@
 
 Scan-during-descent: a BackgroundScanner (drivers.bcr) fires reads in a daemon
 thread while the suction arm descends onto a battery; after the seal, the agreed
-code is checked against cfg.TARGET_BARCODES. A match diverts the battery to the
-right-hand gripper (gripper.py) instead of the case slot.
+code is checked against cfg.TARGET_BARCODES. A match diverts the battery into
+the divert case (chassis_sequence._divert_case_place) instead of the target
+case slot.
 
 No scan-gate / spiral search — scanning happens during the normal pick descent.
 """
@@ -19,5 +20,5 @@ except ImportError:  # allow running a module directly from ik_demo/
 
 
 def is_target(code: str | None) -> bool:
-    """True if a decoded barcode should be diverted to the gripper."""
+    """True if a decoded barcode should be diverted (TARGET_BARCODES match)."""
     return code is not None and code in cfg.TARGET_BARCODES

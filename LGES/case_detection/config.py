@@ -44,7 +44,7 @@ FLOOR_Z_M: float | None = None  # <-- set to a measured value for best results
 # stack anchor: layer tops sit above it by the ik_demo layer pitch. Distinct
 # from FLOOR_Z_M above, which is a camera-frame depth for the old detector.
 # Orange ~0.5687, paper ~0.5641 — within noise, so ONE shared value is used.
-FLOOR_Z_BASE_M: float = 0.72
+FLOOR_Z_BASE_M: float = 0.60
 # Per-layer stack pitch (m), from ik_demo (measured ~0.0131, config 0.0138).
 LAYER_PITCH_M: float = 0.0138
 
@@ -122,6 +122,33 @@ BIN_ROI: tuple[int, int, int, int] | None = None
 OBB_MODEL_PATH: str = "runs/obb/case/weights/best.pt"
 # Min detection confidence.
 OBB_CONF: float = 0.40
+# Measured case footprint (long, short) in metres, as seen on the BEV canvas.
+# The BEV is metric, so a detected box's px size / BEV_PX_PER_M is a real
+# length — model_autolabel_bev.py uses it to reject wrong-sized pseudo-labels
+# and obb_edit_server.py shows it as the edit target. Distinct from
+# CASE_FOOTPRINT_M above, which is the old depth-hole detector's value.
+CASE_BEV_SIZE_M: tuple[float, float] = (0.50, 0.35)
+
+# ----------------------------------------------------------------------------
+# YOLO-OBB box detector (learned backend; runtime script TBD).
+# ----------------------------------------------------------------------------
+BOX_MODEL_PATH: str = "runs/obb/box/weights/best.pt"
+BOX_OBB_CONF: float = 0.40
+# Expected box size on the metric BEV (long, short, m) and the relative
+# tolerance per side: detections outside it are ignored (0903: a corner of a
+# second box at the canvas edge read 0.32x0.20 with conf 0.83 and would have
+# sent the arm to x=1.46). The highest-confidence detection that PASSES wins.
+BOX_BEV_SIZE_M: tuple[float, float] = (0.62, 0.43)
+BOX_SIZE_TOL: float = 0.25
+# Runtime: detect_box_bev.py. NOTE the training frames (data/box_bev/
+# 20260903_161831_L1) were warped at top_face_z(1) = 0.6138 while the box RIM
+# sits well above that plane — detect at the rim height (or recover it with
+# detect_box_bev.plane_from_size from the box's known long side).
+
+# YOLO-OBB "show" detector (train.py --target show; runtime script TBD).
+SHOW_MODEL_PATH: str = "runs/obb/show/weights/best.pt"
+# YOLO-OBB "cylinder" detector (train.py --target cylinder; runtime script TBD).
+CYLINDER_MODEL_PATH: str = "runs/obb/cylinder/weights/best.pt"
 
 # ----------------------------------------------------------------------------
 # Learned BIN detector (detect_bin.py) — replaces HSV find_bin when the bin's
@@ -146,7 +173,8 @@ USE_BIN_MODEL: bool = True
 # Flipping a target's value makes its existing labels the wrong format:
 # re-label (or convert) before training.
 # ----------------------------------------------------------------------------
-TRAIN_OBB: dict[str, bool] = {"case": True, "bin": True}
+TRAIN_OBB: dict[str, bool] = {"case": True, "bin": True, "box": True, "show": True,
+                              "cylinder": True}
 
 # ----------------------------------------------------------------------------
 # SAM2 auto-labeling (sam2_autolabel.py) — runs offline on a GPU box, not at

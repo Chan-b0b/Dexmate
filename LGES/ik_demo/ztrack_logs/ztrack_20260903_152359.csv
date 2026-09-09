@@ -1,0 +1,10 @@
+time,event,station,label,layers,measured_m,predicted_m,resid_mm
+15:24:22,det_yaw,source,case,4,2.1291,2.1291,conf=0.96
+15:24:22,det_box,source,case,4,285.2790,196.6367,ar=1.45
+15:24:30,anchor,source,case,4,0.7995,,
+15:25:09,contact_wrench,target,case,1,9.3241,,fx=-2.8;fy=-1.0;mx=-0.25;my=-0.89;mz=-0.191
+15:25:09,contact_yaw,target,case,1,-177.9088,-177.8762,-0.03deg
+15:25:09,place_misseat,target,case,1,0.7393,,
+15:25:12,place_chk_x,target,case,1,0.8692,0.8585,+10.7
+15:25:12,place_chk_y,target,case,1,0.0930,0.0464,+46.6
+15:25:12,place_chk_yaw,target,case,1,6.0954,2.1291,+3.97deg

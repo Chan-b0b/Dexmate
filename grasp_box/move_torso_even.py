@@ -23,6 +23,8 @@ while enforcing velocity limits and safety checks.
 # print("Debugger attached!")
 
 
+import time
+
 import numpy as np
 import tyro
 from loguru import logger
@@ -32,8 +34,19 @@ from dexcontrol.utils.compat import supported_models
 
 
 @supported_models("vega_1", "vega_1p")
-def main() -> None:
-    """Move torso through a predefined sequence of positions.
+def main(
+    target_angles_deg: tuple[float, float, float] = (30.0, 110.0, 15.0),
+    velocity_scale: float = 0.3,
+    wait_time: float = 5.0,
+) -> None:
+    """Move torso to the specified target joint angles.
+
+    Args:
+        target_angles_deg: Target torso joint angles in degrees (joint0, joint1, joint2).
+        velocity_scale: Velocity scale in (0, 1], as a fraction of the hardware
+            velocity ceiling, applied to the motion.
+        wait_time: Time to wait after sending the command, in seconds, so the
+            motion plugin has time to finish moving before disconnecting.
 
     Returns:
         None
@@ -45,35 +58,17 @@ def main() -> None:
         return
 
     with Robot() as bot:
-        # Move to intermediate crouching position
-        # if not bot.torso.is_pose_reached("crouch45_medium"):
-        #     bot.torso.go_to_pose("crouch45_medium", wait_time=4)
         current_angles = np.asarray(bot.torso.get_state()["pos"], dtype=float)
-        # Move to target joint angles (60, 160, 30 degrees)
-        
-        # target_angles = np.deg2rad([60,120,30])
+        target_angles = np.deg2rad(target_angles_deg)
 
-        target_angles = np.deg2rad([60,165,40])
-
-
-        # Set velocity proportional to joint error with conservative bounds.
-        error = target_angles - current_angles
-        kp = 0.40
-        min_vel = 0
-        max_vel = 0.8
-        joint_vel = np.clip(np.abs(error) * kp, min_vel, max_vel)
-        print(f'moving in {joint_vel} rad/s')
         logger.info(f"Current angles (rad): {current_angles}")
         logger.info(f"Target angles (rad): {target_angles}")
-        logger.info(f"Error (rad): {error}")
-        logger.info(f"Commanded joint_vel (rad/s): {joint_vel}")
+        logger.info(f"Velocity scale: {velocity_scale}")
 
-        bot.torso.set_joint_pos_vel(
-            joint_pos=target_angles,
-            joint_vel=joint_vel,
-            wait_time=5.0,
-            exit_on_reach=False,
+        bot.torso.move_joint_pos(
+            target_angles, relative=False, velocity_scale=velocity_scale
         )
+        time.sleep(wait_time)
 
 if __name__ == "__main__":
     tyro.cli(main)
@@ -81,3 +76,4 @@ if __name__ == "__main__":
 # 5, 5, -5
 # 20, 20, -5
 # 70, 120, 10
+# 30, 110, 15

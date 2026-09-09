@@ -21,7 +21,7 @@ import config as cfg
 
 def main() -> None:
     ap = argparse.ArgumentParser()
-    ap.add_argument("--target", choices=["case", "bin"], default="case",
+    ap.add_argument("--target", choices=["case", "bin", "box", "show", "cylinder"], default="case",
                     help="which detector to train (box type from cfg.TRAIN_OBB)")
     ap.add_argument("--data", default=None, help="data.yaml (default dataset_<target>/data.yaml)")
     ap.add_argument("--model", default=None, help="pretrained checkpoint (default per target)")
@@ -35,7 +35,8 @@ def main() -> None:
         model, project = args.model or "yolov8n-obb.pt", "obb"
     else:
         model, project = args.model or "yolov8n.pt", "detect"
-    cfg_path = "OBB_MODEL_PATH" if args.target == "case" else "BIN_MODEL_PATH"
+    cfg_path = {"case": "OBB_MODEL_PATH", "bin": "BIN_MODEL_PATH", "box": "BOX_MODEL_PATH",
+                "show": "SHOW_MODEL_PATH", "cylinder": "CYLINDER_MODEL_PATH"}[args.target]
     data = args.data or f"dataset_{args.target}/data.yaml"
 
     from ultralytics import YOLO

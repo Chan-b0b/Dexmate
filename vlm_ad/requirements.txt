@@ -1,0 +1,30 @@
+opencv-python-headless>=4.9
+numpy>=1.26
+openai>=1.40
+
+# 중요: dexcontrol과 로봇 펌웨어는 마이너 버전 단위로 락스텝(lockstep)되어 있다
+# (PyPI 페이지에 명시된 공식 호환성 표 기준):
+#   dexcontrol 0.5.x <-> 펌웨어 0.5.x
+#   dexcontrol 0.4.x <-> 펌웨어 0.4.x
+#   dexcontrol 0.3.x <-> 펌웨어 0.3.x
+# 마이너 버전이 안 맞으면 서비스 콜(예: E-Stop)이 "서비스는 발견되는데 응답이
+# 영원히 안 옴" 상태로 조용히 실패한다 (타임아웃을 아무리 늘려도 안 됨).
+# 로봇 펌웨어가 0.5.x로 업그레이드되어 dexcontrol 0.5.0의 E-Stop이 정상
+# 동작함을 확인했으므로 0.5.x에 고정한다 (이전엔 펌웨어 0.4.5에 맞춰 0.4.x로
+# 다운그레이드했었음). 펌웨어를 다시 업그레이드하면 이 핀도 같이 올려야 한다.
+dexcontrol>=0.5.0,<0.6.0
+
+# vllm은 pip로 직접 설치하지 않는다 - Jetson Thor용 NVIDIA 공식 컨테이너 사용:
+#   sudo docker run -it --rm --runtime=nvidia --network host \
+#       -v /home/dexmate/nvidia/models:/models \
+#       ghcr.io/nvidia-ai-iot/vllm:latest-jetson-thor \
+#       vllm serve /models/Qwen3.5-35B-A3B --served-model-name qwen3.5 ...
+# 이 이미지에 들어있는 버전(확인: vLLM 0.19.0+cu130 / transformers 4.57.3 /
+# torch 2.10.0)이 Qwen3_5MoeForConditionalGeneration을 지원한다.
+# 위 목록의 패키지는 호스트에 설치한다 - main.py는 컨테이너 밖(호스트)에서
+# 돌면서 localhost:8000의 vLLM에 HTTP로만 붙는다.
+# (자세한 이유와 명령어는 config.py 상단 주석 참고)
+
+# momentum_observer.py / vega_dynamics.py를 실제로 쓰려면 추가 설치:
+# pin  # pinocchio (PyPI 배포명은 'pin')
+# dexmate-urdf

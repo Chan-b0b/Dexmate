@@ -18,7 +18,8 @@ never reads a half-written file.
 
 EE pose is computed here with its own pinocchio model/data — arm.ArmMover's
 model is NOT thread-safe (and ik_demo now streams motion from more than one
-thread during a divert handoff), so this never calls into a live ArmMover.
+thread, e.g. the view park during a chassis leg), so this never calls into a
+live ArmMover.
 """
 
 from __future__ import annotations

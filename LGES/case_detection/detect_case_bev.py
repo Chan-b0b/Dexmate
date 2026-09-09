@@ -15,7 +15,7 @@ the real grab z comes from ik_demo's descend-to-contact.
         X, Y, yaw = det.base_xy[0], det.base_xy[1], det.base_yaw_deg
 
     requires:  ultralytics + a trained BEV OBB model at cfg.OBB_MODEL_PATH.
-    self-test: python detect_case_bev.py <frame_or_floor_measure>.npz
+    self-test: python detect_case_bev.py <frame_or_floor_measure>.npz [plane_z]
 """
 
 from __future__ import annotations
@@ -114,7 +114,10 @@ def detect_case_bev(rgb: np.ndarray, q_torso, q_head, layers_remaining: int = 1,
 
 if __name__ == "__main__":
     f = np.load(sys.argv[1])
+    # argv[2] forces the plane; otherwise the frame's own (recorded plane_z,
+    # else top_face_z(layers_remaining)).
+    override = float(sys.argv[2]) if len(sys.argv) > 2 else None
     d = detect_case_bev(f["rgb"], f["q_torso"], f["q_head"],
-                        int(f["layers_remaining"]) if "layers_remaining" in f.files else 1)
+                        plane_z=bev.frame_plane_z(f, override))
     print(f"found={d.found}  base_xy=({d.base_xy[0]:.4f}, {d.base_xy[1]:+.4f}) m  "
           f"yaw={d.base_yaw_deg:.1f} deg  top_face_z={d.top_face_z:.4f}  conf={d.conf:.2f}")

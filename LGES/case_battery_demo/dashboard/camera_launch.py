@@ -38,16 +38,23 @@ def _ssh(host: str, remote_cmd: str, timeout: float = 12.0) -> subprocess.Comple
     )
 
 
-def is_running(host: str = NANO_HOST, sensor: str = SENSOR) -> bool:
-    """True if a dexsensor for *sensor* is already running on *host*.
+def is_running(host: str = NANO_HOST, sensor: str = SENSOR, config: str = CONFIG) -> bool:
+    """True if a dexsensor for *sensor* launched with *config* is already running on *host*.
 
     The pattern brackets the first char ("[d]exsensor") so pgrep matches the
     real dexsensor process but NOT the wrapping shell, whose command line
     literally contains the pattern string (a plain "dexsensor..." pattern
     self-matches and always reports running).
+
+    *config* is included in the pattern because the nano also runs a
+    systemd-managed dexsensor.service (boot-time, Restart=always) that
+    launches head_camera with its own default config and no --config flag.
+    Matching on sensor name alone caught that unrelated daemon and reported
+    "already running" even though nothing had launched the depth.toml
+    instance this script actually wants.
     """
     try:
-        r = _ssh(host, f'pgrep -f "[d]exsensor.*{sensor}" >/dev/null && echo YES || echo NO')
+        r = _ssh(host, f'pgrep -f "[d]exsensor.*{sensor}.*{config}" >/dev/null && echo YES || echo NO')
     except (subprocess.TimeoutExpired, OSError):
         return False
     return "YES" in r.stdout
@@ -77,7 +84,7 @@ def ensure_camera(
             "Dashboard will run; image stays blank until the camera is up.")
         return False
 
-    if is_running(host, sensor):
+    if is_running(host, sensor, config):
         say(f"{sensor} already running on {host} — nothing to do.")
         return True
 
@@ -101,7 +108,7 @@ def ensure_camera(
     import time
     for _ in range(6):
         time.sleep(1.0)
-        if is_running(host, sensor):
+        if is_running(host, sensor, config):
             say(f"{sensor} started (logs: {host}:{REMOTE_LOG}).")
             return True
     say(f"{sensor} did not appear after launch — check {host}:{REMOTE_LOG}.")

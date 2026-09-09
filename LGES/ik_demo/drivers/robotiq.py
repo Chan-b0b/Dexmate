@@ -99,7 +99,9 @@ class RobotiqGripper:
             if r is None:
                 time.sleep(0.01)
             else:
-                logger.debug("[Robotiq] flushed stale response: {}", r)
+                # the normal write-ack of the command just sent, drained before
+                # the status poll — TRACE only, it is not a fault
+                logger.trace("[Robotiq] flushed pending reply: {}", r)
 
     def parse_status(self, data: bytes) -> GripperStatus | None:
         if len(data) < 9 or data[1] != 0x04 or data[2] != 0x06:
@@ -213,8 +215,16 @@ class RobotiqGripper:
         time.sleep(0.5)
         return self.activate(wait=True)
 
-    def goto(self, pos: int, speed: int | None = None, force: int | None = None) -> bool:
-        """Move to raw position (0=open .. 255=closed) and wait for completion."""
+    def write_control(
+        self, pos: int, speed: int | None = None, force: int | None = None
+    ) -> None:
+        """Command a raw position (0=open .. 255=closed) WITHOUT waiting.
+
+        goto() is the blocking version and is what most callers want. A
+        contact-stop grip loop needs the non-blocking one: command a full
+        close, poll gCU, and re-command a frozen position as soon as the
+        fingers load up. Mirrors RobotiqGripperUSB._write_control.
+        """
         pos = max(0, min(255, int(pos)))
         speed = cfg.ROBOTIQ_SPEED if speed is None else max(0, min(255, speed))
         force = cfg.ROBOTIQ_FORCE if force is None else max(0, min(255, force))
@@ -223,6 +233,10 @@ class RobotiqGripper:
                           0x09, 0x00, 0x00, pos, speed, force]))
         global _last_cmd_pos
         _last_cmd_pos = pos
+
+    def goto(self, pos: int, speed: int | None = None, force: int | None = None) -> bool:
+        """Move to raw position (0=open .. 255=closed) and wait for completion."""
+        self.write_control(pos, speed=speed, force=force)
         time.sleep(0.15)  # let command settle before polling status
         self._flush_responses(0.1)
         return self.wait_until_done()

@@ -45,7 +45,7 @@ from pink.tasks import PostureTask, RelativeFrameTask
 from dexcontrol.exceptions import ServiceUnavailableError
 from dexcontrol.robot import Robot
 
-URDF_PATH = "/home/dexmate/miniconda3/lib/python3.13/site-packages/dexmate_urdf/robots/humanoid/vega_1p/vega_1p_gripper.urdf"
+URDF_PATH = "/home/dexmate/.local/lib/python3.12/site-packages/dexmate_urdf/robots/humanoid/vega_1p/vega_1p_gripper.urdf"
 CONTROL_DT = 0.02  # 50 Hz command rate
 IK_DT = 0.01
 IK_MAX_ITERS = 200

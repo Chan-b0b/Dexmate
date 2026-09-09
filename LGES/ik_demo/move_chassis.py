@@ -103,7 +103,19 @@ def _pre_steer(bot, vx: float, vy: float, wz: float = 0.0) -> np.ndarray | None:
         speed = float(np.linalg.norm(vec))
         base = float(-np.arctan2(vec[1], vec[0]))
         alt = base + np.pi if base < 0 else base - np.pi
-        use_base = abs(base - cur) <= abs(alt - cur)
+        # base/alt are always pi apart, so for a straight (f/b) command alt sits
+        # at the rear pole (+-pi) — always out of range since max_ang (this
+        # robot: 2.35 rad) < pi, and the wheel can't physically get there.
+        # Prefer whichever candidate is actually reachable; only fall back to
+        # nearest-distance when both are (turn/strafe stay unaffected).
+        base_reachable = abs(base) <= max_ang
+        alt_reachable = abs(alt) <= max_ang
+        if base_reachable and not alt_reachable:
+            use_base = True
+        elif alt_reachable and not base_reachable:
+            use_base = False
+        else:
+            use_base = abs(base - cur) <= abs(alt - cur)
         target.append(float(np.clip(base if use_base else alt, -max_ang, max_ang)))
         signed_speed.append(speed if use_base else -speed)
     target = np.asarray(target)

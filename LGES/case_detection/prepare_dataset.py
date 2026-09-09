@@ -24,13 +24,17 @@ HERE = Path(__file__).resolve().parent
 def main() -> None:
     ap = argparse.ArgumentParser()
     ap.add_argument("--src", required=True, help="dir with images/ and labels/ (e.g. labeled_case)")
-    ap.add_argument("--name", default="case", help="class name (e.g. case or bin)")
+    ap.add_argument("--name", default="case",
+                    help="class name(s), comma-separated in class-index order "
+                         "(e.g. 'case', or 'bin_empty,bin_full' for a 2-class bin model — "
+                         "labels must already carry the matching class index per row)")
     ap.add_argument("--out", default=None, help="output dataset dir (default dataset_<name>)")
     ap.add_argument("--val", type=float, default=0.2, help="val fraction")
     ap.add_argument("--seed", type=int, default=0)
     args = ap.parse_args()
+    names = [n.strip() for n in args.name.split(",")]
     if args.out is None:
-        args.out = f"dataset_{args.name}"
+        args.out = f"dataset_{names[0]}"
 
     src = (HERE / args.src).resolve()
     imgs = sorted((src / "images").glob("*.png"))
@@ -57,10 +61,12 @@ def main() -> None:
 
     yaml = out / "data.yaml"
     yaml.write_text(
-        f"path: {out}\ntrain: images/train\nval: images/val\nnc: 1\nnames: [{args.name}]\n"
+        f"path: {out}\ntrain: images/train\nval: images/val\n"
+        f"nc: {len(names)}\nnames: [{', '.join(names)}]\n"
     )
-    print(f"train={len(splits['train'])}  val={len(splits['val'])}")
-    print(f"wrote {yaml}\nNext: python train.py --target {args.name if args.name in ('case','bin') else 'case'}")
+    print(f"train={len(splits['train'])}  val={len(splits['val'])}  classes={names}")
+    target = next((t for t in ("case", "bin", "box", "show", "cylinder") if any(t in n for n in names)), "case")
+    print(f"wrote {yaml}\nNext: python train.py --target {target}")
 
 
 if __name__ == "__main__":
