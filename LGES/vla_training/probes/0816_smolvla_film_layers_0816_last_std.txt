@@ -1,0 +1,56 @@
+`torch_dtype` is deprecated! Use `dtype` instead!
+[probe] FiLM cond=('contact', 'fz', 'seal') inject=layers mask_force=True  ckpt=outputs/smolvla_film_layers_0816/checkpoints/last
+Loading  HuggingFaceTB/SmolVLM2-500M-Video-Instruct weights ...
+Loading weights:   0%|          | 0/489 [00:00<?, ?it/s]Loading weights:  34%|███▍      | 167/489 [00:00<00:00, 1655.55it/s]Loading weights:  83%|████████▎ | 405/489 [00:00<00:00, 2079.54it/s]Loading weights: 100%|██████████| 489/489 [00:00<00:00, 2168.20it/s]
+Reducing the number of VLM layers to 16 ...
+Loading weights from local directory
+
+── Tier 0  (static, no data) ───────────────────────────────────────
+  |Δγ| max=1.0774 mean=0.1417   |Δβ| max=0.3778 mean=0.0707   (c: 0 -> 1)
+  γ is a multiplicative gain on the action-token embedding; ~0 => FiLM ignores its own input.
+
+── Tier 1  (counterfactual on training data) ───────────────────────
+  episode 0: "pick up the case with the suction cup"  frames 0..177
+
+   frame    ee_z   |F|N | expert_dz  dz(c=0)  dz(c=1)      Δdz  dz(real)
+  --------------------------------------------------------------------------
+       0   1.193    4.6 |     -0.4m    -1.1m     3.4m     4.4m     -1.0m
+       6   1.215    6.0 |      0.3m     0.2m     0.4m     0.2m      0.4m
+      10   1.195    4.5 |     -8.6m    -9.2m    -7.1m     2.1m     -9.1m
+      14   1.163    5.6 |     -2.9m    -3.4m    -0.8m     2.6m     -3.2m
+      20   1.151    5.9 |     -1.1m    -2.2m     0.8m     3.0m     -1.8m
+      24   1.148    6.0 |     -0.9m    -1.6m     0.8m     2.4m     -1.2m
+      29   1.114    5.3 |    -18.5m   -20.4m   -15.3m     5.1m    -20.3m
+      35   1.015    5.3 |     -4.5m    -3.9m     0.5m     4.4m     -4.2m
+      39   1.007    5.4 |     -0.1m    -0.9m     5.0m     5.9m     -0.9m
+      43   1.007    5.3 |      0.0m    -0.2m     8.3m     8.5m     -0.2m
+      47   1.006    5.4 |     -1.8m    -1.5m    12.1m    13.6m     -1.5m
+      51   1.000    5.4 |     -1.5m    -1.6m    11.7m    13.3m     -1.6m
+      55   0.993    5.3 |     -1.3m    -1.7m    11.9m    13.5m     -1.7m
+      59   0.987    5.2 |     -1.5m    -1.7m    11.6m    13.2m     -1.6m
+      63   0.981    5.4 |     -1.4m    -1.6m    12.4m    14.0m     -1.6m
+      67   0.975    5.2 |     -1.1m    -1.6m    12.0m    13.6m     -1.6m
+      71   0.969    5.5 |     -1.4m    -1.6m    13.6m    15.1m     -1.5m
+      75   0.963    5.3 |     -1.5m    -1.5m    14.9m    16.4m     -1.5m
+      79   0.957    5.2 |     -1.2m    -1.5m    16.4m    17.9m     -1.5m
+      83   0.952    5.3 |     -1.8m    -1.6m    17.9m    19.5m     -1.6m
+      87   0.946    5.4 |     -1.9m    -1.7m    18.9m    20.6m     -1.7m
+      91   0.940    5.2 |     -1.1m    -1.6m    19.8m    21.4m     -1.6m
+      95   0.934    5.3 |     -1.5m    -1.6m    20.2m    21.8m     -1.6m
+      99   0.927    5.2 |     -1.8m    -1.6m    20.5m    22.1m     -1.6m
+     103   0.921    5.3 |     -1.4m    -1.6m    20.5m    22.1m     -1.6m
+     107   0.915    5.2 |     -1.1m    -1.6m    20.0m    21.6m     -1.6m
+     111   0.910    5.1 |     -1.8m    -1.6m    18.3m    19.9m     -1.6m
+     115   0.904    5.2 |     -1.6m    -1.6m    13.1m    14.7m     -1.6m
+     119   0.897    5.1 |     -1.4m    -1.6m     8.7m    10.3m     -1.6m
+     123   0.892    5.4 |     -1.6m    -1.5m     3.0m     4.6m     -1.5m
+     165   1.079    5.5 |      6.0m    -0.7m     2.6m     3.3m      4.1m
+  --------------------------------------------------------------------------
+  mean over 122 pre-contact frames:  dz(c=0)=-2.59mm  dz(c=1)=+9.78mm  meanΔdz=+12.37mm  max|Δdz|=23.26mm
+
+  phase split (the transition must fire in the COMMITTED-descent band):
+    approach/hover  dz(c=0)>=-3mm: n=107  dz(c=0)= -1.37mm  dz(c=1)=+12.06mm  Δdz=+13.43mm
+    COMMITTED desc  dz(c=0)< -3mm: n= 15  dz(c=0)=-11.24mm  dz(c=1)= -6.48mm  Δdz= +4.76mm
+
+── verdict ─────────────────────────────────────────────────────────
+  WEAK: c=1 only cancels 42% of the committed descent (dz -11.2->-6.5mm). Right sign, too weak to STOP -> the depth/image cue still dominates the descend command. Likely the under-reach cause.

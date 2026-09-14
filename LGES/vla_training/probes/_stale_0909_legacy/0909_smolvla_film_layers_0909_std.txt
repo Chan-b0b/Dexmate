@@ -1,0 +1,14 @@
+`torch_dtype` is deprecated! Use `dtype` instead!
+[probe] FiLM cond=('contact', 'fz', 'seal') inject=layers mask_force=True  ckpt=/home/maverick/Dexmate/LGES/vla_training/outputs/smolvla_film_layers_0909/checkpoints/best
+Loading  HuggingFaceTB/SmolVLM2-500M-Video-Instruct weights ...
+Loading weights:   0%|          | 0/489 [00:00<?, ?it/s]Loading weights:  15%|█▍        | 72/489 [00:00<00:00, 712.39it/s]Loading weights:  29%|██▉       | 144/489 [00:00<00:00, 627.63it/s]Loading weights:  43%|████▎     | 208/489 [00:00<00:00, 614.74it/s]Loading weights:  56%|█████▌    | 272/489 [00:00<00:00, 609.25it/s]Loading weights:  79%|███████▊  | 385/489 [00:00<00:00, 760.64it/s]Loading weights: 100%|██████████| 489/489 [00:00<00:00, 777.24it/s]
+Reducing the number of VLM layers to 16 ...
+Loading weights from local directory
+
+── Tier 0  (static, no data) ───────────────────────────────────────
+  |Δγ| max=0.3811 mean=0.0516   |Δβ| max=0.2293 mean=0.0329   (c: 0 -> 1)
+  γ is a multiplicative gain on the action-token embedding; ~0 => FiLM ignores its own input.
+
+── Tier 1  (counterfactual on training data) ───────────────────────
+  episode 0: "pick up the case with the suction cup"  frames 0..107
+  no pre-contact frames found (raise --contact-n?).

@@ -1,0 +1,62 @@
+[probe] NAIVE checkpoint (no FiLM)  ckpt=/home/maverick/Dexmate/LGES/vla_training/outputs/act_0729/checkpoints/last
+Loading weights from local directory
+  episodes: [0, 1, 2, 3, 4, 5]
+  swap wrench (median over 18 FIRST-CONTACT frames, fz>3.0N trigger, all episodes): [ 1.32  5.63  3.65  0.02 -0.48 -0.46]  |F|=6.8N  seal stays 0  [--swap firstcontact]
+  ep0: "pick up the case with the suction cup"  frames 0..218  descent=10  first-contact@+141  seal@+180
+  ep1: "pick up the case with the suction cup"  frames 218..438  descent=10  first-contact@+141  seal@+181
+  ep2: "pick up the case with the suction cup"  frames 438..649  descent=10  first-contact@+136  seal@+179
+  ep3: "pick up the case with the suction cup"  frames 649..821  descent=10  first-contact@+100  seal@+140
+  ep4: "pick up the case with the suction cup"  frames 821..996  descent=10  first-contact@+104  seal@+142
+  ep5: "pick up the case with the suction cup"  frames 996..1169  descent=10  first-contact@+101  seal@+140
+
+   frame    ee_z   |F|N |  expert  dz(own) dz(swap)    dzRAW   dzFiLM |    dTot    dRaw   dFiLM
+  ---------------------------------------------------------------------------------------------
+     131   0.777    5.3 |   -1.0m    -1.5m    -1.5m     nanm     nanm |    0.0m    nanm    nanm
+     133   0.774    4.9 |   -1.5m    -1.5m    -1.5m     nanm     nanm |    0.1m    nanm    nanm
+     135   0.772    5.1 |   -1.8m    -1.5m    -1.0m     nanm     nanm |    0.5m    nanm    nanm
+     137   0.768    4.9 |   -1.1m    -1.5m    -0.6m     nanm     nanm |    0.9m    nanm    nanm
+     139   0.765    6.5 |   -1.4m    -1.6m    -0.5m     nanm     nanm |    1.2m    nanm    nanm
+     349   0.780    5.2 |   -1.8m    -1.5m    -1.2m     nanm     nanm |    0.4m    nanm    nanm
+     351   0.777    4.6 |   -1.3m    -1.5m    -0.8m     nanm     nanm |    0.8m    nanm    nanm
+     353   0.774    4.7 |   -1.1m    -1.6m    -0.2m     nanm     nanm |    1.4m    nanm    nanm
+     355   0.771    4.9 |   -2.0m    -1.6m     0.2m     nanm     nanm |    1.8m    nanm    nanm
+     357   0.768    5.3 |   -1.5m    -1.6m     0.6m     nanm     nanm |    2.2m    nanm    nanm
+     564   0.777    5.0 |   -1.9m    -1.5m    -0.2m     nanm     nanm |    1.3m    nanm    nanm
+     566   0.774    4.6 |   -1.4m    -1.5m     0.2m     nanm     nanm |    1.7m    nanm    nanm
+     568   0.771    4.9 |   -1.5m    -1.5m     0.3m     nanm     nanm |    1.8m    nanm    nanm
+     570   0.768    4.9 |   -1.5m    -1.5m     0.7m     nanm     nanm |    2.3m    nanm    nanm
+     572   0.765    6.7 |   -1.4m    -1.2m     1.0m     nanm     nanm |    2.2m    nanm    nanm
+     739   0.833    5.0 |   -1.4m    -1.5m    -0.8m     nanm     nanm |    0.7m    nanm    nanm
+     741   0.830    4.8 |   -1.4m    -1.5m    -0.7m     nanm     nanm |    0.8m    nanm    nanm
+     743   0.827    5.1 |   -1.6m    -1.5m    -0.5m     nanm     nanm |    1.1m    nanm    nanm
+     745   0.824    5.0 |   -1.6m    -1.5m    -0.4m     nanm     nanm |    1.1m    nanm    nanm
+     747   0.821    5.3 |   -1.4m    -1.4m    -0.3m     nanm     nanm |    1.1m    nanm    nanm
+     915   0.832    5.2 |   -1.5m    -1.5m    -0.6m     nanm     nanm |    0.9m    nanm    nanm
+     917   0.829    5.1 |   -1.6m    -1.6m     0.3m     nanm     nanm |    1.8m    nanm    nanm
+     919   0.825    5.3 |   -1.4m    -1.6m     0.8m     nanm     nanm |    2.4m    nanm    nanm
+     921   0.822    5.4 |   -1.5m    -1.4m     1.1m     nanm     nanm |    2.4m    nanm    nanm
+     923   0.820    6.4 |   -1.3m    -1.0m     1.1m     nanm     nanm |    2.1m    nanm    nanm
+    1087   0.832    5.4 |   -1.5m    -1.5m     0.6m     nanm     nanm |    2.1m    nanm    nanm
+    1089   0.829    5.3 |   -1.6m    -1.6m     0.8m     nanm     nanm |    2.3m    nanm    nanm
+    1091   0.825    5.1 |   -1.5m    -1.5m     1.0m     nanm     nanm |    2.6m    nanm    nanm
+    1093   0.822    4.9 |   -1.4m    -1.0m     1.4m     nanm     nanm |    2.4m    nanm    nanm
+    1095   0.820    6.2 |   -1.3m    -0.4m     1.4m     nanm     nanm |    1.8m    nanm    nanm
+  ---------------------------------------------------------------------------------------------
+
+  decomposition over 60 descent frames (d* = dz(cell) - dz(own,own)):
+    ALL frames                  : n= 60  dz(own)= -1.43mm  dTotal= +1.53mm
+    approach/hover dz(own)>=-3mm: n= 60  dz(own)= -1.43mm  dTotal= +1.53mm
+
+  time-to-contact split (pooled over 6 episode(s), per-episode first-contact detection):
+    <2s before contact (late)   : n= 60  dz(own)= -1.43mm  dTotal= +1.53mm
+
+  per-episode split (ABSOLUTE dz, mm/step):
+    ep0 (contact z=0.763): n= 10  dz(own)= -1.54  dz(swap)= -0.97  d= +0.57
+    ep1 (contact z=0.765): n= 10  dz(own)= -1.56  dz(swap)= -0.15  d= +1.41
+    ep2 (contact z=0.762): n= 10  dz(own)= -1.45  dz(swap)= +0.53  d= +1.97
+    ep3 (contact z=0.818): n= 10  dz(own)= -1.49  dz(swap)= -0.47  d= +1.02
+    ep4 (contact z=0.817): n= 10  dz(own)= -1.38  dz(swap)= +0.60  d= +1.98
+    ep5 (contact z=0.817): n= 10  dz(own)= -1.16  dz(swap)= +1.05  d= +2.21
+
+── verdict ─────────────────────────────────────────────────────────
+  INCONCLUSIVE: no committed-descent frames in this episode.

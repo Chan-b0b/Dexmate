@@ -1,0 +1,55 @@
+WARNING:root:Vision embedding key might need handling: model.paligemma_with_expert.paligemma.model.vision_tower.vision_model.embeddings.patch_embedding.bias
+WARNING:root:Vision embedding key might need handling: model.paligemma_with_expert.paligemma.model.vision_tower.vision_model.embeddings.patch_embedding.weight
+[sim] FiLM-pi0 cond=('contact', 'fz', 'seal') inject=state mask_force=True  ckpt=/home/maverick/Dexmate/LGES/vla_training/outputs/pi0_film_state_0816_r2/checkpoints/005000
+[sim] stiffness=1.0N/mm  f_base=6.8N  seal_depth=nevermm  max_steps=40  start_offset=1  force_model=fzdelta
+The PI0 model is a direct port of the OpenPI implementation. 
+This implementation follows the original OpenPI structure for compatibility. 
+Original implementation: https://github.com/Physical-Intelligence/openpi
+Loading model from: /home/maverick/Dexmate/LGES/vla_training/outputs/pi0_film_state_0816_r2/checkpoints/005000/pretrained_model
+✓ Loaded state dict from model.safetensors
+All keys loaded successfully!
+[sim] contact direction=[0.37 0.77 0.52]  torque=[ 0.04 -0.45 -0.39]
+  ep0 (z=0.883): STOP    steps=17 depth= 11.1mm  |F|end= 9.5N  sealed=False
+        first steps [|F|/dz(mm)]: 7.1N/-2.0  6.3N/-2.0  6.0N/-2.0  6.4N/-0.7  6.7N/-0.7  7.0N/-0.6  7.3N/-0.6  7.7N/-0.6
+  ep1 (z=0.883): timeout steps=40 depth= 13.3mm  |F|end=11.3N  sealed=False
+        first steps [|F|/dz(mm)]: 6.2N/-1.9  5.5N/-1.9  5.3N/-0.7  5.4N/-0.7  5.6N/-0.6  5.8N/-0.6  6.1N/-0.6  6.4N/-0.6
+  ep2 (z=0.886): STOP    steps=12 depth=  6.9mm  |F|end= 9.5N  sealed=False
+        first steps [|F|/dz(mm)]: 5.4N/-2.2  6.2N/-0.9  6.7N/-0.7  7.2N/-0.7  7.7N/-0.6  8.2N/-0.6  8.6N/-0.5  9.0N/-0.4
+  ep3 (z=0.884): STOP    steps=31 depth= 11.6mm  |F|end=10.9N  sealed=False
+        first steps [|F|/dz(mm)]: 5.8N/-2.2  5.4N/-2.3  5.9N/-2.1  7.0N/-0.7  7.5N/-0.7  7.9N/-0.6  8.4N/-0.6  8.9N/-0.6
+  ep4 (z=0.884): STOP    steps=18 depth= 12.2mm  |F|end= 9.6N  sealed=False
+        first steps [|F|/dz(mm)]: 7.6N/-1.9  6.6N/-1.9  6.0N/-1.9  6.0N/-1.0  6.2N/-0.7  6.5N/-0.7  6.8N/-0.7  7.2N/-0.6
+  ep5 (z=0.884): timeout steps=40 depth= 14.1mm  |F|end=11.4N  sealed=False
+        first steps [|F|/dz(mm)]: 7.4N/-1.9  6.4N/-1.9  5.9N/-1.9  6.0N/-0.7  6.2N/-0.7  6.5N/-0.6  6.8N/-0.6  7.1N/-0.6
+  ep6 (z=0.885): STOP    steps=17 depth= 10.4mm  |F|end= 9.9N  sealed=False
+        first steps [|F|/dz(mm)]: 6.4N/-1.9  5.9N/-1.9  6.1N/-0.7  6.3N/-0.7  6.5N/-0.7  6.8N/-0.6  7.2N/-0.6  7.5N/-0.6
+  ep7 (z=0.885): STOP    steps=28 depth= 11.8mm  |F|end=10.5N  sealed=False
+        first steps [|F|/dz(mm)]: 6.4N/-2.1  5.8N/-2.2  5.9N/-2.1  6.7N/-0.7  7.1N/-0.7  7.5N/-0.6  7.9N/-0.6  8.3N/-0.6
+  ep8 (z=0.884): STOP    steps=14 depth= 10.1mm  |F|end= 9.6N  sealed=False
+        first steps [|F|/dz(mm)]: 5.7N/-2.2  5.3N/-2.2  5.8N/-2.2  7.0N/-0.7  7.5N/-0.7  8.0N/-0.6  8.4N/-0.5  8.9N/-0.4
+  ep9 (z=0.884): STOP    steps=14 depth= 10.6mm  |F|end= 9.7N  sealed=False
+        first steps [|F|/dz(mm)]: 6.0N/-2.2  5.4N/-2.2  5.7N/-2.1  6.7N/-0.8  7.2N/-0.7  7.7N/-0.6  8.1N/-0.6  8.6N/-0.5
+  ep10 (z=0.939): STOP    steps= 8 depth= 10.9mm  |F|end= 9.3N  sealed=False
+        first steps [|F|/dz(mm)]: 7.1N/-2.2  6.2N/-2.2  6.0N/-2.1  6.6N/-2.1  7.7N/-1.8  9.0N/-0.4  9.3N/+1.2  9.3N/+1.2
+  ep11 (z=0.940): STOP    steps= 6 depth=  7.3mm  |F|end= 8.8N  sealed=False
+        first steps [|F|/dz(mm)]: 5.7N/-2.2  5.9N/-2.2  6.8N/-2.0  8.1N/-0.9  8.8N/+3.3  8.8N/+3.3
+  ep12 (z=0.937): STOP    steps=21 depth=  9.0mm  |F|end= 7.9N  sealed=False
+        first steps [|F|/dz(mm)]: 5.8N/-1.9  5.1N/-1.0  5.0N/-0.8  5.1N/-0.8  5.2N/-0.7  5.5N/-0.7  5.8N/-0.7  6.2N/-0.7
+  ep13 (z=0.939): STOP    steps= 7 depth=  9.1mm  |F|end= 8.4N  sealed=False
+        first steps [|F|/dz(mm)]: 6.5N/-2.3  5.8N/-2.3  6.0N/-2.2  6.9N/-2.0  8.2N/-0.3  8.4N/+1.0  8.4N/+1.0
+  ep14 (z=0.940): STOP    steps= 9 depth=  5.4mm  |F|end= 7.5N  sealed=False
+        first steps [|F|/dz(mm)]: 5.5N/-2.1  5.8N/-2.0  6.7N/-0.7  7.2N/-0.3  7.4N/-0.0  7.4N/-0.0  7.5N/-0.1  7.5N/+0.1
+  ep15 (z=0.938): STOP    steps= 8 depth=  7.6mm  |F|end= 7.4N  sealed=False
+        first steps [|F|/dz(mm)]: 6.0N/-2.3  5.5N/-2.2  5.8N/-2.0  6.8N/-0.6  7.1N/-0.4  7.4N/-0.1  7.4N/+0.0  7.4N/+0.0
+  ep16 (z=0.939): STOP    steps= 9 depth= 10.4mm  |F|end= 8.9N  sealed=False
+        first steps [|F|/dz(mm)]: 6.9N/-2.2  6.0N/-2.2  5.8N/-2.2  6.5N/-2.1  7.6N/-0.9  8.2N/-0.5  8.6N/-0.3  8.9N/+1.2
+  ep17 (z=0.938): STOP    steps= 7 depth=  9.4mm  |F|end= 8.2N  sealed=False
+        first steps [|F|/dz(mm)]: 6.7N/-2.3  5.8N/-2.2  5.8N/-2.2  6.5N/-2.0  7.8N/-0.6  8.2N/+1.1  8.2N/+1.1
+  ep18 (z=0.938): STOP    steps=17 depth= 10.1mm  |F|end= 8.1N  sealed=False
+        first steps [|F|/dz(mm)]: 6.9N/-2.1  5.9N/-2.1  5.6N/-2.0  5.9N/-1.8  6.7N/-0.7  7.2N/-0.6  7.6N/-0.5  7.9N/-0.3
+  ep19 (z=0.939): STOP    steps= 8 depth= 10.8mm  |F|end= 9.3N  sealed=False
+        first steps [|F|/dz(mm)]: 7.2N/-2.2  6.4N/-2.1  6.1N/-2.1  6.6N/-2.1  7.7N/-1.9  8.9N/-0.5  9.3N/+1.7  9.3N/+1.7
+
+── summary ─────────────────────────────────────────────────────────
+  stopped 18/20 episodes   penetration depth mean=10.1mm  max=14.1mm
+    z~0.817: stopped 18/20  depth mean=10.1mm

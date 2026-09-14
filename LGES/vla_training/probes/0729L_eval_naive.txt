@@ -1,0 +1,21 @@
+`torch_dtype` is deprecated! Use `dtype` instead!
+checkpoint: outputs/smolvla_naive_0729/checkpoints/best
+Loading  HuggingFaceTB/SmolVLM2-500M-Video-Instruct weights ...
+Loading weights:   0%|          | 0/489 [00:00<?, ?it/s]Loading weights:  13%|█▎        | 64/489 [00:00<00:00, 631.80it/s]Loading weights:  28%|██▊       | 137/489 [00:00<00:00, 688.61it/s]Loading weights:  42%|████▏     | 206/489 [00:00<00:00, 682.84it/s]Loading weights:  57%|█████▋    | 277/489 [00:00<00:00, 692.19it/s]Loading weights:  79%|███████▉  | 387/489 [00:00<00:00, 825.81it/s]Loading weights: 100%|██████████| 489/489 [00:00<00:00, 843.99it/s]
+Reducing the number of VLM layers to 16 ...
+Loading weights from local directory
+val: 6 episodes, 1169 frames
+
+task                                        pos(mm)  rot(mrad)  suction
+pick up the case with the suction cup          0.89       1.66    99.6%
+------------------------------------------------------------------------
+OVERALL mean |err| per step                    0.89       1.66    99.6%
+
+per-dimension mean |err|:
+  dx       0.00065
+  dy       0.00077
+  dz       0.00125
+  drx      0.00122
+  dry      0.00199
+  drz      0.00178
+  suction  0.01894

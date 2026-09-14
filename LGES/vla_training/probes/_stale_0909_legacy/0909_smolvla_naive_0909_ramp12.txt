@@ -1,0 +1,39 @@
+`torch_dtype` is deprecated! Use `dtype` instead!
+[probe] NAIVE checkpoint (no FiLM)  ckpt=/home/maverick/Dexmate/LGES/vla_training/outputs/smolvla_naive_0909/checkpoints/best
+Loading  HuggingFaceTB/SmolVLM2-500M-Video-Instruct weights ...
+Loading weights:   0%|          | 0/489 [00:00<?, ?it/s]Loading weights:  15%|█▌        | 75/489 [00:00<00:00, 747.58it/s]Loading weights:  32%|███▏      | 155/489 [00:00<00:00, 760.41it/s]Loading weights:  88%|████████▊ | 432/489 [00:00<00:00, 1665.12it/s]Loading weights: 100%|██████████| 489/489 [00:00<00:00, 1541.34it/s]
+Reducing the number of VLM layers to 16 ...
+Loading weights from local directory
+  episodes: [0, 1, 2, 3, 4, 5, 6, 7, 8, 9]
+  swap wrench (median over 30 FIRST-CONTACT frames, fz>3.0N trigger, all episodes): [ 7.4   2.47  9.11  0.3  -0.06  0.14]  |F|=12.0N  seal stays 0  [--swap fcscale]
+  ep0: "pick up the case with the suction cup"  frames 0..107  descent=0  first-contact@+57  seal@+79
+  ep1: "pick up the case with the suction cup"  frames 107..222  descent=0  first-contact@+65  seal@+86
+  ep2: "pick up the case with the suction cup"  frames 222..332  descent=0  first-contact@+60  seal@+82
+  ep3: "pick up the case with the suction cup"  frames 332..449  descent=1  first-contact@+62  seal@+88
+  ep4: "pick up the case with the suction cup"  frames 449..560  descent=0  first-contact@+61  seal@+83
+  ep5: "pick up the case with the suction cup"  frames 560..655  descent=0  first-contact@+48  seal@+69
+  ep6: "pick up the case with the suction cup"  frames 655..752  descent=0  first-contact@+53  seal@+71
+  ep7: "pick up the case with the suction cup"  frames 752..845  descent=0  first-contact@+7  seal@+67
+  ep8: "pick up the case with the suction cup"  frames 845..943  descent=2  first-contact@+51  seal@+72
+  ep9: "pick up the case with the suction cup"  frames 943..1037  descent=0  first-contact@+10  seal@+68
+
+   frame    ee_z   |F|N |  expert  dz(own) dz(swap)    dzRAW   dzFiLM |    dTot    dRaw   dFiLM
+  ---------------------------------------------------------------------------------------------
+     347   1.144    5.9 |   -7.1m    -9.5m    -9.5m     nanm     nanm |    0.0m    nanm    nanm
+     854   1.197    5.6 |   -6.5m    -8.5m    -8.1m     nanm     nanm |    0.4m    nanm    nanm
+     855   1.191    5.9 |   -7.1m    -8.7m    -8.4m     nanm     nanm |    0.3m    nanm    nanm
+  ---------------------------------------------------------------------------------------------
+
+  decomposition over 3 descent frames (d* = dz(cell) - dz(own,own)):
+    ALL frames                  : n=  3  dz(own)= -8.91mm  dTotal= +0.24mm
+    COMMITTED desc dz(own)< -3mm: n=  3  dz(own)= -8.91mm  dTotal= +0.24mm
+
+  time-to-contact split (pooled over 10 episode(s), per-episode first-contact detection):
+    2-4s before contact         : n=  3  dz(own)= -8.91mm  dTotal= +0.24mm
+
+  per-episode split (ABSOLUTE dz, mm/step):
+    ep3 (contact z=0.775): n=  1  dz(own)= -9.52  dz(swap)= -9.51  d= +0.02
+    ep8 (contact z=0.813): n=  2  dz(own)= -8.60  dz(swap)= -8.25  d= +0.35
+
+── verdict ─────────────────────────────────────────────────────────
+  raw-state authority (naive): swapping wrench+seal to contact values cancels 3% of the committed descent (dz -8.9 -> -8.7mm).

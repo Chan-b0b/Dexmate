@@ -1,0 +1,28 @@
+WARNING:root:Vision embedding key might need handling: model.paligemma_with_expert.paligemma.model.vision_tower.vision_model.embeddings.patch_embedding.bias
+WARNING:root:Vision embedding key might need handling: model.paligemma_with_expert.paligemma.model.vision_tower.vision_model.embeddings.patch_embedding.weight
+[sim] FiLM-pi0 cond=('contact', 'fz', 'seal') inject=layers mask_force=True  ckpt=outputs/pi0_film_frombase_layers_0729/checkpoints/best
+[sim] stiffness=1.0N/mm  f_base=6.8N  seal_depth=nevermm  max_steps=40  start_offset=1  force_model=fzdelta
+The PI0 model is a direct port of the OpenPI implementation. 
+This implementation follows the original OpenPI structure for compatibility. 
+Original implementation: https://github.com/Physical-Intelligence/openpi
+Loading model from: outputs/pi0_film_frombase_layers_0729/checkpoints/best/pretrained_model
+✓ Loaded state dict from model.safetensors
+All keys loaded successfully!
+[sim] contact direction=[0.19 0.82 0.53]  torque=[ 0.02 -0.48 -0.46]
+  ep0 (z=0.763): timeout steps=40 depth= 22.0mm  |F|end=18.1N  sealed=False
+        first steps [|F|/dz(mm)]: 6.6N/-2.9  5.0N/-2.1  4.8N/-2.0  5.3N/-1.9  6.4N/-1.1  7.2N/-0.7  7.7N/-0.7  8.3N/-0.6
+  ep1 (z=0.765): timeout steps=40 depth= 18.7mm  |F|end=16.9N  sealed=False
+        first steps [|F|/dz(mm)]: 5.7N/-2.0  5.1N/-1.0  5.1N/-0.6  5.2N/-0.6  5.4N/-0.6  5.6N/-0.6  5.9N/-0.6  6.3N/-0.6
+  ep2 (z=0.762): timeout steps=40 depth= 20.6mm  |F|end=17.0N  sealed=False
+        first steps [|F|/dz(mm)]: 6.2N/-2.3  5.0N/-1.9  4.6N/-0.6  4.7N/-0.6  4.8N/-0.6  5.0N/-0.6  5.3N/-0.5  5.6N/-0.5
+  ep3 (z=0.818): STOP    steps=22 depth= 14.8mm  |F|end=14.6N  sealed=False
+        first steps [|F|/dz(mm)]: 4.8N/-1.8  4.8N/-1.8  5.4N/-1.7  6.4N/-1.7  7.6N/-0.8  8.2N/-0.6  8.7N/-0.6  9.2N/-0.6
+  ep4 (z=0.817): STOP    steps=28 depth= 18.2mm  |F|end=14.9N  sealed=False
+        first steps [|F|/dz(mm)]: 6.6N/-2.2  5.4N/-1.9  5.0N/-1.4  5.2N/-0.8  5.4N/-0.7  5.7N/-0.6  6.0N/-0.6  6.4N/-0.6
+  ep5 (z=0.817): timeout steps=40 depth= 18.5mm  |F|end=14.6N  sealed=False
+        first steps [|F|/dz(mm)]: 7.0N/-2.0  5.7N/-1.7  5.1N/-1.3  5.0N/-0.8  5.1N/-0.7  5.3N/-0.6  5.5N/-0.6  5.8N/-0.6
+
+── summary ─────────────────────────────────────────────────────────
+  stopped 2/6 episodes   penetration depth mean=18.8mm  max=22.0mm
+    z~0.763: stopped 0/3  depth mean=20.4mm
+    z~0.817: stopped 2/3  depth mean=17.2mm

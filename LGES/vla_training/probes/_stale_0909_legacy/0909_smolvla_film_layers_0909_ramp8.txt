@@ -1,0 +1,44 @@
+`torch_dtype` is deprecated! Use `dtype` instead!
+[probe] FiLM cond=('contact', 'fz', 'seal') inject=layers mask_force=True  ckpt=/home/maverick/Dexmate/LGES/vla_training/outputs/smolvla_film_layers_0909/checkpoints/best
+Loading  HuggingFaceTB/SmolVLM2-500M-Video-Instruct weights ...
+Loading weights:   0%|          | 0/489 [00:00<?, ?it/s]Loading weights:  15%|█▌        | 75/489 [00:00<00:00, 717.55it/s]Loading weights:  31%|███       | 151/489 [00:00<00:00, 741.90it/s]Loading weights:  46%|████▌     | 226/489 [00:00<00:00, 718.88it/s]Loading weights:  61%|██████    | 298/489 [00:00<00:00, 699.10it/s]Loading weights:  81%|████████  | 397/489 [00:00<00:00, 780.88it/s]Loading weights: 100%|██████████| 489/489 [00:00<00:00, 799.25it/s]
+Reducing the number of VLM layers to 16 ...
+Loading weights from local directory
+  episodes: [0, 1, 2, 3, 4, 5, 6, 7, 8, 9]
+  swap wrench (median over 30 FIRST-CONTACT frames, fz>3.0N trigger, all episodes): [ 4.94  1.65  6.08  0.3  -0.06  0.14]  |F|=8.0N  seal stays 0  [--swap fcscale]
+  ep0: "pick up the case with the suction cup"  frames 0..107  descent=0  first-contact@+57  seal@+79
+  ep1: "pick up the case with the suction cup"  frames 107..222  descent=0  first-contact@+65  seal@+86
+  ep2: "pick up the case with the suction cup"  frames 222..332  descent=0  first-contact@+60  seal@+82
+  c-hat: own(example)=[[ 0.    -0.663  0.   ]]  swap=[[ 0.    -0.421  0.   ]]  (channels ('contact', 'fz', 'seal'))
+  ep3: "pick up the case with the suction cup"  frames 332..449  descent=1  first-contact@+62  seal@+88
+  ep4: "pick up the case with the suction cup"  frames 449..560  descent=0  first-contact@+61  seal@+83
+  ep5: "pick up the case with the suction cup"  frames 560..655  descent=0  first-contact@+48  seal@+69
+  ep6: "pick up the case with the suction cup"  frames 655..752  descent=0  first-contact@+53  seal@+71
+  ep7: "pick up the case with the suction cup"  frames 752..845  descent=0  first-contact@+7  seal@+67
+  ep8: "pick up the case with the suction cup"  frames 845..943  descent=2  first-contact@+51  seal@+72
+  ep9: "pick up the case with the suction cup"  frames 943..1037  descent=0  first-contact@+10  seal@+68
+
+   frame    ee_z   |F|N |  expert  dz(own) dz(swap)    dzRAW   dzFiLM |    dTot    dRaw   dFiLM
+  ---------------------------------------------------------------------------------------------
+     347   1.144    5.9 |   -7.1m   -11.5m   -11.4m   -11.5m   -11.4m |    0.1m    0.0m    0.1m
+     854   1.197    5.6 |   -6.5m   -10.4m   -10.3m   -10.4m   -10.3m |    0.1m    0.0m    0.1m
+     855   1.191    5.9 |   -7.1m   -11.4m   -11.3m   -11.4m   -11.3m |    0.1m    0.0m    0.1m
+  ---------------------------------------------------------------------------------------------
+
+  decomposition over 3 descent frames (d* = dz(cell) - dz(own,own)):
+    ALL frames                  : n=  3  dz(own)=-11.09mm  dTotal= +0.07mm  dRaw= +0.00mm  dFiLM= +0.07mm  interact= +0.00mm
+    COMMITTED desc dz(own)< -3mm: n=  3  dz(own)=-11.09mm  dTotal= +0.07mm  dRaw= +0.00mm  dFiLM= +0.07mm  interact= +0.00mm
+
+  time-to-contact split (pooled over 10 episode(s), per-episode first-contact detection):
+    2-4s before contact         : n=  3  dz(own)=-11.09mm  dTotal= +0.07mm  dRaw= +0.00mm  dFiLM= +0.07mm  interact= +0.00mm
+
+  per-episode split (ABSOLUTE dz, mm/step):
+    ep3 (contact z=0.775): n=  1  dz(own)=-11.50  dz(swap)=-11.40  d= +0.10  (FiLM  +0.10)
+    ep8 (contact z=0.813): n=  2  dz(own)=-10.88  dz(swap)=-10.83  d= +0.05  (FiLM  +0.05)
+
+── verdict ─────────────────────────────────────────────────────────
+  committed descent, cancellation of dz(own)=-11.1mm:
+    TOTAL (state+c swap) :    +1%
+    RAW path only        :    +0%   (state swap, c pinned to own)
+    FiLM path only       :    +1%   (c swap, state kept own)
+  -> both paths contribute comparably (or neither does — check TOTAL).

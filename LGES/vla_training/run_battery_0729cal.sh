@@ -1,0 +1,126 @@
+#!/usr/bin/env bash
+# Paper probe battery (P1-P4 + eval_offline) under the ORIGINAL 0729 calibration
+# (cond=contact,fz,seal F0=6 tau=4 fz=2.1/5 mask1) — the calibration the from-base 0729
+# arms and the 'layers' arms were trained with. Numbers from this batch are comparable to
+# each other (and to the pi0/pi05 0729 rounds), NOT to the paper's recal/fromnaive tables
+# (guardrail: no % comparison across calibration rounds).
+#
+# Usage: ./run_battery_0729cal.sh <tag> <kind> <inject> <ckpt_dir> [gpu]
+#   tag    output suffix -> probes/${PFX}_<tag>_*.txt
+#   kind   naive | film | film-act | film-pi0 | film-groot | naive-act
+#          (P1 condition-forcing runs only for film|film-act; pi0/groot report the
+#           battery's state/sim/eval cells, matching how the paper covers pi0/pi05)
+#   inject prefix | suffix | layers | state | action | - (ignored for naive kinds)
+#   ckpt   dir containing pretrained_model/ (checkpoints/best, or an HF snapshot link dir)
+#   gpu    CUDA device index (default 7)
+# Cells (paper mapping): P2=state pc_fc | P3=ramp8/10/12 (+pc_r12) | P1=std+realistic
+# (film kinds only) | P4=press sim off1/off30 fzdelta | eval_offline (mm/step).
+set -uo pipefail
+DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+PY=/home/maverick/vla_venv/bin/python
+export HF_HOME="$HOME/.cache/huggingface"
+
+TAG=${1:?tag}; KIND=${2:?naive|film|film-act|naive-act}; INJECT=${3:?inject}; CK=${4:?ckpt dir}
+GPU=${5:-7}
+# Round overrides (defaults = the 0729 round): VAL_ROOT/REPO_VAL pick the val set,
+# FZ_OFF the round's fz calibration, PFX the probes/ filename prefix.
+# F0/TAU/C1 were hardcoded here until 0909, whose collection shifted the |F| baseline
+# +3.8N (hover 5.4->9.2N) — probing at F0=6 while training at the shifted F0 is exactly
+# the cross-calibration mismatch this file's header forbids, so they are overridable now.
+# C1 is the 'realistic contact' c-hat (contact,fz,seal) for the _real cell; it is derived
+# from the round's F0/TAU/FZ_OFF, so a round that moves those must move C1 too.
+RV="${VAL_ROOT:-$DIR/datasets/lges_case_pick_0729_val}"
+REPO_VAL="${REPO_VAL:-Chanho-Lee/lges_case_pick_0729_val}"
+FZ_OFF="${FZ_OFF:-2.1}"
+FZ_TAU="${FZ_TAU:-5}"
+F0="${F0:-6}"
+TAU="${TAU:-4}"
+C1="${C1:-0.6,0.42,0}"
+# press-sim force model, likewise hardcoded until 0909 and likewise invalidated by the
+# remount. Derived per round by validate_<round>.sh; defaults reproduce 0729/0816 exactly.
+FZ_DELTA0="${FZ_DELTA0:-1.7}"
+F_BASE="${F_BASE:-6.8}"
+F_CAP="${F_CAP:-25.0}"
+# PRE_CONTACT>0 makes the ramp cells select frames by TIME (the N frames before each
+# episode's touch) instead of by the |F| < --descend-n force threshold. Required whenever
+# pre-touch |F| overlaps the press level: on 0909 the 6N default matched n=3 frames that
+# were not even pre-contact, so ramp8/10/12 measured the wrong frames entirely.
+# 0 = legacy force-threshold behaviour.
+PRE_CONTACT="${PRE_CONTACT:-0}"
+# FC_FZ: pc_fc's "first force rise" trigger (fz > FC_FZ). 3.0 is below 0909's fz
+# baseline (7.54N) so the trigger fired at frame 0 and pc_fc injected |F|=8.6N < F0.
+FC_FZ="${FC_FZ:-3.0}"
+PFX="${PFX:-0729L}"
+PC=(); [[ "$PRE_CONTACT" -gt 0 ]] && PC=(--pre-contact "$PRE_CONTACT")
+
+# FILM_MASK_FORCE must match TRAINING. It was hardcoded to 1 here, which silently probed
+# the mask=0 ablation arms with the wrench dims zeroed at inference — the model was trained
+# seeing raw force, the probe hid it, and dRaw came out +0.00 by construction instead of
+# measuring the second path. Default stays 1, so every mask=1 round reproduces unchanged.
+MASK_FORCE="${FILM_MASK_FORCE:-1}"
+FENV=(FILM_COND=contact,fz,seal FILM_MASK_FORCE="$MASK_FORCE" FILM_F0="$F0" FILM_TAU="$TAU"
+      FILM_FZ_TAU="$FZ_TAU" FILM_FZ_OFF="$FZ_OFF" FILM_INJECT="$INJECT" CUDA_VISIBLE_DEVICES="$GPU")
+
+FLAG=()   # policy-kind flag for probe_state_authority / probe_press_sim
+case "$KIND" in
+  naive|naive-act) FLAG=(--naive) ;;
+  film)            FLAG=() ;;
+  film-act)        FLAG=(--film-act) ;;
+  film-pi0)        FLAG=(--film-pi0) ;;
+  film-groot)      FLAG=(--film-groot) ;;
+  *) echo "unknown kind $KIND" >&2; exit 1 ;;
+esac
+
+[[ -d "$CK/pretrained_model" ]] || { echo "[$TAG] no pretrained_model under $CK" >&2; exit 1; }
+[[ -d "$RV/meta" ]] || { echo "[$TAG] val dataset missing" >&2; exit 1; }
+mkdir -p "$DIR/probes"
+echo "[$TAG] kind=$KIND inject=$INJECT mask_force=$MASK_FORCE gpu=$GPU ckpt=$CK"
+
+state() { # <cell> <extra args...>
+  local cell=$1; shift
+  env "${FENV[@]}" "$PY" "$DIR/probe_state_authority.py" "${FLAG[@]}" \
+    --checkpoint "$CK" --dataset-root "$RV" --repo-id "$REPO_VAL" --all-episodes "$@" \
+    > "$DIR/probes/${PFX}_${TAG}_${cell}.txt" 2>&1
+  echo "[$TAG] $cell rc=$? -> $(grep -a -m1 'ALL frames' "$DIR/probes/${PFX}_${TAG}_${cell}.txt" | sed 's/^ *//')"
+}
+
+state pc_fc  --swap firstcontact --pre-contact 10 --fc-fz-thresh "$FC_FZ"
+state ramp8  --swap fcscale --fc-mag 8 ${PC[@]+"${PC[@]}"}
+state ramp10 --swap fcscale --fc-mag 10 ${PC[@]+"${PC[@]}"}
+state ramp12 --swap fcscale --fc-mag 12 ${PC[@]+"${PC[@]}"}
+state pc_r12 --swap fcscale --fc-mag 12 --pre-contact 10
+
+if [[ "$KIND" == film || "$KIND" == film-act ]]; then
+  AFLAG=(); [[ "$KIND" == film-act ]] && AFLAG=(--film-act)
+  env "${FENV[@]}" "$PY" "$DIR/probe_film_authority.py" "${AFLAG[@]}" --checkpoint "$CK" \
+    --dataset-root "$RV" --repo-id "$REPO_VAL" --contact-n "${CONTACT_N:-6}" \
+    > "$DIR/probes/${PFX}_${TAG}_std.txt" 2>&1; echo "[$TAG] std rc=$?"
+  env "${FENV[@]}" "$PY" "$DIR/probe_film_authority.py" "${AFLAG[@]}" --checkpoint "$CK" \
+    --dataset-root "$RV" --repo-id "$REPO_VAL" --contact-n "${CONTACT_N:-6}" \
+    --c0 "0,0,0" --c1 "$C1" \
+    > "$DIR/probes/${PFX}_${TAG}_real.txt" 2>&1; echo "[$TAG] real rc=$?"
+fi
+
+for off in 1 30; do
+  env "${FENV[@]}" "$PY" "$DIR/probe_press_sim.py" "${FLAG[@]}" --checkpoint "$CK" \
+    --dataset-root "$RV" --repo-id "$REPO_VAL" \
+    --stiffness 1.0 --seal-depth 0 --start-offset "$off" --force-model fzdelta \
+    --fz-delta0 "$FZ_DELTA0" --f-base "$F_BASE" --f-cap "$F_CAP" \
+    > "$DIR/probes/${PFX}_sim_${TAG}_off${off}.txt" 2>&1
+  echo "[$TAG] sim off$off rc=$?"
+done
+
+EVF=()
+case "$KIND" in
+  film) EVF=(--film) ;; film-act) EVF=(--film-act) ;;
+  film-pi0) EVF=(--film-pi0) ;; film-groot) EVF=(--film-groot) ;;
+esac
+env "${FENV[@]}" "$PY" "$DIR/eval_offline.py" "${EVF[@]}" --checkpoint "$CK" \
+  --val-root "$RV" --repo-id "$REPO_VAL" \
+  > "$DIR/probes/${PFX}_eval_${TAG}.txt" 2>&1; echo "[$TAG] eval rc=$?"
+
+echo; echo "===== $TAG summary ====="
+grep -a -H "ALL frames" "$DIR"/probes/${PFX}_${TAG}_{pc_fc,ramp8,ramp10,ramp12,pc_r12}.txt 2>/dev/null
+grep -a -H -A3 "── summary" "$DIR"/probes/${PFX}_sim_${TAG}_*.txt 2>/dev/null | grep -v "^--$"
+grep -a -H "OVERALL" "$DIR"/probes/${PFX}_eval_${TAG}.txt 2>/dev/null
+echo "[$TAG] DONE"

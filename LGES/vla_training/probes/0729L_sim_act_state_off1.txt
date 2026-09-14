@@ -1,0 +1,21 @@
+[sim] FiLM-act cond=('contact', 'fz', 'seal') inject=state mask_force=True  ckpt=outputs/act_film_scratch_0729/checkpoints/best
+[sim] stiffness=1.0N/mm  f_base=6.8N  seal_depth=nevermm  max_steps=40  start_offset=1  force_model=fzdelta
+Loading weights from local directory
+[sim] contact direction=[0.19 0.82 0.53]  torque=[ 0.02 -0.48 -0.46]
+  ep0 (z=0.763): timeout steps=40 depth= 19.6mm  |F|end=15.8N  sealed=False
+        first steps [|F|/dz(mm)]: 6.6N/-1.6  5.6N/-1.6  4.9N/-1.5  4.7N/-1.5  5.0N/-1.5  5.6N/-1.4  6.5N/-1.4  7.6N/-1.4
+  ep1 (z=0.765): STOP    steps=22 depth=  1.2mm  |F|end= 5.3N  sealed=False
+        first steps [|F|/dz(mm)]: 5.7N/-0.6  5.4N/-0.3  5.3N/-0.2  5.3N/-0.1  5.3N/-0.0  5.3N/-0.0  5.3N/-0.0  5.3N/-0.0
+  ep2 (z=0.762): STOP    steps= 2 depth=  0.0mm  |F|end= 6.2N  sealed=False
+        first steps [|F|/dz(mm)]: 6.2N/+1.4  6.2N/+1.4
+  ep3 (z=0.818): timeout steps=40 depth= 50.1mm  |F|end=22.8N  sealed=False
+        first steps [|F|/dz(mm)]: 4.8N/-1.4  4.7N/-1.3  5.0N/-1.3  5.6N/-1.3  6.4N/-1.3  7.3N/-1.3  8.4N/-1.3  9.5N/-1.3
+  ep4 (z=0.817): timeout steps=40 depth= 27.8mm  |F|end=19.7N  sealed=False
+        first steps [|F|/dz(mm)]: 6.6N/-1.6  5.7N/-1.5  5.2N/-1.5  5.1N/-1.5  5.4N/-1.5  6.1N/-1.4  7.0N/-1.4  8.0N/-1.2
+  ep5 (z=0.817): STOP    steps= 7 depth=  6.4mm  |F|end= 5.3N  sealed=False
+        first steps [|F|/dz(mm)]: 7.0N/-1.4  6.1N/-1.4  5.4N/-1.4  5.1N/-1.3  5.1N/-1.0  5.3N/+0.1  5.3N/+0.1
+
+── summary ─────────────────────────────────────────────────────────
+  stopped 3/6 episodes   penetration depth mean=17.5mm  max=50.1mm
+    z~0.763: stopped 2/3  depth mean=6.9mm
+    z~0.817: stopped 1/3  depth mean=28.1mm

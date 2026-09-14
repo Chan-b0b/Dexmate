@@ -1,0 +1,33 @@
+`torch_dtype` is deprecated! Use `dtype` instead!
+[sim] FiLM cond=('contact', 'fz', 'seal') inject=prefix mask_force=True  ckpt=/home/maverick/Dexmate/LGES/vla_training/outputs/smolvla_film_state_0909/checkpoints/best
+[sim] stiffness=1.0N/mm  f_base=18.43N  seal_depth=nevermm  max_steps=40  start_offset=1  force_model=fzdelta
+Loading  HuggingFaceTB/SmolVLM2-500M-Video-Instruct weights ...
+Loading weights:   0%|          | 0/489 [00:00<?, ?it/s]Loading weights:  44%|████▍     | 217/489 [00:00<00:00, 2166.58it/s]Loading weights: 100%|██████████| 489/489 [00:00<00:00, 2713.39it/s]
+Reducing the number of VLM layers to 16 ...
+Loading weights from local directory
+[sim] contact direction=[0.62 0.21 0.76]  torque=[ 0.3  -0.06  0.14]
+  ep0 (z=0.755): STOP    steps=29 depth= 14.8mm  |F|end=16.0N  sealed=False
+        first steps [|F|/dz(mm)]: 7.7N/-4.7  8.6N/-5.0  11.8N/-1.6  13.0N/-0.8  13.7N/-0.5  14.1N/-0.4  14.4N/-0.3  14.6N/-0.2
+  ep1 (z=0.756): STOP    steps=17 depth=  8.8mm  |F|end=14.4N  sealed=False
+        first steps [|F|/dz(mm)]: 8.1N/-4.7  11.0N/-1.5  12.2N/-0.8  12.9N/-0.5  13.3N/-0.4  13.6N/-0.2  13.8N/-0.2  14.0N/-0.1
+  ep2 (z=0.754): STOP    steps=18 depth= 19.8mm  |F|end=14.8N  sealed=False
+        first steps [|F|/dz(mm)]: 10.5N/-4.6  8.1N/-4.8  8.0N/-5.0  10.6N/-4.8  14.3N/-0.1  14.4N/-0.1  14.5N/-0.1  14.6N/-0.1
+  ep3 (z=0.756): STOP    steps=20 depth= 10.9mm  |F|end=15.8N  sealed=False
+        first steps [|F|/dz(mm)]: 8.4N/-5.1  11.2N/-3.5  13.9N/-0.6  14.4N/-0.4  14.7N/-0.3  15.0N/-0.2  15.2N/-0.2  15.3N/-0.1
+  ep4 (z=0.754): STOP    steps=32 depth= 24.6mm  |F|end=16.0N  sealed=False
+        first steps [|F|/dz(mm)]: 13.3N/-4.4  10.1N/-4.7  8.0N/-4.9  8.5N/-5.0  11.4N/-1.9  12.9N/-0.9  13.6N/-0.6  14.1N/-0.4
+  ep5 (z=0.809): STOP    steps=27 depth= 22.7mm  |F|end=16.5N  sealed=False
+        first steps [|F|/dz(mm)]: 11.1N/-5.3  8.1N/-5.6  8.2N/-6.2  11.8N/-4.5  15.5N/-0.2  15.7N/-0.2  15.8N/-0.1  16.0N/-0.1
+  ep6 (z=0.809): STOP    steps=16 depth= 17.4mm  |F|end=15.0N  sealed=False
+        first steps [|F|/dz(mm)]: 8.4N/-5.2  7.3N/-5.7  9.9N/-5.9  14.5N/-0.2  14.7N/-0.1  14.8N/-0.1  14.8N/-0.1  14.9N/-0.0
+  ep7 (z=0.809): STOP    steps=22 depth= 23.7mm  |F|end=14.7N  sealed=False
+        first steps [|F|/dz(mm)]: 14.0N/-4.7  10.6N/-4.9  8.3N/-5.3  8.8N/-5.8  12.3N/-1.3  13.3N/-0.5  13.7N/-0.4  14.0N/-0.3
+  ep8 (z=0.810): STOP    steps=19 depth= 18.9mm  |F|end=14.5N  sealed=False
+        first steps [|F|/dz(mm)]: 9.8N/-5.0  7.5N/-5.3  8.3N/-5.8  12.1N/-1.7  13.4N/-0.4  13.8N/-0.3  14.0N/-0.2  14.2N/-0.1
+  ep9 (z=0.806): STOP    steps= 7 depth= 25.2mm  |F|end=15.1N  sealed=False
+        first steps [|F|/dz(mm)]: 14.8N/-4.5  11.3N/-4.8  8.7N/-5.1  8.3N/-5.6  11.1N/-5.2  15.1N/+0.1  15.1N/+0.1
+
+── summary ─────────────────────────────────────────────────────────
+  stopped 10/10 episodes   penetration depth mean=18.7mm  max=25.2mm
+    z~0.763: stopped 5/5  depth mean=15.8mm
+    z~0.817: stopped 5/5  depth mean=21.6mm

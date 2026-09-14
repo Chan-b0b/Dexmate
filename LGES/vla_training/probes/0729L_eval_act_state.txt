@@ -1,0 +1,18 @@
+checkpoint: outputs/act_film_scratch_0729/checkpoints/best
+[eval] FiLM ENABLED-act (cond=('contact', 'fz', 'seal') inject=state mask_force=True F0=6 tau=4 fz_tau=5 fz_off=2.1 fmag=5.1/5 stats=/home/maverick/Dexmate/LGES/vla_training/datasets/lges_case_pick_0729_val)
+Loading weights from local directory
+val: 6 episodes, 1169 frames
+
+task                                        pos(mm)  rot(mrad)  suction
+pick up the case with the suction cup          0.71       1.32    99.7%
+------------------------------------------------------------------------
+OVERALL mean |err| per step                    0.71       1.32    99.7%
+
+per-dimension mean |err|:
+  dx       0.00050
+  dy       0.00060
+  dz       0.00101
+  drx      0.00100
+  dry      0.00157
+  drz      0.00138
+  suction  0.01069

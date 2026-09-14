@@ -1,0 +1,89 @@
+`torch_dtype` is deprecated! Use `dtype` instead!
+[probe] NAIVE checkpoint (no FiLM)  ckpt=/home/maverick/Dexmate/LGES/vla_training/outputs/smolvla_naive_0816/checkpoints/best
+Loading  HuggingFaceTB/SmolVLM2-500M-Video-Instruct weights ...
+Loading weights:   0%|          | 0/489 [00:00<?, ?it/s]Loading weights:  17%|█▋        | 81/489 [00:00<00:00, 805.21it/s]Loading weights:  33%|███▎      | 162/489 [00:00<00:00, 701.12it/s]Loading weights:  48%|████▊     | 233/489 [00:00<00:00, 636.84it/s]Loading weights:  61%|██████    | 298/489 [00:00<00:00, 604.98it/s]Loading weights:  83%|████████▎ | 405/489 [00:00<00:00, 748.50it/s]Loading weights: 100%|██████████| 489/489 [00:00<00:00, 765.34it/s]
+Reducing the number of VLM layers to 16 ...
+Loading weights from local directory
+  episodes: [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19]
+  swap wrench (median over 60 FIRST-CONTACT frames, fz>3.0N trigger, all episodes): [ 4.48  9.18  6.29  0.04 -0.45 -0.39]  |F|=12.0N  seal stays 0  [--swap fcscale]
+  ep0: "pick up the case with the suction cup"  frames 0..177  descent=10  first-contact@+129  seal@+153
+  ep1: "pick up the case with the suction cup"  frames 177..361  descent=10  first-contact@+136  seal@+160
+  ep2: "pick up the case with the suction cup"  frames 361..543  descent=10  first-contact@+132  seal@+157
+  ep3: "pick up the case with the suction cup"  frames 543..725  descent=10  first-contact@+134  seal@+170
+  ep4: "pick up the case with the suction cup"  frames 725..906  descent=10  first-contact@+134  seal@+156
+  ep5: "pick up the case with the suction cup"  frames 906..1089  descent=10  first-contact@+134  seal@+158
+  ep6: "pick up the case with the suction cup"  frames 1089..1270  descent=10  first-contact@+132  seal@+156
+  ep7: "pick up the case with the suction cup"  frames 1270..1452  descent=10  first-contact@+133  seal@+157
+  ep8: "pick up the case with the suction cup"  frames 1452..1634  descent=10  first-contact@+134  seal@+158
+  ep9: "pick up the case with the suction cup"  frames 1634..1816  descent=10  first-contact@+134  seal@+157
+  ep10: "pick up the case with the suction cup"  frames 1816..1959  descent=10  first-contact@+98  seal@+120
+  ep11: "pick up the case with the suction cup"  frames 1959..2103  descent=10  first-contact@+96  seal@+123
+  ep12: "pick up the case with the suction cup"  frames 2103..2245  descent=10  first-contact@+97  seal@+120
+  ep13: "pick up the case with the suction cup"  frames 2245..2389  descent=10  first-contact@+97  seal@+122
+  ep14: "pick up the case with the suction cup"  frames 2389..2535  descent=10  first-contact@+100  seal@+124
+  ep15: "pick up the case with the suction cup"  frames 2535..2677  descent=10  first-contact@+97  seal@+120
+  ep16: "pick up the case with the suction cup"  frames 2677..2820  descent=10  first-contact@+100  seal@+122
+  ep17: "pick up the case with the suction cup"  frames 2820..2963  descent=10  first-contact@+97  seal@+121
+  ep18: "pick up the case with the suction cup"  frames 2963..3105  descent=10  first-contact@+97  seal@+120
+  ep19: "pick up the case with the suction cup"  frames 3105..3249  descent=10  first-contact@+97  seal@+122
+
+   frame    ee_z   |F|N |  expert  dz(own) dz(swap)    dzRAW   dzFiLM |    dTot    dRaw   dFiLM
+  ---------------------------------------------------------------------------------------------
+     119   0.897    5.1 |   -1.4m    -2.3m    -0.6m     nanm     nanm |    1.6m    nanm    nanm
+     127   0.886    6.6 |   -1.4m    -1.4m    -0.7m     nanm     nanm |    0.7m    nanm    nanm
+     309   0.889    4.9 |   -1.4m    -2.2m    -0.6m     nanm     nanm |    1.6m    nanm    nanm
+     487   0.895    5.3 |   -1.4m    -2.0m    -0.6m     nanm     nanm |    1.4m    nanm    nanm
+     669   0.896    5.4 |   -1.7m    -2.2m    -0.3m     nanm     nanm |    1.9m    nanm    nanm
+     849   0.899    5.1 |   -1.7m    -2.2m    -0.5m     nanm     nanm |    1.7m    nanm    nanm
+     857   0.887    7.0 |   -1.4m    -2.3m    -0.6m     nanm     nanm |    1.7m    nanm    nanm
+    1036   0.890    5.3 |   -1.2m    -2.3m    -0.2m     nanm     nanm |    2.1m    nanm    nanm
+    1215   0.894    5.1 |   -1.4m    -2.3m    -0.4m     nanm     nanm |    1.9m    nanm    nanm
+    1395   0.897    5.1 |   -1.9m    -2.2m    -0.3m     nanm     nanm |    1.9m    nanm    nanm
+    1576   0.899    5.4 |   -1.2m    -2.1m    -1.0m     nanm     nanm |    1.1m    nanm    nanm
+    1584   0.887    5.0 |   -1.4m    -2.4m    -0.6m     nanm     nanm |    1.8m    nanm    nanm
+    1764   0.890    5.4 |   -1.5m    -2.1m    -0.6m     nanm     nanm |    1.4m    nanm    nanm
+    1908   0.947    5.2 |   -1.4m    -2.3m     0.1m     nanm     nanm |    2.4m    nanm    nanm
+    2047   0.952    5.1 |   -1.2m    -2.4m    -0.3m     nanm     nanm |    2.1m    nanm    nanm
+    2190   0.952    5.1 |   -1.8m    -2.5m    -0.3m     nanm     nanm |    2.2m    nanm    nanm
+    2198   0.940    5.4 |   -1.1m    -2.3m    -0.7m     nanm     nanm |    1.6m    nanm    nanm
+    2338   0.945    5.0 |   -1.5m    -2.6m    -0.4m     nanm     nanm |    2.2m    nanm    nanm
+    2483   0.949    5.3 |   -1.4m    -2.4m    -0.1m     nanm     nanm |    2.3m    nanm    nanm
+    2624   0.950    5.2 |   -1.7m    -2.6m    -0.2m     nanm     nanm |    2.4m    nanm    nanm
+    2767   0.953    5.2 |   -1.4m    -2.4m    -0.2m     nanm     nanm |    2.2m    nanm    nanm
+    2775   0.942    6.2 |   -1.4m    -1.5m    -0.2m     nanm     nanm |    1.3m    nanm    nanm
+    2913   0.944    5.4 |   -1.3m    -2.6m    -0.5m     nanm     nanm |    2.1m    nanm    nanm
+    3054   0.947    5.1 |   -1.5m    -2.3m    -0.5m     nanm     nanm |    1.8m    nanm    nanm
+    3194   0.951    5.2 |   -1.6m    -2.3m    -0.0m     nanm     nanm |    2.3m    nanm    nanm
+  ---------------------------------------------------------------------------------------------
+
+  decomposition over 200 descent frames (d* = dz(cell) - dz(own,own)):
+    ALL frames                  : n=200  dz(own)= -2.23mm  dTotal= +1.83mm
+    approach/hover dz(own)>=-3mm: n=200  dz(own)= -2.23mm  dTotal= +1.83mm
+
+  time-to-contact split (pooled over 20 episode(s), per-episode first-contact detection):
+    <2s before contact (late)   : n=200  dz(own)= -2.23mm  dTotal= +1.83mm
+
+  per-episode split (ABSOLUTE dz, mm/step):
+    ep0 (contact z=0.883): n= 10  dz(own)= -2.11  dz(swap)= -0.63  d= +1.48
+    ep1 (contact z=0.883): n= 10  dz(own)= -2.25  dz(swap)= -0.62  d= +1.64
+    ep2 (contact z=0.886): n= 10  dz(own)= -2.20  dz(swap)= -0.56  d= +1.64
+    ep3 (contact z=0.884): n= 10  dz(own)= -2.11  dz(swap)= -0.28  d= +1.83
+    ep4 (contact z=0.884): n= 10  dz(own)= -2.15  dz(swap)= -0.57  d= +1.57
+    ep5 (contact z=0.884): n= 10  dz(own)= -2.24  dz(swap)= -0.31  d= +1.93
+    ep6 (contact z=0.885): n= 10  dz(own)= -2.24  dz(swap)= -0.47  d= +1.78
+    ep7 (contact z=0.885): n= 10  dz(own)= -2.16  dz(swap)= -0.37  d= +1.80
+    ep8 (contact z=0.884): n= 10  dz(own)= -2.06  dz(swap)= -0.66  d= +1.40
+    ep9 (contact z=0.884): n= 10  dz(own)= -2.12  dz(swap)= -0.62  d= +1.49
+    ep10 (contact z=0.939): n= 10  dz(own)= -2.15  dz(swap)= +0.10  d= +2.25
+    ep11 (contact z=0.940): n= 10  dz(own)= -2.32  dz(swap)= -0.43  d= +1.90
+    ep12 (contact z=0.937): n= 10  dz(own)= -2.38  dz(swap)= -0.55  d= +1.83
+    ep13 (contact z=0.939): n= 10  dz(own)= -2.44  dz(swap)= -0.47  d= +1.96
+    ep14 (contact z=0.940): n= 10  dz(own)= -2.44  dz(swap)= -0.10  d= +2.34
+    ep15 (contact z=0.938): n= 10  dz(own)= -2.37  dz(swap)= -0.25  d= +2.11
+    ep16 (contact z=0.939): n= 10  dz(own)= -2.18  dz(swap)= -0.23  d= +1.95
+    ep17 (contact z=0.938): n= 10  dz(own)= -2.40  dz(swap)= -0.47  d= +1.93
+    ep18 (contact z=0.938): n= 10  dz(own)= -2.24  dz(swap)= -0.46  d= +1.77
+    ep19 (contact z=0.939): n= 10  dz(own)= -2.13  dz(swap)= -0.12  d= +2.01
+
+── verdict ─────────────────────────────────────────────────────────
+  INCONCLUSIVE: no committed-descent frames in this episode.

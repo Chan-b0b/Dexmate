@@ -1,0 +1,81 @@
+WARNING:root:Vision embedding key might need handling: model.paligemma_with_expert.paligemma.model.vision_tower.vision_model.embeddings.patch_embedding.bias
+WARNING:root:Vision embedding key might need handling: model.paligemma_with_expert.paligemma.model.vision_tower.vision_model.embeddings.patch_embedding.weight
+[probe] NAIVE checkpoint (no FiLM)  ckpt=/home/maverick/Dexmate/LGES/vla_training/outputs/pi0_naive_0909/checkpoints/best
+The PI0 model is a direct port of the OpenPI implementation. 
+This implementation follows the original OpenPI structure for compatibility. 
+Original implementation: https://github.com/Physical-Intelligence/openpi
+Loading model from: /home/maverick/Dexmate/LGES/vla_training/outputs/pi0_naive_0909/checkpoints/best/pretrained_model
+✓ Loaded state dict from model.safetensors
+All keys loaded successfully!
+  episodes: [0, 1, 2, 3, 4, 5, 6, 7, 8, 9]
+  swap wrench (median over 30 FIRST-CONTACT frames, fz>3.0N trigger, all episodes): [11.1   3.71 13.67  0.3  -0.06  0.14]  |F|=18.0N  seal stays 0  [--swap fcscale]
+  ep0: "pick up the case with the suction cup"  frames 0..107  descent=10  first-contact@+57  seal@+79
+  ep1: "pick up the case with the suction cup"  frames 107..222  descent=10  first-contact@+65  seal@+86
+  ep2: "pick up the case with the suction cup"  frames 222..332  descent=10  first-contact@+60  seal@+82
+  ep3: "pick up the case with the suction cup"  frames 332..449  descent=10  first-contact@+62  seal@+88
+  ep4: "pick up the case with the suction cup"  frames 449..560  descent=10  first-contact@+61  seal@+83
+  ep5: "pick up the case with the suction cup"  frames 560..655  descent=10  first-contact@+48  seal@+69
+  ep6: "pick up the case with the suction cup"  frames 655..752  descent=10  first-contact@+53  seal@+71
+  ep7: "pick up the case with the suction cup"  frames 752..845  descent=7  first-contact@+7  seal@+67
+  ep8: "pick up the case with the suction cup"  frames 845..943  descent=10  first-contact@+51  seal@+72
+  ep9: "pick up the case with the suction cup"  frames 943..1037  descent=10  first-contact@+10  seal@+68
+
+   frame    ee_z   |F|N |  expert  dz(own) dz(swap)    dzRAW   dzFiLM |    dTot    dRaw   dFiLM
+  ---------------------------------------------------------------------------------------------
+      47   0.794   11.7 |   -3.8m    -5.6m    -4.8m     nanm     nanm |    0.8m    nanm    nanm
+      50   0.782   11.1 |   -3.8m    -5.8m    -4.8m     nanm     nanm |    1.0m    nanm    nanm
+      53   0.770   10.9 |   -3.4m    -5.3m    -4.3m     nanm     nanm |    1.0m    nanm    nanm
+      56   0.758    7.9 |   -3.6m    -5.1m    -2.2m     nanm     nanm |    2.9m    nanm    nanm
+     164   0.793   10.6 |   -4.2m    -5.8m    -4.9m     nanm     nanm |    0.9m    nanm    nanm
+     167   0.780   10.7 |   -4.5m    -5.5m    -4.8m     nanm     nanm |    0.7m    nanm    nanm
+     170   0.768   10.9 |   -4.3m    -5.2m    -4.4m     nanm     nanm |    0.8m    nanm    nanm
+     273   0.796   11.5 |   -4.1m    -5.7m    -4.9m     nanm     nanm |    0.8m    nanm    nanm
+     276   0.784   10.6 |   -3.5m    -5.8m    -4.9m     nanm     nanm |    0.9m    nanm    nanm
+     279   0.772   11.1 |   -3.0m    -5.9m    -4.9m     nanm     nanm |    1.0m    nanm    nanm
+     384   0.814   10.2 |   -4.5m    -5.5m    -4.9m     nanm     nanm |    0.6m    nanm    nanm
+     387   0.802   11.9 |   -2.8m    -5.6m    -4.9m     nanm     nanm |    0.7m    nanm    nanm
+     390   0.789   10.2 |   -2.9m    -5.7m    -4.9m     nanm     nanm |    0.8m    nanm    nanm
+     393   0.778    9.7 |   -3.1m    -5.8m    -4.9m     nanm     nanm |    0.9m    nanm    nanm
+     502   0.793   11.5 |   -4.5m    -5.7m    -4.8m     nanm     nanm |    0.9m    nanm    nanm
+     505   0.781   10.7 |   -4.8m    -5.7m    -4.8m     nanm     nanm |    0.9m    nanm    nanm
+     508   0.768   11.2 |   -4.4m    -4.8m    -4.4m     nanm     nanm |    0.4m    nanm    nanm
+     599   0.851   11.6 |   -4.1m    -6.1m    -6.7m     nanm     nanm |   -0.6m    nanm    nanm
+     602   0.840   10.6 |   -4.8m    -5.7m    -6.2m     nanm     nanm |   -0.5m    nanm    nanm
+     605   0.828   10.8 |   -4.6m    -5.5m    -5.9m     nanm     nanm |   -0.4m    nanm    nanm
+     698   0.847   10.9 |   -3.6m    -5.7m    -6.2m     nanm     nanm |   -0.4m    nanm    nanm
+     701   0.836   11.4 |   -4.8m    -5.7m    -6.0m     nanm     nanm |   -0.4m    nanm    nanm
+     704   0.824   10.9 |   -4.9m    -5.6m    -5.9m     nanm     nanm |   -0.3m    nanm    nanm
+     707   0.812    9.0 |   -3.1m    -4.8m    -1.7m     nanm     nanm |    3.1m    nanm    nanm
+     754   1.165   12.2 |   10.8m     1.7m    -0.1m     nanm     nanm |   -1.8m    nanm    nanm
+     757   1.190    9.9 |   -2.4m   -13.6m   -12.8m     nanm     nanm |    0.9m    nanm    nanm
+     887   0.847   10.2 |   -3.5m    -5.8m    -6.6m     nanm     nanm |   -0.8m    nanm    nanm
+     890   0.836   10.7 |   -3.4m    -5.8m    -6.3m     nanm     nanm |   -0.5m    nanm    nanm
+     893   0.824   10.9 |   -4.2m    -5.7m    -6.2m     nanm     nanm |   -0.5m    nanm    nanm
+     943   1.104   13.3 |   62.0m    10.0m     9.6m     nanm     nanm |   -0.4m    nanm    nanm
+     946   1.166   13.3 |    0.0m    -3.2m    -2.4m     nanm     nanm |    0.8m    nanm    nanm
+     949   1.172    7.7 |    0.0m   -15.5m   -13.7m     nanm     nanm |    1.8m    nanm    nanm
+     952   1.137    6.8 |   -7.6m   -15.7m   -12.0m     nanm     nanm |    3.6m    nanm    nanm
+  ---------------------------------------------------------------------------------------------
+
+  decomposition over 97 descent frames (d* = dz(cell) - dz(own,own)):
+    ALL frames                  : n= 97  dz(own)= -5.78mm  dTotal= +0.73mm
+    approach/hover dz(own)>=-3mm: n=  6  dz(own)= +3.97mm  dTotal= -0.94mm
+    COMMITTED desc dz(own)< -3mm: n= 91  dz(own)= -6.42mm  dTotal= +0.84mm
+
+  time-to-contact split (pooled over 10 episode(s), per-episode first-contact detection):
+    <2s before contact (late)   : n= 97  dz(own)= -5.78mm  dTotal= +0.73mm
+
+  per-episode split (ABSOLUTE dz, mm/step):
+    ep0 (contact z=0.755): n= 10  dz(own)= -5.50  dz(swap)= -4.00  d= +1.51
+    ep1 (contact z=0.760): n= 10  dz(own)= -5.64  dz(swap)= -4.61  d= +1.02
+    ep2 (contact z=0.760): n= 10  dz(own)= -5.83  dz(swap)= -4.88  d= +0.95
+    ep3 (contact z=0.775): n= 10  dz(own)= -5.67  dz(swap)= -4.90  d= +0.77
+    ep4 (contact z=0.760): n= 10  dz(own)= -5.51  dz(swap)= -4.68  d= +0.83
+    ep5 (contact z=0.815): n= 10  dz(own)= -5.74  dz(swap)= -5.98  d= -0.24
+    ep6 (contact z=0.809): n= 10  dz(own)= -5.40  dz(swap)= -4.74  d= +0.66
+    ep7 (contact z=1.179): n=  7  dz(own)= -3.52  dz(swap)= -4.00  d= -0.48
+    ep8 (contact z=0.813): n= 10  dz(own)= -5.70  dz(swap)= -5.53  d= +0.17
+    ep9 (contact z=1.130): n= 10  dz(own)= -8.58  dz(swap)= -6.84  d= +1.75
+
+── verdict ─────────────────────────────────────────────────────────
+  raw-state authority (naive): swapping wrench+seal to contact values cancels 13% of the committed descent (dz -6.4 -> -5.6mm).

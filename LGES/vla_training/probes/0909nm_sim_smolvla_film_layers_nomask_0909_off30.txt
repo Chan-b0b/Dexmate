@@ -1,0 +1,33 @@
+`torch_dtype` is deprecated! Use `dtype` instead!
+[sim] FiLM cond=('contact', 'fz', 'seal') inject=layers mask_force=False  ckpt=/home/maverick/Dexmate/LGES/vla_training/outputs/smolvla_film_layers_nomask_0909/checkpoints/best
+[sim] stiffness=1.0N/mm  f_base=18.43N  seal_depth=nevermm  max_steps=40  start_offset=30  force_model=fzdelta
+Loading  HuggingFaceTB/SmolVLM2-500M-Video-Instruct weights ...
+Loading weights:   0%|          | 0/489 [00:00<?, ?it/s]Loading weights:  42%|████▏     | 203/489 [00:00<00:00, 1995.41it/s]Loading weights:  93%|█████████▎| 457/489 [00:00<00:00, 2310.55it/s]Loading weights: 100%|██████████| 489/489 [00:00<00:00, 2321.86it/s]
+Reducing the number of VLM layers to 16 ...
+Loading weights from local directory
+[sim] contact direction=[0.62 0.21 0.76]  torque=[ 0.3  -0.06  0.14]
+  ep0 (z=0.755): timeout steps=40 depth= 98.6mm  |F|end=35.4N  sealed=False
+        first steps [|F|/dz(mm)]: 11.2N/-13.7  23.5N/-4.0  27.4N/-3.4  30.7N/-2.9  33.6N/-2.5  35.4N/-2.1  35.4N/-2.1  35.4N/-2.1
+  ep1 (z=0.756): timeout steps=40 depth=105.4mm  |F|end=36.0N  sealed=False
+        first steps [|F|/dz(mm)]: 12.0N/-15.1  25.6N/-5.4  30.8N/-3.3  33.9N/-2.6  36.0N/-2.2  36.0N/-2.2  36.0N/-2.2  36.0N/-2.2
+  ep2 (z=0.754): timeout steps=40 depth= 71.4mm  |F|end=36.2N  sealed=False
+        first steps [|F|/dz(mm)]: 12.5N/-12.6  23.5N/-3.6  26.9N/-3.1  29.8N/-2.5  32.2N/-2.0  34.2N/-1.7  35.8N/-1.4  36.2N/-1.3
+  ep3 (z=0.756): timeout steps=40 depth=112.2mm  |F|end=35.7N  sealed=False
+        first steps [|F|/dz(mm)]: 11.4N/-14.1  24.2N/-6.2  30.3N/-3.5  33.7N/-2.7  35.7N/-2.4  35.7N/-2.4  35.7N/-2.4  35.7N/-2.4
+  ep4 (z=0.754): timeout steps=40 depth= 92.4mm  |F|end=36.6N  sealed=False
+        first steps [|F|/dz(mm)]: 12.3N/-13.8  24.8N/-4.4  29.1N/-3.3  32.3N/-2.7  35.0N/-2.2  36.6N/-1.9  36.6N/-1.9  36.6N/-1.9
+  ep5 (z=0.809): timeout steps=40 depth=146.4mm  |F|end=35.6N  sealed=False
+        first steps [|F|/dz(mm)]: 11.4N/-7.6  18.0N/-6.6  24.2N/-6.2  30.2N/-5.2  35.3N/-3.4  35.6N/-3.4  35.6N/-3.4  35.6N/-3.4
+  ep6 (z=0.809): timeout steps=40 depth=127.8mm  |F|end=35.3N  sealed=False
+        first steps [|F|/dz(mm)]: 11.1N/-7.9  17.9N/-6.1  23.6N/-3.5  27.0N/-5.1  32.0N/-3.9  35.3N/-2.9  35.3N/-2.9  35.3N/-2.9
+  ep7 (z=0.809): timeout steps=40 depth=158.8mm  |F|end=35.3N  sealed=False
+        first steps [|F|/dz(mm)]: 11.0N/-7.4  17.5N/-7.1  24.2N/-4.5  28.5N/-5.5  33.9N/-4.2  35.3N/-3.7  35.3N/-3.7  35.3N/-3.7
+  ep8 (z=0.810): timeout steps=40 depth=145.7mm  |F|end=35.5N  sealed=False
+        first steps [|F|/dz(mm)]: 11.4N/-7.7  18.0N/-7.6  25.1N/-3.8  28.7N/-4.5  33.1N/-4.0  35.5N/-3.4  35.5N/-3.4  35.5N/-3.4
+  ep9 (z=0.806): timeout steps=40 depth= 96.8mm  |F|end=34.0N  sealed=False
+        first steps [|F|/dz(mm)]: 10.2N/-8.5  17.4N/-4.7  21.7N/-6.3  27.7N/-4.6  32.2N/-2.6  34.0N/-2.0  34.0N/-2.0  34.0N/-2.0
+
+── summary ─────────────────────────────────────────────────────────
+  stopped 0/10 episodes   penetration depth mean=115.5mm  max=158.8mm
+    z~0.763: stopped 0/5  depth mean=96.0mm
+    z~0.817: stopped 0/5  depth mean=135.1mm

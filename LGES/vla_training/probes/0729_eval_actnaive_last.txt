@@ -1,0 +1,17 @@
+checkpoint: /home/maverick/Dexmate/LGES/vla_training/outputs/act_0729/checkpoints/last
+Loading weights from local directory
+val: 6 episodes, 1169 frames
+
+task                                        pos(mm)  rot(mrad)  suction
+pick up the case with the suction cup          0.67       1.26    99.7%
+------------------------------------------------------------------------
+OVERALL mean |err| per step                    0.67       1.26    99.7%
+
+per-dimension mean |err|:
+  dx       0.00049
+  dy       0.00054
+  dz       0.00097
+  drx      0.00092
+  dry      0.00153
+  drz      0.00134
+  suction  0.01128

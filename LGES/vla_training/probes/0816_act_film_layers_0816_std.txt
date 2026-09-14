@@ -1,0 +1,52 @@
+[probe] FiLM-act cond=('contact', 'fz', 'seal') inject=layers mask_force=True  ckpt=/home/maverick/Dexmate/LGES/vla_training/outputs/act_film_layers_0816/checkpoints/best
+Loading weights from local directory
+
+── Tier 0  (static, no data) ───────────────────────────────────────
+  |Δγ| max=0.4087 mean=0.0900   |Δβ| max=0.1684 mean=0.0174   (c: 0 -> 1)
+  γ is a multiplicative gain on the action-token embedding; ~0 => FiLM ignores its own input.
+
+── Tier 1  (counterfactual on training data) ───────────────────────
+  episode 0: "pick up the case with the suction cup"  frames 0..177
+
+   frame    ee_z   |F|N | expert_dz  dz(c=0)  dz(c=1)      Δdz  dz(real)
+  --------------------------------------------------------------------------
+       0   1.193    4.6 |     -0.4m    11.3m    12.3m     0.9m     11.4m
+       6   1.215    6.0 |      0.3m    -1.6m    -1.6m    -0.0m     -1.6m
+      10   1.195    4.5 |     -8.6m    -8.2m    -8.0m     0.2m     -8.2m
+      14   1.163    5.6 |     -2.9m    -2.5m    -1.8m     0.7m     -2.5m
+      20   1.151    5.9 |     -1.1m    -1.3m    -0.6m     0.6m     -1.3m
+      24   1.148    6.0 |     -0.9m    -0.8m    -0.2m     0.6m     -0.8m
+      29   1.114    5.3 |    -18.5m   -10.4m    -9.8m     0.7m    -10.4m
+      35   1.015    5.3 |     -4.5m    -5.1m    -4.5m     0.6m     -5.1m
+      39   1.007    5.4 |     -0.1m    -2.3m    -1.8m     0.5m     -2.3m
+      43   1.007    5.3 |      0.0m    -2.6m    -2.0m     0.6m     -2.6m
+      47   1.006    5.4 |     -1.8m    -2.0m    -1.4m     0.5m     -2.0m
+      51   1.000    5.4 |     -1.5m    -0.2m     0.2m     0.4m     -0.2m
+      55   0.993    5.3 |     -1.3m    -1.0m    -0.8m     0.2m     -1.0m
+      59   0.987    5.2 |     -1.5m    -1.7m    -1.5m     0.1m     -1.7m
+      63   0.981    5.4 |     -1.4m    -1.6m    -1.5m     0.1m     -1.6m
+      67   0.975    5.2 |     -1.1m    -1.6m    -1.5m     0.1m     -1.6m
+      71   0.969    5.5 |     -1.4m    -1.6m    -1.5m     0.1m     -1.6m
+      75   0.963    5.3 |     -1.5m    -1.6m    -1.4m     0.2m     -1.6m
+      79   0.957    5.2 |     -1.2m    -1.6m    -1.4m     0.2m     -1.6m
+      83   0.952    5.3 |     -1.8m    -1.6m    -1.4m     0.2m     -1.6m
+      87   0.946    5.4 |     -1.9m    -1.6m    -1.5m     0.1m     -1.6m
+      91   0.940    5.2 |     -1.1m    -1.6m    -1.5m     0.1m     -1.6m
+      95   0.934    5.3 |     -1.5m    -1.6m    -1.4m     0.1m     -1.6m
+      99   0.927    5.2 |     -1.8m    -1.6m    -1.4m     0.2m     -1.6m
+     103   0.921    5.3 |     -1.4m    -1.6m    -1.4m     0.1m     -1.6m
+     107   0.915    5.2 |     -1.1m    -1.5m    -1.4m     0.1m     -1.5m
+     111   0.910    5.1 |     -1.8m    -1.5m    -1.4m     0.1m     -1.5m
+     115   0.904    5.2 |     -1.6m    -1.6m    -1.5m     0.1m     -1.6m
+     119   0.897    5.1 |     -1.4m    -1.5m    -1.5m     0.1m     -1.5m
+     123   0.892    5.4 |     -1.6m    -1.5m    -1.4m     0.1m     -1.5m
+     165   1.079    5.5 |      6.0m     5.9m     5.8m    -0.1m      5.8m
+  --------------------------------------------------------------------------
+  mean over 122 pre-contact frames:  dz(c=0)=-1.96mm  dz(c=1)=-1.67mm  meanΔdz=+0.29mm  max|Δdz|=0.91mm
+
+  phase split (the transition must fire in the COMMITTED-descent band):
+    approach/hover  dz(c=0)>=-3mm: n=108  dz(c=0)= -0.96mm  dz(c=1)= -0.69mm  Δdz= +0.27mm
+    COMMITTED desc  dz(c=0)< -3mm: n= 14  dz(c=0)= -9.66mm  dz(c=1)= -9.20mm  Δdz= +0.46mm
+
+── verdict ─────────────────────────────────────────────────────────
+  Tier 1 FAIL: module moves with c but the ACTION does not (max|Δdz|<1mm) -> expert layers/out_proj wash out the modulation. No authority.

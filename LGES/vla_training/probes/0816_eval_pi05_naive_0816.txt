@@ -1,0 +1,24 @@
+WARNING:root:Vision embedding key might need handling: model.paligemma_with_expert.paligemma.model.vision_tower.vision_model.embeddings.patch_embedding.bias
+WARNING:root:Vision embedding key might need handling: model.paligemma_with_expert.paligemma.model.vision_tower.vision_model.embeddings.patch_embedding.weight
+checkpoint: /home/maverick/Dexmate/LGES/vla_training/outputs/pi05_naive_0816/checkpoints/best
+The PI05 model is a direct port of the OpenPI implementation. 
+This implementation follows the original OpenPI structure for compatibility. 
+Original implementation: https://github.com/Physical-Intelligence/openpi
+Loading model from: /home/maverick/Dexmate/LGES/vla_training/outputs/pi05_naive_0816/checkpoints/best/pretrained_model
+✓ Loaded state dict from model.safetensors
+All keys loaded successfully!
+val: 20 episodes, 3249 frames
+
+task                                        pos(mm)  rot(mrad)  suction
+pick up the case with the suction cup          1.12       1.71    99.4%
+------------------------------------------------------------------------
+OVERALL mean |err| per step                    1.12       1.71    99.4%
+
+per-dimension mean |err|:
+  dx       0.00072
+  dy       0.00099
+  dz       0.00164
+  drx      0.00162
+  dry      0.00208
+  drz      0.00143
+  suction  0.01808

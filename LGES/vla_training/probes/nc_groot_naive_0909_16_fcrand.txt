@@ -1,0 +1,99 @@
+[probe] NAIVE checkpoint (no FiLM)  ckpt=/home/maverick/Dexmate/LGES/vla_training/outputs/groot_naive_0909/checkpoints/best
+The Groot policy is a wrapper around Nvidia's GR00T N1.5 model.
+Loading pretrained model from: /home/maverick/Dexmate/LGES/vla_training/outputs/groot_naive_0909/checkpoints/best/pretrained_model
+Detected fine-tuned LeRobot checkpoint, loading with state dict...
+[GROOT] Flash Attention not available: No module named 'flash_attn'
+[GROOT] Will use fallback attention mechanism
+Loading pretrained dual brain from nvidia/GR00T-N1.5-3B
+Tune backbone vision tower: False
+Tune backbone LLM: False
+Tune action head projector: True
+Tune action head DiT: True
+Fetching 13 files:   0%|          | 0/13 [00:00<?, ?it/s]Fetching 13 files: 100%|██████████| 13/13 [00:00<00:00, 953.60it/s]
+`torch_dtype` is deprecated! Use `dtype` instead!
+[groot-shim] flash-attn unavailable -> sdpa for Eagle25VLForConditionalGeneration
+[groot-shim] flash-attn unavailable -> sdpa for SiglipVisionModel
+[groot-shim] flash-attn unavailable -> sdpa for Qwen3ForCausalLM
+[GROOT] Copying vendor Eagle files to cache: /home/maverick/vla_venv/lib/python3.12/site-packages/lerobot/policies/groot/eagle2_hg_model -> /home/maverick/.cache/huggingface/lerobot/lerobot/eagle2hg-processor-groot-n1p5
+[GROOT] Assets repo: lerobot/eagle2hg-processor-groot-n1p5 
+ Cache dir: /home/maverick/.cache/huggingface/lerobot/lerobot/eagle2hg-processor-groot-n1p5
+Tune backbone llm: False
+Tune backbone visual: True
+Total number of DiT parameters:  550386688
+Total number of SelfAttentionTransformer parameters:  201433088
+Tune action head projector: True
+Tune action head diffusion model: True
+Loading weights:   0%|          | 0/899 [00:00<?, ?it/s]Loading weights:  67%|██████▋   | 606/899 [00:00<00:00, 6057.26it/s]Loading weights: 100%|██████████| 899/899 [00:00<00:00, 6479.61it/s]
+`use_fast` is set to `True` but the image processor class does not have a fast version.  Falling back to the slow version.
+The tokenizer you are loading from '/home/maverick/.cache/huggingface/lerobot/lerobot/eagle2hg-processor-groot-n1p5' with an incorrect regex pattern: https://huggingface.co/mistralai/Mistral-Small-3.1-24B-Instruct-2503/discussions/84#69121093e8b480e709447d5e. This will lead to incorrect tokenization. You should set the `fix_mistral_regex=True` flag when loading this tokenizer to fix this issue.
+The tokenizer you are loading from '/home/maverick/.cache/huggingface/lerobot/lerobot/eagle2hg-processor-groot-n1p5' with an incorrect regex pattern: https://huggingface.co/mistralai/Mistral-Small-3.1-24B-Instruct-2503/discussions/84#69121093e8b480e709447d5e. This will lead to incorrect tokenization. You should set the `fix_mistral_regex=True` flag when loading this tokenizer to fix this issue.
+Tune backbone llm: False
+Tune backbone visual: False
+Warning: No backbone trainable parameters found.
+Tune action head projector: True
+Tune action head diffusion model: True
+Loading weights from local directory
+  episodes: [0, 1, 2, 3, 4, 5, 6, 7, 8, 9]
+  swap wrench (median over 30 FIRST-CONTACT frames, fz>3.0N trigger, all episodes): [ 3.02 -3.17 15.39  0.3  -0.06  0.14]  |F|=16.0N  seal stays 0  [--swap fcrand]
+  ep0: "pick up the case with the suction cup"  frames 0..107  descent=10  first-contact@+57  seal@+79
+  ep1: "pick up the case with the suction cup"  frames 107..222  descent=10  first-contact@+66  seal@+86
+  ep2: "pick up the case with the suction cup"  frames 222..332  descent=10  first-contact@+62  seal@+82
+  ep3: "pick up the case with the suction cup"  frames 332..449  descent=10  first-contact@+67  seal@+88
+  ep4: "pick up the case with the suction cup"  frames 449..560  descent=10  first-contact@+63  seal@+83
+  ep5: "pick up the case with the suction cup"  frames 560..655  descent=10  first-contact@+50  seal@+69
+  ep6: "pick up the case with the suction cup"  frames 655..752  descent=10  first-contact@+53  seal@+71
+  ep7: "pick up the case with the suction cup"  frames 752..845  descent=10  first-contact@+50  seal@+67
+  ep8: "pick up the case with the suction cup"  frames 845..943  descent=10  first-contact@+52  seal@+72
+  ep9: "pick up the case with the suction cup"  frames 943..1037  descent=10  first-contact@+48  seal@+68
+
+   frame    ee_z   |F|N |  expert  dz(own) dz(swap)    dzRAW   dzFiLM |    dTot    dRaw   dFiLM
+  ---------------------------------------------------------------------------------------------
+      47   0.794   11.7 |   -3.8m     2.5m     1.6m     nanm     nanm |   -1.0m    nanm    nanm
+      51   0.778   11.2 |   -5.4m     3.8m     2.4m     nanm     nanm |   -1.3m    nanm    nanm
+      55   0.763    9.4 |   -4.5m     3.5m     4.3m     nanm     nanm |    0.8m    nanm    nanm
+     165   0.788   10.7 |   -4.0m     1.2m     0.2m     nanm     nanm |   -1.0m    nanm    nanm
+     169   0.772   10.4 |   -4.0m     2.7m     2.5m     nanm     nanm |   -0.3m    nanm    nanm
+     274   0.792   10.4 |   -3.8m     1.1m     1.4m     nanm     nanm |    0.3m    nanm    nanm
+     278   0.776   10.4 |   -4.1m     0.4m     0.7m     nanm     nanm |    0.3m    nanm    nanm
+     282   0.760    8.3 |   -4.0m     1.9m     2.0m     nanm     nanm |    0.2m    nanm    nanm
+     391   0.786   10.8 |   -4.4m     0.6m     0.2m     nanm     nanm |   -0.5m    nanm    nanm
+     395   0.770   10.1 |   -4.2m     2.0m     2.5m     nanm     nanm |    0.5m    nanm    nanm
+     502   0.793   11.5 |   -4.5m     0.4m    -0.6m     nanm     nanm |   -0.9m    nanm    nanm
+     506   0.776   10.9 |   -3.4m     1.5m     0.6m     nanm     nanm |   -0.9m    nanm    nanm
+     510   0.760    7.8 |   -2.7m     1.8m     2.3m     nanm     nanm |    0.5m    nanm    nanm
+     602   0.840   10.6 |   -4.8m    -3.2m    -3.8m     nanm     nanm |   -0.7m    nanm    nanm
+     606   0.824   10.4 |   -3.6m    -2.9m    -3.5m     nanm     nanm |   -0.7m    nanm    nanm
+     698   0.847   10.9 |   -3.6m    -2.3m    -2.9m     nanm     nanm |   -0.6m    nanm    nanm
+     702   0.831   10.0 |   -3.7m    -2.1m    -2.8m     nanm     nanm |   -0.6m    nanm    nanm
+     706   0.816    8.2 |   -3.3m     0.3m     0.9m     nanm     nanm |    0.6m    nanm    nanm
+     794   0.838   11.4 |   -3.5m    -1.6m    -2.3m     nanm     nanm |   -0.7m    nanm    nanm
+     798   0.821   11.2 |   -2.9m     1.2m     0.4m     nanm     nanm |   -0.8m    nanm    nanm
+     887   0.847   10.2 |   -3.5m    -2.6m    -3.2m     nanm     nanm |   -0.6m    nanm    nanm
+     891   0.832   10.6 |   -4.8m    -2.7m    -3.4m     nanm     nanm |   -0.7m    nanm    nanm
+     895   0.816    7.6 |   -3.1m     0.3m     0.9m     nanm     nanm |    0.6m    nanm    nanm
+     983   0.835   10.5 |   -3.8m    -2.3m    -2.8m     nanm     nanm |   -0.5m    nanm    nanm
+     987   0.820   10.7 |   -4.7m     0.8m     0.3m     nanm     nanm |   -0.5m    nanm    nanm
+  ---------------------------------------------------------------------------------------------
+
+  decomposition over 100 descent frames (d* = dz(cell) - dz(own,own)):
+    ALL frames                  : n=100  dz(own)= +0.30mm  dTotal= -0.28mm
+    approach/hover dz(own)>=-3mm: n= 91  dz(own)= +0.65mm  dTotal= -0.25mm
+    COMMITTED desc dz(own)< -3mm: n=  9  dz(own)= -3.25mm  dTotal= -0.57mm
+
+  time-to-contact split (pooled over 10 episode(s), per-episode first-contact detection):
+    <2s before contact (late)   : n=100  dz(own)= +0.30mm  dTotal= -0.28mm
+
+  per-episode split (ABSOLUTE dz, mm/step):
+    ep0 (contact z=0.755): n= 10  dz(own)= +3.06  dz(swap)= +2.80  d= -0.26
+    ep1 (contact z=0.756): n= 10  dz(own)= +2.24  dz(swap)= +1.87  d= -0.37
+    ep2 (contact z=0.754): n= 10  dz(own)= +2.25  dz(swap)= +1.87  d= -0.38
+    ep3 (contact z=0.756): n= 10  dz(own)= +2.34  dz(swap)= +1.92  d= -0.42
+    ep4 (contact z=0.754): n= 10  dz(own)= +1.43  dz(swap)= +1.26  d= -0.17
+    ep5 (contact z=0.809): n= 10  dz(own)= -2.44  dz(swap)= -2.69  d= -0.25
+    ep6 (contact z=0.809): n= 10  dz(own)= -1.63  dz(swap)= -1.87  d= -0.24
+    ep7 (contact z=0.809): n= 10  dz(own)= -1.20  dz(swap)= -1.39  d= -0.19
+    ep8 (contact z=0.810): n= 10  dz(own)= -1.80  dz(swap)= -1.99  d= -0.19
+    ep9 (contact z=0.806): n= 10  dz(own)= -1.24  dz(swap)= -1.52  d= -0.28
+
+── verdict ─────────────────────────────────────────────────────────
+  raw-state authority (naive): swapping wrench+seal to contact values cancels -17% of the committed descent (dz -3.3 -> -3.8mm).

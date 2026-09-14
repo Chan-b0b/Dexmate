@@ -1,0 +1,128 @@
+[probe] FiLM-groot cond=('contact', 'fz', 'seal') inject=state mask_force=True  ckpt=/home/maverick/Dexmate/LGES/vla_training/outputs/groot_film_state_0816_r2/checkpoints/050000
+The Groot policy is a wrapper around Nvidia's GR00T N1.5 model.
+Loading pretrained model from: /home/maverick/Dexmate/LGES/vla_training/outputs/groot_film_state_0816_r2/checkpoints/050000/pretrained_model
+Detected fine-tuned LeRobot checkpoint, loading with state dict...
+[GROOT] Flash Attention not available: No module named 'flash_attn'
+[GROOT] Will use fallback attention mechanism
+Loading pretrained dual brain from nvidia/GR00T-N1.5-3B
+Tune backbone vision tower: False
+Tune backbone LLM: False
+Tune action head projector: True
+Tune action head DiT: True
+Fetching 13 files:   0%|          | 0/13 [00:00<?, ?it/s]Fetching 13 files: 100%|██████████| 13/13 [00:00<00:00, 752.42it/s]
+`torch_dtype` is deprecated! Use `dtype` instead!
+[groot-shim] flash-attn unavailable -> sdpa for Eagle25VLForConditionalGeneration
+[groot-shim] flash-attn unavailable -> sdpa for SiglipVisionModel
+[groot-shim] flash-attn unavailable -> sdpa for Qwen3ForCausalLM
+[GROOT] Copying vendor Eagle files to cache: /home/maverick/vla_venv/lib/python3.12/site-packages/lerobot/policies/groot/eagle2_hg_model -> /home/maverick/.cache/huggingface/lerobot/lerobot/eagle2hg-processor-groot-n1p5
+[GROOT] Assets repo: lerobot/eagle2hg-processor-groot-n1p5 
+ Cache dir: /home/maverick/.cache/huggingface/lerobot/lerobot/eagle2hg-processor-groot-n1p5
+Tune backbone llm: False
+Tune backbone visual: True
+Total number of DiT parameters:  550386688
+Total number of SelfAttentionTransformer parameters:  201433088
+Tune action head projector: True
+Tune action head diffusion model: True
+Loading weights:   0%|          | 0/899 [00:00<?, ?it/s]Loading weights:  66%|██████▌   | 594/899 [00:00<00:00, 5938.93it/s]Loading weights: 100%|██████████| 899/899 [00:00<00:00, 6001.47it/s]
+`use_fast` is set to `True` but the image processor class does not have a fast version.  Falling back to the slow version.
+The tokenizer you are loading from '/home/maverick/.cache/huggingface/lerobot/lerobot/eagle2hg-processor-groot-n1p5' with an incorrect regex pattern: https://huggingface.co/mistralai/Mistral-Small-3.1-24B-Instruct-2503/discussions/84#69121093e8b480e709447d5e. This will lead to incorrect tokenization. You should set the `fix_mistral_regex=True` flag when loading this tokenizer to fix this issue.
+The tokenizer you are loading from '/home/maverick/.cache/huggingface/lerobot/lerobot/eagle2hg-processor-groot-n1p5' with an incorrect regex pattern: https://huggingface.co/mistralai/Mistral-Small-3.1-24B-Instruct-2503/discussions/84#69121093e8b480e709447d5e. This will lead to incorrect tokenization. You should set the `fix_mistral_regex=True` flag when loading this tokenizer to fix this issue.
+Tune backbone llm: False
+Tune backbone visual: False
+Warning: No backbone trainable parameters found.
+Tune action head projector: True
+Tune action head diffusion model: True
+Loading weights from local directory
+  episodes: [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19]
+  swap wrench (median over 60 FIRST-CONTACT frames, fz>3.0N trigger, all episodes): [ 5.6  11.48  7.87  0.04 -0.45 -0.39]  |F|=15.0N  seal stays 0  [--swap fcscale]
+  c-hat: own(example)=[[0.    0.141 0.   ]]  swap=[[1.    1.294 0.   ]]  (channels ('contact', 'fz', 'seal'))
+  ep0: "pick up the case with the suction cup"  frames 0..177  descent=122  first-contact@+129  seal@+153
+  ep1: "pick up the case with the suction cup"  frames 177..361  descent=140  first-contact@+136  seal@+160
+  ep2: "pick up the case with the suction cup"  frames 361..543  descent=134  first-contact@+132  seal@+157
+  ep3: "pick up the case with the suction cup"  frames 543..725  descent=134  first-contact@+134  seal@+170
+  ep4: "pick up the case with the suction cup"  frames 725..906  descent=131  first-contact@+134  seal@+156
+  ep5: "pick up the case with the suction cup"  frames 906..1089  descent=138  first-contact@+134  seal@+158
+  ep6: "pick up the case with the suction cup"  frames 1089..1270  descent=126  first-contact@+132  seal@+156
+  ep7: "pick up the case with the suction cup"  frames 1270..1452  descent=134  first-contact@+133  seal@+157
+  ep8: "pick up the case with the suction cup"  frames 1452..1634  descent=133  first-contact@+134  seal@+158
+  ep9: "pick up the case with the suction cup"  frames 1634..1816  descent=137  first-contact@+134  seal@+157
+  ep10: "pick up the case with the suction cup"  frames 1816..1959  descent=100  first-contact@+98  seal@+120
+  ep11: "pick up the case with the suction cup"  frames 1959..2103  descent=108  first-contact@+96  seal@+123
+  ep12: "pick up the case with the suction cup"  frames 2103..2245  descent=102  first-contact@+97  seal@+120
+  ep13: "pick up the case with the suction cup"  frames 2245..2389  descent=106  first-contact@+97  seal@+122
+  ep14: "pick up the case with the suction cup"  frames 2389..2535  descent=108  first-contact@+100  seal@+124
+  ep15: "pick up the case with the suction cup"  frames 2535..2677  descent=100  first-contact@+97  seal@+120
+  ep16: "pick up the case with the suction cup"  frames 2677..2820  descent=105  first-contact@+100  seal@+122
+  ep17: "pick up the case with the suction cup"  frames 2820..2963  descent=93  first-contact@+97  seal@+121
+  ep18: "pick up the case with the suction cup"  frames 2963..3105  descent=94  first-contact@+97  seal@+120
+  ep19: "pick up the case with the suction cup"  frames 3105..3249  descent=95  first-contact@+97  seal@+122
+
+   frame    ee_z   |F|N |  expert  dz(own) dz(swap)    dzRAW   dzFiLM |    dTot    dRaw   dFiLM
+  ---------------------------------------------------------------------------------------------
+       0   1.193    4.6 |   -0.4m    -2.2m    -2.9m    -2.2m    -2.9m |   -0.7m    0.0m   -0.7m
+     100   0.926    5.0 |   -1.5m    -1.4m     6.7m    -1.4m     6.7m |    8.2m    0.0m    8.2m
+     243   0.987    4.9 |   -1.3m    -1.8m     6.8m    -1.8m     6.8m |    8.5m    0.0m    8.5m
+     379   1.180    4.3 |   -6.2m    -5.9m    -5.7m    -5.9m    -5.7m |    0.2m    0.0m    0.2m
+     473   0.916    5.2 |   -1.4m    -1.6m     6.7m    -1.6m     6.7m |    8.3m    0.0m    8.3m
+     614   0.978    5.1 |   -1.5m    -1.7m     7.3m    -1.7m     7.3m |    9.0m    0.0m    9.0m
+     754   1.149    5.2 |   -1.4m    -5.2m   -13.7m    -5.2m   -13.7m |   -8.6m    0.0m   -8.6m
+     848   0.900    5.3 |   -1.5m    -0.8m     5.9m    -0.8m     5.9m |    6.7m    0.0m    6.7m
+     989   0.960    5.1 |   -1.6m    -1.9m     6.9m    -1.9m     6.9m |    8.7m    0.0m    8.7m
+    1133   1.005    5.1 |    0.0m    -2.1m    -0.2m    -2.1m    -0.2m |    1.9m    0.0m    1.9m
+    1275   1.117    5.2 |   13.5m    -5.1m    -5.4m    -5.1m    -5.4m |   -0.3m    0.0m   -0.3m
+    1369   0.935    5.1 |   -1.1m    -1.6m     6.6m    -1.6m     6.6m |    8.1m    0.0m    8.1m
+    1511   0.997    5.4 |   -1.3m    -1.6m     7.3m    -1.6m     7.3m |    8.9m    0.0m    8.9m
+    1651   1.190    4.5 |   -5.3m    -4.8m    -4.2m    -4.8m    -4.2m |    0.6m    0.0m    0.6m
+    1744   0.919    5.2 |   -1.2m    -1.4m     6.9m    -1.4m     6.9m |    8.3m    0.0m    8.3m
+    1883   0.985    5.2 |   -1.8m    -1.8m     7.5m    -1.8m     7.5m |    9.4m    0.0m    9.4m
+    2018   0.996    5.1 |   -1.8m    -1.4m     7.7m    -1.4m     7.7m |    9.1m    0.0m    9.1m
+    2148   1.006    5.2 |   -0.0m    -1.9m     0.5m    -1.9m     0.5m |    2.5m    0.0m    2.5m
+    2281   1.090    5.7 |  -18.0m     1.5m    -5.5m     1.5m    -5.5m |   -7.0m    0.0m   -7.0m
+    2411   1.169    4.5 |   -4.0m   -13.3m   -12.4m   -13.3m   -12.4m |    0.9m    0.0m    0.9m
+    2544   1.169    4.5 |    7.0m    -1.6m    -2.4m    -1.6m    -2.4m |   -0.8m    0.0m   -0.8m
+    2677   1.095    5.9 |    0.1m    -5.2m    -6.2m    -5.2m    -6.2m |   -1.1m    0.0m   -1.1m
+    2774   0.943    5.4 |   -1.5m    -1.7m     7.3m    -1.7m     7.3m |    8.9m    0.0m    8.9m
+    2905   0.956    5.3 |   -1.7m    -1.8m     6.7m    -1.8m     6.7m |    8.5m    0.0m    8.5m
+    3047   0.957    5.4 |   -1.5m    -2.0m     7.0m    -2.0m     7.0m |    9.0m    0.0m    9.0m
+    3188   0.960    5.4 |   -1.5m    -1.6m     7.5m    -1.6m     7.5m |    9.0m    0.0m    9.0m
+  ---------------------------------------------------------------------------------------------
+
+  decomposition over 2340 descent frames (d* = dz(cell) - dz(own,own)):
+    ALL frames                  : n=2340  dz(own)= -2.57mm  dTotal= +4.08mm  dRaw= +0.00mm  dFiLM= +4.08mm  interact= +0.00mm
+    approach/hover dz(own)>=-3mm: n=1915  dz(own)= -1.20mm  dTotal= +5.10mm  dRaw= +0.00mm  dFiLM= +5.10mm  interact= +0.00mm
+    COMMITTED desc dz(own)< -3mm: n=425  dz(own)= -8.72mm  dTotal= -0.55mm  dRaw= +0.00mm  dFiLM= -0.55mm  interact= +0.00mm
+
+  time-to-contact split (pooled over 20 episode(s), per-episode first-contact detection):
+    >=4s before contact (early) : n=1088  dz(own)= -4.20mm  dTotal= +0.31mm  dRaw= +0.00mm  dFiLM= +0.31mm  interact= +0.00mm
+    2-4s before contact         : n=595  dz(own)= -1.78mm  dTotal= +7.19mm  dRaw= +0.00mm  dFiLM= +7.19mm  interact= +0.00mm
+    <2s before contact (late)   : n=552  dz(own)= -1.29mm  dTotal= +8.14mm  dRaw= +0.00mm  dFiLM= +8.14mm  interact= +0.00mm
+    after contact (press phase) : n=105  dz(own)= +3.16mm  dTotal= +4.10mm  dRaw= +0.00mm  dFiLM= +4.10mm  interact= +0.00mm
+
+  per-episode split (ABSOLUTE dz, mm/step):
+    ep0 (contact z=0.883): n=122  dz(own)= -2.10  dz(swap)= +3.12  d= +5.22  (FiLM  +5.22)
+    ep1 (contact z=0.883): n=140  dz(own)= -2.29  dz(swap)= +1.93  d= +4.22  (FiLM  +4.22)
+    ep2 (contact z=0.886): n=134  dz(own)= -2.51  dz(swap)= +2.06  d= +4.56  (FiLM  +4.56)
+    ep3 (contact z=0.884): n=134  dz(own)= -2.21  dz(swap)= +2.37  d= +4.58  (FiLM  +4.58)
+    ep4 (contact z=0.884): n=131  dz(own)= -2.45  dz(swap)= +1.84  d= +4.29  (FiLM  +4.29)
+    ep5 (contact z=0.884): n=138  dz(own)= -2.33  dz(swap)= +1.94  d= +4.26  (FiLM  +4.26)
+    ep6 (contact z=0.885): n=126  dz(own)= -2.54  dz(swap)= +1.95  d= +4.49  (FiLM  +4.49)
+    ep7 (contact z=0.885): n=134  dz(own)= -2.47  dz(swap)= +1.94  d= +4.41  (FiLM  +4.41)
+    ep8 (contact z=0.884): n=133  dz(own)= -2.43  dz(swap)= +2.19  d= +4.63  (FiLM  +4.63)
+    ep9 (contact z=0.884): n=137  dz(own)= -2.44  dz(swap)= +2.27  d= +4.72  (FiLM  +4.72)
+    ep10 (contact z=0.939): n=100  dz(own)= -3.11  dz(swap)= +0.53  d= +3.65  (FiLM  +3.65)
+    ep11 (contact z=0.940): n=108  dz(own)= -2.54  dz(swap)= +1.16  d= +3.71  (FiLM  +3.71)
+    ep12 (contact z=0.937): n=102  dz(own)= -2.74  dz(swap)= +0.78  d= +3.52  (FiLM  +3.52)
+    ep13 (contact z=0.939): n=106  dz(own)= -2.65  dz(swap)= +0.83  d= +3.48  (FiLM  +3.48)
+    ep14 (contact z=0.940): n=108  dz(own)= -2.99  dz(swap)= +0.32  d= +3.31  (FiLM  +3.31)
+    ep15 (contact z=0.938): n=100  dz(own)= -2.70  dz(swap)= +0.95  d= +3.64  (FiLM  +3.64)
+    ep16 (contact z=0.939): n=105  dz(own)= -2.52  dz(swap)= +0.87  d= +3.40  (FiLM  +3.40)
+    ep17 (contact z=0.938): n= 93  dz(own)= -3.00  dz(swap)= +0.31  d= +3.31  (FiLM  +3.31)
+    ep18 (contact z=0.938): n= 94  dz(own)= -2.99  dz(swap)= +0.52  d= +3.51  (FiLM  +3.51)
+    ep19 (contact z=0.939): n= 95  dz(own)= -3.04  dz(swap)= +0.21  d= +3.25  (FiLM  +3.25)
+
+── verdict ─────────────────────────────────────────────────────────
+  committed descent, cancellation of dz(own)=-8.7mm:
+    TOTAL (state+c swap) :    -6%
+    RAW path only        :    +0%   (state swap, c pinned to own)
+    FiLM path only       :    -6%   (c swap, state kept own)
+  -> both paths contribute comparably (or neither does — check TOTAL).

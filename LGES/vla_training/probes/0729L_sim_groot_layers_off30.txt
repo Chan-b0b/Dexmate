@@ -1,0 +1,54 @@
+[sim] FiLM-groot cond=('contact', 'fz', 'seal') inject=layers mask_force=True  ckpt=outputs/groot_film_layers_0729/checkpoints/best
+[sim] stiffness=1.0N/mm  f_base=6.8N  seal_depth=nevermm  max_steps=40  start_offset=30  force_model=fzdelta
+The Groot policy is a wrapper around Nvidia's GR00T N1.5 model.
+Loading pretrained model from: outputs/groot_film_layers_0729/checkpoints/best/pretrained_model
+Detected fine-tuned LeRobot checkpoint, loading with state dict...
+[GROOT] Flash Attention not available: No module named 'flash_attn'
+[GROOT] Will use fallback attention mechanism
+Loading pretrained dual brain from nvidia/GR00T-N1.5-3B
+Tune backbone vision tower: False
+Tune backbone LLM: False
+Tune action head projector: True
+Tune action head DiT: True
+Fetching 13 files:   0%|          | 0/13 [00:00<?, ?it/s]Fetching 13 files: 100%|██████████| 13/13 [00:00<00:00, 903.66it/s]
+`torch_dtype` is deprecated! Use `dtype` instead!
+[groot-shim] flash-attn unavailable -> sdpa for Eagle25VLForConditionalGeneration
+[groot-shim] flash-attn unavailable -> sdpa for SiglipVisionModel
+[groot-shim] flash-attn unavailable -> sdpa for Qwen3ForCausalLM
+[GROOT] Copying vendor Eagle files to cache: /home/maverick/vla_venv/lib/python3.12/site-packages/lerobot/policies/groot/eagle2_hg_model -> /home/maverick/.cache/huggingface/lerobot/lerobot/eagle2hg-processor-groot-n1p5
+[GROOT] Assets repo: lerobot/eagle2hg-processor-groot-n1p5 
+ Cache dir: /home/maverick/.cache/huggingface/lerobot/lerobot/eagle2hg-processor-groot-n1p5
+Tune backbone llm: False
+Tune backbone visual: True
+Total number of DiT parameters:  550386688
+Total number of SelfAttentionTransformer parameters:  201433088
+Tune action head projector: True
+Tune action head diffusion model: True
+Loading weights:   0%|          | 0/899 [00:00<?, ?it/s]Loading weights: 100%|██████████| 899/899 [00:00<00:00, 20351.91it/s]
+`use_fast` is set to `True` but the image processor class does not have a fast version.  Falling back to the slow version.
+The tokenizer you are loading from '/home/maverick/.cache/huggingface/lerobot/lerobot/eagle2hg-processor-groot-n1p5' with an incorrect regex pattern: https://huggingface.co/mistralai/Mistral-Small-3.1-24B-Instruct-2503/discussions/84#69121093e8b480e709447d5e. This will lead to incorrect tokenization. You should set the `fix_mistral_regex=True` flag when loading this tokenizer to fix this issue.
+The tokenizer you are loading from '/home/maverick/.cache/huggingface/lerobot/lerobot/eagle2hg-processor-groot-n1p5' with an incorrect regex pattern: https://huggingface.co/mistralai/Mistral-Small-3.1-24B-Instruct-2503/discussions/84#69121093e8b480e709447d5e. This will lead to incorrect tokenization. You should set the `fix_mistral_regex=True` flag when loading this tokenizer to fix this issue.
+Tune backbone llm: False
+Tune backbone visual: False
+Warning: No backbone trainable parameters found.
+Tune action head projector: True
+Tune action head diffusion model: True
+Loading weights from local directory
+[sim] contact direction=[0.19 0.82 0.53]  torque=[ 0.02 -0.48 -0.46]
+  ep0 (z=0.763): STOP    steps= 2 depth=  0.0mm  |F|end= 5.8N  sealed=False
+        first steps [|F|/dz(mm)]: 5.8N/+7.5  5.8N/+7.5
+  ep1 (z=0.765): STOP    steps= 2 depth=  0.0mm  |F|end= 6.0N  sealed=False
+        first steps [|F|/dz(mm)]: 6.0N/+11.0  6.0N/+11.0
+  ep2 (z=0.762): STOP    steps= 2 depth=  0.0mm  |F|end= 5.8N  sealed=False
+        first steps [|F|/dz(mm)]: 5.8N/+7.4  5.8N/+7.4
+  ep3 (z=0.818): timeout steps=40 depth=  0.5mm  |F|end= 5.8N  sealed=False
+        first steps [|F|/dz(mm)]: 5.5N/-0.3  5.8N/-0.1  5.8N/-0.0  5.8N/-0.0  5.8N/-0.0  5.8N/-0.0  5.8N/-0.0  5.8N/-0.0
+  ep4 (z=0.817): STOP    steps=11 depth=  3.6mm  |F|end= 8.7N  sealed=False
+        first steps [|F|/dz(mm)]: 6.1N/-1.5  7.1N/-0.9  7.8N/-0.5  8.2N/-0.3  8.4N/-0.2  8.6N/-0.1  8.6N/-0.0  8.7N/-0.0
+  ep5 (z=0.817): STOP    steps=12 depth=  5.3mm  |F|end=10.0N  sealed=False
+        first steps [|F|/dz(mm)]: 6.0N/-1.8  7.1N/-1.2  8.1N/-0.8  8.7N/-0.5  9.1N/-0.4  9.4N/-0.3  9.7N/-0.2  9.8N/-0.1
+
+── summary ─────────────────────────────────────────────────────────
+  stopped 5/6 episodes   penetration depth mean=1.6mm  max=5.3mm
+    z~0.763: stopped 3/3  depth mean=0.0mm
+    z~0.817: stopped 2/3  depth mean=3.1mm

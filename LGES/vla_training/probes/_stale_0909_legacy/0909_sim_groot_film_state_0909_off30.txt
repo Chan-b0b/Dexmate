@@ -1,0 +1,58 @@
+[sim] FiLM-groot cond=('contact', 'fz', 'seal') inject=state mask_force=True  ckpt=/home/maverick/Dexmate/LGES/vla_training/outputs/groot_film_state_0909/checkpoints/best
+[sim] stiffness=1.0N/mm  f_base=6.8N  seal_depth=nevermm  max_steps=40  start_offset=30  force_model=fzdelta
+The Groot policy is a wrapper around Nvidia's GR00T N1.5 model.
+Loading pretrained model from: /home/maverick/Dexmate/LGES/vla_training/outputs/groot_film_state_0909/checkpoints/best/pretrained_model
+Detected fine-tuned LeRobot checkpoint, loading with state dict...
+[GROOT] Flash Attention not available: No module named 'flash_attn'
+[GROOT] Will use fallback attention mechanism
+Loading pretrained dual brain from nvidia/GR00T-N1.5-3B
+Tune backbone vision tower: False
+Tune backbone LLM: False
+Tune action head projector: True
+Tune action head DiT: True
+Fetching 13 files:   0%|          | 0/13 [00:00<?, ?it/s]Fetching 13 files: 100%|██████████| 13/13 [00:00<00:00, 779.57it/s]
+`torch_dtype` is deprecated! Use `dtype` instead!
+[groot-shim] flash-attn unavailable -> sdpa for Eagle25VLForConditionalGeneration
+[groot-shim] flash-attn unavailable -> sdpa for SiglipVisionModel
+[groot-shim] flash-attn unavailable -> sdpa for Qwen3ForCausalLM
+[GROOT] Copying vendor Eagle files to cache: /home/maverick/vla_venv/lib/python3.12/site-packages/lerobot/policies/groot/eagle2_hg_model -> /home/maverick/.cache/huggingface/lerobot/lerobot/eagle2hg-processor-groot-n1p5
+[GROOT] Assets repo: lerobot/eagle2hg-processor-groot-n1p5 
+ Cache dir: /home/maverick/.cache/huggingface/lerobot/lerobot/eagle2hg-processor-groot-n1p5
+Tune backbone llm: False
+Tune backbone visual: True
+Total number of DiT parameters:  550386688
+Total number of SelfAttentionTransformer parameters:  201433088
+Tune action head projector: True
+Tune action head diffusion model: True
+Loading weights:   0%|          | 0/899 [00:00<?, ?it/s]Loading weights:  56%|█████▌    | 501/899 [00:00<00:00, 4981.50it/s]Loading weights: 100%|██████████| 899/899 [00:00<00:00, 5448.26it/s]
+`use_fast` is set to `True` but the image processor class does not have a fast version.  Falling back to the slow version.
+The tokenizer you are loading from '/home/maverick/.cache/huggingface/lerobot/lerobot/eagle2hg-processor-groot-n1p5' with an incorrect regex pattern: https://huggingface.co/mistralai/Mistral-Small-3.1-24B-Instruct-2503/discussions/84#69121093e8b480e709447d5e. This will lead to incorrect tokenization. You should set the `fix_mistral_regex=True` flag when loading this tokenizer to fix this issue.
+The tokenizer you are loading from '/home/maverick/.cache/huggingface/lerobot/lerobot/eagle2hg-processor-groot-n1p5' with an incorrect regex pattern: https://huggingface.co/mistralai/Mistral-Small-3.1-24B-Instruct-2503/discussions/84#69121093e8b480e709447d5e. This will lead to incorrect tokenization. You should set the `fix_mistral_regex=True` flag when loading this tokenizer to fix this issue.
+Tune backbone llm: False
+Tune backbone visual: False
+Warning: No backbone trainable parameters found.
+Tune action head projector: True
+Tune action head diffusion model: True
+Loading weights from local directory
+[sim] contact direction=[0.62 0.21 0.76]  torque=[ 0.3  -0.06  0.14]
+  ep0 (z=0.755): timeout steps=40 depth= 50.0mm  |F|end=33.4N  sealed=False
+        first steps [|F|/dz(mm)]: 11.6N/-4.4  15.4N/-3.3  18.4N/-3.4  21.6N/-3.5  24.9N/-2.8  27.6N/-2.2  29.7N/-1.7  31.3N/-1.4
+  ep1 (z=0.760): timeout steps=40 depth=101.6mm  |F|end=33.8N  sealed=False
+        first steps [|F|/dz(mm)]: 12.4N/-4.0  15.7N/-2.5  17.9N/-2.6  20.3N/-2.8  22.9N/-3.1  25.8N/-3.1  28.8N/-2.8  31.6N/-2.6
+  ep2 (z=0.760): timeout steps=40 depth=128.4mm  |F|end=33.8N  sealed=False
+        first steps [|F|/dz(mm)]: 12.3N/-4.7  16.2N/-3.7  19.6N/-3.7  23.1N/-4.0  26.8N/-3.7  30.4N/-3.3  33.6N/-3.1  33.8N/-3.1
+  ep3 (z=0.775): timeout steps=40 depth=203.7mm  |F|end=33.5N  sealed=False
+        first steps [|F|/dz(mm)]: 11.6N/-9.4  20.1N/-5.9  25.7N/-5.5  31.0N/-5.0  33.5N/-4.9  33.5N/-4.9  33.5N/-4.9  33.5N/-4.9
+  ep4 (z=0.760): timeout steps=40 depth=135.1mm  |F|end=33.3N  sealed=False
+        first steps [|F|/dz(mm)]: 11.8N/-5.0  16.0N/-3.6  19.2N/-3.8  22.8N/-4.0  26.6N/-4.0  30.5N/-3.6  33.3N/-3.3  33.3N/-3.3
+  ep5 (z=0.815): timeout steps=40 depth=390.9mm  |F|end=32.8N  sealed=False
+        first steps [|F|/dz(mm)]: 11.0N/-13.7  23.4N/-10.4  32.8N/-9.7  32.8N/-9.7  32.8N/-9.7  32.8N/-9.7  32.8N/-9.7  32.8N/-9.7
+  ep6 (z=0.809): timeout steps=40 depth=397.0mm  |F|end=33.2N  sealed=False
+        first steps [|F|/dz(mm)]: 11.5N/-14.1  24.3N/-10.5  33.2N/-9.8  33.2N/-9.8  33.2N/-9.8  33.2N/-9.8  33.2N/-9.8  33.2N/-9.8
+  ep8 (z=0.813): timeout steps=40 depth=453.3mm  |F|end=33.1N  sealed=False
+        first steps [|F|/dz(mm)]: 11.4N/-14.7  24.8N/-11.7  33.1N/-11.2  33.1N/-11.2  33.1N/-11.2  33.1N/-11.2  33.1N/-11.2  33.1N/-11.2
+
+── summary ─────────────────────────────────────────────────────────
+  stopped 0/8 episodes   penetration depth mean=232.5mm  max=453.3mm
+    z~0.763: stopped 0/5  depth mean=123.7mm
+    z~0.817: stopped 0/3  depth mean=413.7mm
