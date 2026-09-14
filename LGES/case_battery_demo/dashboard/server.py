@@ -12,7 +12,7 @@ installed and runs as its own process:
     # in another terminal — serve the viewer:
     python -m case_battery_demo.dashboard.server --spool /tmp/cns_dashboard
 
-Then open http://<robot-ip>:8080/ in a browser.
+Then open http://<robot-ip>:9090/ in a browser.
 
 The chart history is accumulated in the browser, so the server stays a thin
 file server. Pointing it at a recorded session directory (same frame.jpg +
@@ -674,7 +674,7 @@ def main() -> None:
     parser.add_argument("--spool", default="/tmp/cns_dashboard",
                         help="directory the demo publisher writes frame.jpg + state.json to")
     parser.add_argument("--host", default="0.0.0.0", help="bind address (default: all interfaces)")
-    parser.add_argument("--port", type=int, default=8080, help="port (default: 8080)")
+    parser.add_argument("--port", type=int, default=9090, help="port (default: 9090)")
     parser.add_argument("--no-launch-camera", action="store_true",
                         help="don't auto-launch the head_camera dexsensor on the nano over SSH")
     parser.add_argument("--camera-host", default=None,

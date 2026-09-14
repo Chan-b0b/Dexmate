@@ -10,9 +10,12 @@ Two ways to say where the box is:
     yaw (the grasp point is then that xy itself — air-test mode)
   * --detect: head camera -> BEV YOLO-OBB (case_detection/detect_box_bev) ->
     box center / size / yaw in base_link -> right-wall grasp point. The BEV
-    warp needs the box RIM height: give --box-long-m (tape-measure the box's
-    long side) and it is recovered by a plane sweep; otherwise --top-z is used
-    as the rim height, which biases the box position by tens of mm if wrong.
+    warp needs the box RIM height. By default --top-z (cfg.BOX_RIM_Z_M) is only
+    the first guess: the box FLOOR is measured from head-camera depth and the
+    rim rebuilt as floor + cfg.BOX_WALL_HEIGHT_M, and the frame is re-warped
+    there — the WARP PLANE only, not the grasp height (see detect_box for why
+    they are deliberately different). --box-long-m recovers the plane from the
+    box's tape-measured long side instead, and moves both.
 
 ``run_box_pick`` is the whole step (home -> detect -> grip -> home) and is
 the SAME routine chassis_sequence runs at the end of a `--box` run, so that
@@ -26,6 +29,7 @@ Run from LGES/:
     python -m ik_demo.box_pick --detect --home-left            # ... left arm homed first, as in the sequence
     python -m ik_demo.box_pick --keep                         # end at the hover, gripper as-is
     python -m ik_demo.box_pick --detect --carry                # actually hoist the box
+    python -m ik_demo.box_pick --detect --seat-probe           # DIAGNOSIS: force vs height, never grips
 By default the pick CLOSES on the wall, lifts the box BOX_LIFT_TEST_M, sets it
 back down at the grasp height, RELEASES and retreats empty; --carry keeps
 holding through the lift to the hover instead.
@@ -63,20 +67,22 @@ class Args:
     keep: bool = False       # end at the hover with the gripper as-is (inspect the grasp)
     home_left: bool = False  # safe-home the LEFT arm first (the sequence does; it can block the view)
     carry: bool = False      # keep holding through the lift; default = grasp, lift 10 cm, set down, RELEASE
+    seat_probe: bool = False # DIAGNOSIS: creep past the grasp height logging force vs height, never grip
 
 
 def box_pose_from_detection(det, top_z: float, inset_m: float) -> BoxPose:
     """Grasp point for a detected box: midpoint of the LONG wall on the robot's
-    right (base -y), ``inset_m`` in from the wall line toward the center. The
-    pose yaw is the box's long-axis yaw, so pick_box's EE yaw (+ pi/2) closes
-    the fingers ACROSS that wall."""
+    right (base -y), ``inset_m`` in from the wall line toward the center, then
+    shifted cfg.BOX_GRASP_Y_OFFSET_M in BASE y. The pose yaw is the box's
+    long-axis yaw, so pick_box's EE yaw (+ pi/2) closes the fingers ACROSS
+    that wall."""
     yaw = float(np.deg2rad(det.base_yaw_deg))
     u_short = np.array([-np.sin(yaw), np.cos(yaw)])   # across the box, unit
     if u_short[1] > 0.0:                               # point to the robot's right
         u_short = -u_short
     half = float(det.dims_m[1]) / 2.0 - float(inset_m)
     gx = float(det.base_xy[0]) + float(u_short[0]) * half
-    gy = float(det.base_xy[1]) + float(u_short[1]) * half
+    gy = float(det.base_xy[1]) + float(u_short[1]) * half + float(cfg.BOX_GRASP_Y_OFFSET_M)
     return BoxPose(gx, gy, float(top_z), yaw)
 
 
@@ -90,7 +96,10 @@ def detect_box(bot, top_z: float, box_long_m: "float | None" = None,
     sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "case_detection"))
     import detect_box_bev as dbb   # noqa: PLC0415
 
-    set_head_pitch(bot, angle=head_angle)
+    # tol_deg: skip the move (and its flat 5 s wait) when the head is already
+    # aimed — it usually is, from whatever task ran before. _head_rgb below
+    # still waits for two fresh frames, so the settle is not lost.
+    set_head_pitch(bot, angle=head_angle, tol_deg=2.0)
     rgb = _head_rgb(bot)
     if rgb is None:
         logger.error("no head-camera frame — is the head camera enabled?")
@@ -101,13 +110,38 @@ def detect_box(bot, top_z: float, box_long_m: "float | None" = None,
         if det is None:
             logger.error("box not detected at any plane 0.60-1.05 m")
             return None, None
-        logger.info("rim height recovered from the {:.3f} m long side: plane z = {:.3f}",
-                    box_long_m, z)
+        # --box-long-m is an explicit operator choice: the recovered plane is
+        # used for BOTH the warp and the grasp height (unlike the automatic
+        # refinement below, which only moves the warp). Note it may well land
+        # near the true rim and therefore out of the arm's reach — that is the
+        # operator's call to make.
+        z_grasp_ref = z
+        logger.info("rim height recovered from the {:.3f} m long side: plane z = {:.3f} "
+                    "(used for the warp AND the grasp height)", box_long_m, z)
     else:
-        z = float(top_z)
-        logger.info("fixed rim height: warping at z = {:.3f} (--top-z / cfg.BOX_RIM_Z_M; pass "
-                    "--box-long-m to recover it from the box size instead)", z)
+        z = z_grasp_ref = float(top_z)
+        logger.info("rim height first guess: warping at z = {:.3f} (--top-z / cfg.BOX_RIM_Z_M); "
+                    "the floor depth below refines the WARP PLANE", z)
         det = dbb.detect_box_bev(rgb, q_torso, q_head, z)
+        z_rim = _rim_from_floor_depth(bot, det, z, q_torso, q_head, rgb.shape)
+        if z_rim is not None:
+            # DETECTION ONLY (0911). Re-warping at the measured rim fixes the xy
+            # and the SIZE: warping 81mm low made the box read 11% too big
+            # (homothety about the camera nadir), and since the grasp point is
+            # the box centre plus half the short side, that put the wall
+            # midpoint ~20mm OUTSIDE the wall the fingers have to straddle.
+            #
+            # The GRASP height follows it too, since 0911: the TILTED wall
+            # pinch (cfg.BOX_GRASP_TILT_DEG) reaches the true rim comfortably,
+            # where the old vertical grasp could not reach it at all. The
+            # operator's hand-tuned grip independently landed 35mm under this
+            # measured rim, against BOX_GRASP_DEPTH_M's intended 30mm.
+            logger.info("re-warping at the measured rim {:.4f} "
+                        "(warp was {:.4f}, {:+.1f}mm) — used for the warp AND the "
+                        "grasp height, so the fingers land {:.0f}mm below the rim",
+                        z_rim, z, (z_rim - z) * 1000.0, cfg.BOX_GRASP_DEPTH_M * 1000.0)
+            z = z_grasp_ref = z_rim
+            det = dbb.detect_box_bev(rgb, q_torso, q_head, z)
     out_dir = Path(__file__).resolve().parents[1] / "case_detection" / "out"
     out_dir.mkdir(parents=True, exist_ok=True)
     png = out_dir / f"box_detect_{time.strftime('%Y%m%d_%H%M%S')}.png"
@@ -116,7 +150,9 @@ def detect_box(bot, top_z: float, box_long_m: "float | None" = None,
         cv2.imwrite(str(png), dbb.draw(det))
         logger.error("box NOT detected (plane z {:.3f}) — BEV saved to {}", z, png)
         return None, None
-    pose = box_pose_from_detection(det, z, cfg.BOX_GRASP_EDGE_INSET_M)
+    # xy/size from the WARP plane z (the real rim, when depth measured it);
+    # top_z from z_grasp_ref, which is what sets the descent depth.
+    pose = box_pose_from_detection(det, z_grasp_ref, cfg.BOX_GRASP_EDGE_INSET_M)
     import cv2  # noqa: PLC0415
     cv2.imwrite(str(png), dbb.draw(det, [(pose.x, pose.y)]))
     logger.info("box: center ({:.3f},{:+.3f}) size {:.3f}x{:.3f} m yaw {:.1f} deg conf {:.2f} "
@@ -125,7 +161,121 @@ def detect_box(bot, top_z: float, box_long_m: "float | None" = None,
     logger.info("grasp: right long-wall midpoint ({:.3f},{:+.3f}), fingers close across the "
                 "wall (EE yaw {:+.2f} rad) — BEV + grasp point saved to {}",
                 pose.x, pose.y, pose.yaw + cfg.BOX_GRASP_YAW_OFFSET_RAD, png)
+    _log_rim_depth(bot, det, pose, z, q_torso, q_head, rgb.shape)
     return pose, det
+
+
+def _rim_from_floor_depth(bot, det, plane_guess: float, q_torso, q_head,
+                          rgb_shape) -> "float | None":
+    """Box rim z measured as (depth-measured FLOOR) + cfg.BOX_WALL_HEIGHT_M, or
+    None to keep ``plane_guess`` — see the cfg.BOX_WALL_HEIGHT_M comment for why
+    the floor is measured instead of the rim.
+
+    The floor window sits at the box CENTRE, which comes from a detection warped
+    at ``plane_guess``; that is fine even when the guess is off, because the
+    floor is wide and flat there (plane_from_depth also re-projects the sample
+    point through each height it measures, so the pixel converges onto the real
+    surface). Gated on the window's own spread and on agreeing with
+    cfg.FLOOR_Z_BASE_M, which the case stacking model already pins for this same
+    box. Never raises: a missing depth stream must not stop a box pick."""
+    if det is None or not det.found:
+        return None
+    try:
+        import depth_plane as dp   # case_detection sibling (path set by detect_box)
+
+        depth = bot.sensors.head_camera.get_depth()
+        if depth is None:
+            logger.warning("[box] floor depth: no depth frame (is the dexsensor publishing "
+                           "depth?) — keeping the assumed rim {:.4f}", plane_guess)
+            return None
+        xy = (float(det.base_xy[0]), float(det.base_xy[1]))
+        z_floor, n_px, spread = dp.plane_from_depth(depth, rgb_shape, q_torso, q_head,
+                                                    xy, float(plane_guess), pct=50.0)
+        if z_floor is None:
+            logger.warning("[box] floor depth @ centre ({:.3f},{:+.3f}): only {} valid px "
+                           "— keeping the assumed rim {:.4f}", xy[0], xy[1], n_px, plane_guess)
+            return None
+        dev = z_floor - float(cfg.FLOOR_Z_BASE_M)
+        logger.info("[box] DEPTH floor @ centre ({:.3f},{:+.3f}): z={:.4f} [{} px, spread "
+                    "{:.0f}mm] vs cfg.FLOOR_Z_BASE_M {:.3f} ({:+.1f}mm)", xy[0], xy[1],
+                    z_floor, n_px, spread * 1000.0, cfg.FLOOR_Z_BASE_M, dev * 1000.0)
+        if spread > float(cfg.BOX_FLOOR_DEPTH_MAX_SPREAD_M):
+            logger.warning("[box] floor depth rejected: spread {:.0f}mm > {:.0f}mm — the window "
+                           "is not on the floor. Keeping the assumed rim {:.4f}",
+                           spread * 1000.0, cfg.BOX_FLOOR_DEPTH_MAX_SPREAD_M * 1000.0,
+                           plane_guess)
+            return None
+        if abs(dev) > float(cfg.BOX_FLOOR_DEPTH_MAX_DEV_M):
+            logger.warning("[box] floor depth rejected: {:+.0f}mm from FLOOR_Z_BASE_M (limit "
+                           "{:.0f}mm) — contents or the rim, not the floor. Keeping the "
+                           "assumed rim {:.4f}", dev * 1000.0,
+                           cfg.BOX_FLOOR_DEPTH_MAX_DEV_M * 1000.0, plane_guess)
+            return None
+        return float(z_floor) + float(cfg.BOX_WALL_HEIGHT_M)
+    except Exception as e:  # noqa: BLE001 — a measurement must not stop a box pick
+        logger.warning("[box] floor depth failed ({}) — keeping the assumed rim {:.4f}",
+                       e, plane_guess)
+        return None
+
+
+def _log_rim_depth(bot, det, pose, plane_z: float, q_torso, q_head, rgb_shape) -> None:
+    """DIAGNOSIS ONLY: what the ZED depth reads for the box rim, next to the
+    ``plane_z`` the detection was warped at (cfg.BOX_RIM_Z_M unless --top-z /
+    --box-long-m). Nothing acts on it — this exists to find out whether the
+    hand-set 0.65 is right before anything depends on the measurement.
+
+    Two windows, because they answer different questions (depth_plane.
+    sample_depth): at the GRASP point (the wall midpoint) a LOW percentile —
+    the nearest point, i.e. the tallest thing in the window — is the rim, since
+    that window also catches the outside wall face falling away and the box
+    interior, both of which drag a median down. At the box CENTRE the MEDIAN is
+    the contents/floor, which says how far the rim stands above what is inside.
+    ``spread`` (p95-p5) flags a window straddling an edge: the lid work threw
+    out a read with 59mm of it for exactly that reason.
+
+    plane_z feeds BOTH the BEV warp (a wrong plane biases the detected x by
+    ~0.7*dz, a homothety about the camera nadir) and the grasp height
+    (z_grasp = plane_z - BOX_GRASP_DEPTH_M + BOX_FINGER_LENGTH_M), so an error
+    here lands in two places at once.
+
+    The depth frame is grabbed separately from the RGB above — fine while the
+    chassis and head are parked for the detection, which is always the case
+    here. Never raises: a missing depth stream must not stop a box pick."""
+    try:
+        import depth_plane as dp   # case_detection sibling (path set by detect_box)
+
+        depth = bot.sensors.head_camera.get_depth()
+        if depth is None:
+            logger.warning("[box] rim depth: no depth frame (is the dexsensor "
+                           "publishing depth?) — plane stays at the assumed {:.3f}", plane_z)
+            return
+        rim_xy = (float(pose.x), float(pose.y))
+        z_rim, n_rim, sp_rim = dp.plane_from_depth(depth, rgb_shape, q_torso, q_head,
+                                                  rim_xy, float(plane_z), pct=10.0)
+        ctr_xy = (float(det.base_xy[0]), float(det.base_xy[1]))
+        z_ctr, n_ctr, sp_ctr = dp.plane_from_depth(depth, rgb_shape, q_torso, q_head,
+                                                   ctr_xy, float(plane_z), pct=50.0)
+        if z_rim is None:
+            logger.warning("[box] rim depth @ grasp ({:.3f},{:+.3f}): only {} valid px "
+                           "— rim NOT seen by depth", rim_xy[0], rim_xy[1], n_rim)
+        else:
+            logger.info("[box] DEPTH rim @ grasp ({:.3f},{:+.3f}): z={:.4f} vs assumed "
+                        "{:.4f} ({:+.1f}mm) [{} px, spread {:.0f}mm] -> would move the "
+                        "grasp height by {:+.1f}mm", rim_xy[0], rim_xy[1], z_rim,
+                        plane_z, (z_rim - plane_z) * 1000.0, n_rim, sp_rim * 1000.0,
+                        (z_rim - plane_z) * 1000.0)
+        if z_ctr is None:
+            logger.info("[box] DEPTH interior @ centre ({:.3f},{:+.3f}): only {} valid px",
+                        ctr_xy[0], ctr_xy[1], n_ctr)
+        else:
+            logger.info("[box] DEPTH interior @ centre ({:.3f},{:+.3f}): z={:.4f} "
+                        "[{} px, spread {:.0f}mm]{}", ctr_xy[0], ctr_xy[1], z_ctr, n_ctr,
+                        sp_ctr * 1000.0,
+                        "" if z_rim is None else
+                        f" -> rim stands {(z_rim - z_ctr) * 1000.0:+.0f}mm above it")
+    except Exception as e:  # noqa: BLE001 — a log line must not stop a box pick
+        logger.warning("[box] rim depth failed ({}) — plane stays at the assumed {:.3f}",
+                       e, plane_z)
 
 
 def run_box_pick(bot, gripper: GripperMover, left=None, pose: "BoxPose | None" = None,
@@ -189,7 +339,12 @@ def _main(a: Args) -> None:
                        "PLAN ONLY (--dry)" if a.dry else "MOVE THE RIGHT ARM + ROBOTIQ:")
     else:
         logger.warning("MOVES THE REAL RIGHT ARM + ROBOTIQ GRIPPER:")
-    if not a.dry:
+    if a.seat_probe:
+        logger.warning("  SEAT PROBE: home -> hover -> creep PAST the grasp height while logging "
+                       "wrist force vs height -> lift. The gripper never closes and nothing is "
+                       "picked up; the palm is pressed onto the box RIM at {:.0f}N at most.",
+                       cfg.BOX_SEAT_PROBE_BACKSTOP_N)
+    elif not a.dry:
         logger.warning("  home -> hover over the grasp point -> straight down -> close -> {} -> lift -> {}",
                        "carry the box (--carry)" if a.carry
                        else f"lift {cfg.BOX_LIFT_TEST_M * 100:.0f}cm, set down, RELEASE",
@@ -233,6 +388,15 @@ def _main(a: Args) -> None:
             res = g.pick_box(box, dry=True)
             logger.info("dry run -> {} (yaw {})", res.reason,
                         "-" if res.yaw_used is None else f"{res.yaw_used:+.2f} rad")
+            return
+        if a.seat_probe:
+            if box is None:
+                box, _det = detect_box(bot, a.top_z, a.box_long_m, a.head_angle)
+                if box is None:
+                    return
+            safe_home(g)                      # the probe starts from the right arm's home
+            g.probe_seat(box)
+            safe_home(g)
             return
         left = None
         if a.home_left:

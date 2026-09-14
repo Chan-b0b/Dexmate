@@ -154,6 +154,7 @@ class RobotiqGripperUSB:
         """Write the gripper control registers. Returns True on a valid echo."""
         payload = bytes([self._slave, 0x10, 0x03, 0xE8, 0x00, 0x03, 0x06,
                          control_byte, 0x00, 0x00, pos, speed, force])
+        self._last_cmd_pos = int(pos)
         return self._transact(payload, WRITE_RESPONSE_LEN) is not None
 
     def read_status(self) -> GripperStatus | None:
@@ -178,12 +179,21 @@ class RobotiqGripperUSB:
 
     def wait_until_done(
         self,
+        target_pos: "int | None" = None,
         timeout: float = 3.0,
         poll_interval: float = 0.1,
         fallback_sleep: float = 1.5,
         required_done_count: int = 2,
     ) -> bool:
-        """Block until gOBJ confirms motion done, with fallback sleep on timeout."""
+        """Block until the fingers stop, with fallback sleep on timeout.
+
+        ``target_pos``: the position just commanded. A status frame is only
+        believed once it ECHOES it (gPR == target_pos) — without that gate the
+        first polls read the PREVIOUS motion's gOBJ and the wait returns
+        immediately. 0910: pick_box logged "close -> GRASPED" 0.5 s after
+        commanding a close, having read the gOBJ=3 left over from the preceding
+        open() with the fingers still wide apart. None skips the gate (raw
+        waits that did not command a position)."""
         start = time.time()
         got_any = False
         done_count = 0
@@ -196,7 +206,8 @@ class RobotiqGripperUSB:
             got_any = True
             if status.has_fault:
                 logger.warning("[Robotiq-USB] fault gFLT={}", status.gFLT)
-            if status.motion_done:
+            echoed = target_pos is None or status.gPR == int(target_pos)
+            if echoed and status.motion_done:
                 done_count += 1
                 if done_count >= required_done_count:
                     return True
@@ -253,6 +264,25 @@ class RobotiqGripperUSB:
         logger.warning("[Robotiq-USB] activation did not complete")
         return False
 
+    def ensure_activated(self) -> bool:
+        """True if the gripper is activated and ready; if not, reset + activate.
+
+        *** SWEEPS THE FINGERS *** — call only with the hand in free air. The
+        EE-pass-through twin (RobotiqGripper.ensure_activated) carries the
+        reasoning; this mirrors it so either transport answers the same call.
+        """
+        st = self.read_status()
+        if st is not None and st.gSTA == 3 and st.gFLT not in (0x05, 0x07):
+            return True
+        logger.warning("[Robotiq-USB] NOT ready before the grasp ({}) — reset + activate "
+                       "(this sweeps the fingers; the hand must be clear)",
+                       "no status" if st is None else f"gFLT={st.gFLT}, gSTA={st.gSTA}")
+        if self.initialize():
+            logger.info("[Robotiq-USB] re-activated, ready for the grasp")
+            return True
+        logger.error("[Robotiq-USB] re-activation failed — the gripper is not usable this run")
+        return False
+
     def goto(self, pos: int, speed: int | None = None, force: int | None = None) -> bool:
         """Move to raw position (0=open .. 255=closed) and wait for completion."""
         pos = max(0, min(255, int(pos)))
@@ -260,7 +290,7 @@ class RobotiqGripperUSB:
         force = cfg.ROBOTIQ_FORCE if force is None else max(0, min(255, force))
         self._write_control(0x09, pos, speed, force)
         time.sleep(0.15)  # let command settle before polling status
-        return self.wait_until_done()
+        return self.wait_until_done(target_pos=pos)
 
     def open(self) -> bool:
         return self.goto(cfg.ROBOTIQ_OPEN_POS)
@@ -280,6 +310,18 @@ class RobotiqGripperUSB:
         """
         status = self.read_status()
         if not status:
+            return False
+        last = getattr(self, "_last_cmd_pos", None)
+        if last is not None and status.gPR != int(last):
+            # the status still echoes an EARLIER target, so gOBJ/gPO describe
+            # that motion — reading them here is what reported a wide-open
+            # gripper as gripped (0910, see wait_until_done). Compared against
+            # the last commanded position rather than CLOSE_POS: a soft grip
+            # freezes the fingers at gPO + squeeze (vla_training collect.py),
+            # which is a legitimate hold well short of CLOSE_POS.
+            logger.warning(
+                "[Robotiq-USB] grasp check: status echoes gPR={}, not the last "
+                "commanded {} — reporting NO object", status.gPR, last)
             return False
         if status.gOBJ == 2:
             return True

@@ -2,30 +2,48 @@
 
 For each cylinder (one cycle per --slots entry):
 
-    home -> just above the standoff -> short straight descent to pinch height
+    detect the CYLINDERS only — the bin is not looked at yet
+         [chassis: if the nearest cylinder is outside the pick window in y, the
+          base strafes it to the nearest spot inside. The base only ever
+          strafes; x is the arm's reach, driven only if a plan fails outright]
+         -> home -> just above the standoff -> short straight descent to pinch
+            height
          -> straight-line entry from behind (+x), fingers open left/right,
             wrench guard stops an early bump
          -> soft close (position-checked, one corrective re-grip)
          -> straight up to transport height -> carry upright over the slot
-            [--chassis: the base drives the bin to STAND_BIN_PLACE_XY meanwhile]
-         -> turn in the air (tool ends pointing down, cylinder lies along x)
+            [chassis: the base drives BLIND toward the bin meanwhile, by the
+             learned total displacement minus the pre-pick move]
+         -> turn in the air, the same path every cycle (tool ends pointing down,
+            cylinder lying along base x)
+         [chassis: NOW detect the bin — the only place it is measurable — and
+          send the HAND to it, base unmoved, spinning the WRIST by the bin's
+          yaw so the cylinder lands parallel to its walls — everything up to
+          the hover pose is identical every cycle and only the lay-down turns.
+          That same reading teaches the next cycle its carry and place centre
+          (but never the yaw: the base loses heading when it strafes). Bin not
+          measurable, or further off than STAND_CARRY_CORRECT_MAX_M? the
+          cylinder stays held and the run stops]
          -> straight down until the cylinder rests on the bin floor (touchdown
             guard) -> open 4 mm -> straight up -> open -> home
-            [--chassis: the base drives back by everything it moved this cycle]
+            [chassis: the base strafes back by the y it moved this cycle, while
+             the arm turns back and homes. x is not undone]
 
-Positions come from --detect (show_detect: head camera, both OBB models,
-nearest cylinder first) or from the typed --cyl-x/--cyl-y and --bin-x/--bin-y.
+Positions come from the head camera by default (show_detect: both OBB models,
+nearest cylinder first); --no-detect uses the typed --cyl-x/--cyl-y and
+--bin-x/--bin-y instead.
 
 Run from LGES/:
-    python -m ik_demo.stand_place --dry                       # plan only, no robot (typed positions)
-    python -m ik_demo.stand_place --pick-only                 # grip, lift 10 cm, set back down, release
-    python -m ik_demo.stand_place                             # four cylinders, 5 cm apart (re-stand between cycles)
+    python -m ik_demo.stand_place                             # DEFAULT (= the old --detect --chassis): camera
+                                                              # finds the cylinders + bin, the chassis brings the
+                                                              # bin into reach, four cylinders 5 cm apart, the
+                                                              # base returns to the cycle start after each place
+    python -m ik_demo.stand_place --dry                       # camera -> plan only; nothing moves but the head
     python -m ik_demo.stand_place --slots 0                   # one cylinder into the bin centre
-    python -m ik_demo.stand_place --measure-fingers           # fingertips touch the desk: finger length
-    python -m ik_demo.stand_place --detect --dry              # camera: cylinders + bin -> plan only (calibrate)
-    python -m ik_demo.stand_place --detect                    # detected cylinder -> detected bin (arm reach only)
-    python -m ik_demo.stand_place --detect --chassis          # chassis brings the bin (and, if needed, the
-                                                              # cylinder) into reach, places, drives back
+    python -m ik_demo.stand_place --pick-only                 # grip, lift 10 cm, set back down, release
+    python -m ik_demo.stand_place --no-chassis                # place at the detected bin, arm reach only
+    python -m ik_demo.stand_place --no-detect                 # typed positions on the robot
+    python -m ik_demo.stand_place --no-detect --dry           # offline planner, no robot at all
 """
 
 from __future__ import annotations
@@ -51,23 +69,25 @@ from .gripper import GripperMover
 class Args:
     # cylinder default = where the user hand-flew the grasp on 0906 (pose_tune, arm_center
     # frame -> base_link at TORSO_JOINTS; pinch EE x 0.860 + reach 0.073)
-    cyl_x: float = 0.933          # standing cylinder centre, base_link (m) — ignored with --detect
+    cyl_x: float = 0.933          # standing cylinder centre, base_link (m) — used only with --no-detect
     cyl_y: float = -0.28
-    bin_x: float = 0.95           # black bin centre, base_link (m) — ignored with --detect
+    bin_x: float = 0.95           # black bin centre, base_link (m) — used only with --no-detect
     bin_y: float = -0.05
     slots: str = "-7.5,-2.5,2.5,7.5"   # one cycle per entry: slot y offsets from the bin centre, cm, left is +
                                        # (default: four cylinders 5 cm apart, user's choice 0906); "0" = one, centred
     dry: bool = False             # plan + report only, no robot
     pick_only: bool = False       # grip, lift STAND_LIFT_TEST_M, set back down, release (no bin)
     keep: bool = False            # skip the final home
-    detect: bool = False          # find the cylinders + bin with the head camera (show_detect), every cycle
-    chassis: bool = False         # with --detect: drive the base so the bin sits at STAND_BIN_PLACE_XY
-                                  # (slowly, while the arm carries + turns), then place there
-    measure_fingers: bool = False # no pick: fingers closed + tool down, touch the desk at (--probe-x, --probe-y),
-                                  # report flange-to-fingertip length = contact z - STAND_DESK_Z_M
-    probe_x: float = 0.85         # desk spot for --measure-fingers (must be clear of objects and the bin)
-    probe_y: float = -0.15
-    speed: float = 0.1            # right-arm speed scale for this run (cfg.SPEED_SCALE_RIGHT is 0.2)
+    yaw_align: bool = True        # turn the slot row (and the laid-down cylinder) to follow the bin's
+                                  # long axis, instead of always lying along base x
+    detect: bool = True           # find the cylinders + bin with the head camera (show_detect), every cycle;
+                                  # --no-detect uses the typed cyl_*/bin_* above instead
+    chassis: bool = True          # with detection: drive the base so the bin sits at STAND_BIN_PLACE_XY
+                                  # (slowly, while the arm carries + turns), then place there;
+                                  # --no-chassis places at the detected bin, arm reach only
+    speed: float = cfg.STAND_SPEED_SCALE   # right-arm joint-speed scale for this run; the default is
+                                           # this job's own STAND_SPEED_SCALE, not robot.py's
+                                           # SPEED_SCALE_RIGHT (which the session keeps)
 
 
 # ---------------------------------------------------------------------------
@@ -102,7 +122,11 @@ def plan_object(g: GripperMover, label: str, x: float, y: float, yaw: float,
                 slot_xy: tuple[float, float], seed: np.ndarray) -> ObjectPlan:
     """Geometry + IK pre-flight for one object. ``yaw`` rotates the entry
     direction about base z (0 = straight along +x). ``seed`` warm-starts the
-    solves; pass the config the arm will actually be in (the task home)."""
+    solves; pass the config the arm will actually be in (the task home).
+
+    Plans the lay-down at STAND_PLACE_RPY, the orientation the in-air turn was
+    proven into. Lining the row up with the bin is a WRIST SPIN applied later,
+    at the place point, from the yaw measured in that same cycle."""
     obj = cfg.STAND_OBJECTS[label]
     z_grasp = float(cfg.STAND_DESK_Z_M) + float(obj["grasp_h"])
     d = np.array([np.cos(yaw), np.sin(yaw), 0.0])
@@ -204,15 +228,18 @@ def build_plans(g: GripperMover, a: Args) -> list[ObjectPlan]:
 # Execution (robot)
 # ---------------------------------------------------------------------------
 
-def _guard(g: GripperMover, axis) -> "callable | None":
-    """stop_fn: True once the tared force along ``axis`` exceeds STAND_CONTACT_N."""
-    if not g.tare_wrench():
+def _guard(g: GripperMover, axis, limit: "float | None" = None, tare: bool = True) -> "callable | None":
+    """stop_fn: True once the tared force along ``axis`` exceeds ``limit``
+    (STAND_CONTACT_N by default). ``tare=False`` reuses the baseline the last
+    guard measured, so two thresholds can watch one tare."""
+    if tare and not g.tare_wrench():
         return None
+    lim = float(cfg.STAND_CONTACT_N if limit is None else limit)
     hit: list[float] = []
 
     def stop() -> bool:
         f = g.axis_force(axis)
-        if f is not None and abs(f) > float(cfg.STAND_CONTACT_N):
+        if f is not None and abs(f) > lim:
             hit.append(f)
             return True
         return False
@@ -341,13 +368,20 @@ def grasp_with_check(g: GripperMover, plan: ObjectPlan) -> tuple[bool, int]:
             return True, contact
         if attempt == 2:
             return False, contact
-        # correct along the entry line and try once more
-        deep = contact > expected + tol and contact < int(cfg.ROBOTIQ_CLOSE_POS) - int(cfg.ROBOTIQ_GRIP_MIN_GAP)
+        # Correct along the entry line and try once more. "Deep" needs the
+        # gripper to have actually STOPPED on something: with gOBJ 3 the fingers
+        # met nothing, and a late contact position then means they closed past
+        # the object, which has to be approached FURTHER IN, not backed out.
+        # (0911 20:56: contact 227 with gOBJ 3 was read as deep and the arm
+        # backed out 28 mm, spending the retry in the wrong direction.)
+        deep = grasped and contact > expected + tol
         shift = -float(cfg.STAND_REGRIP_SHIFT_M) if deep else float(cfg.STAND_REGRIP_SHIFT_M)
         pos_now = np.asarray(g.fk(g._q_cmd)[0], dtype=float)
         target = pos_now + plan.approach_dir * shift
-        logger.warning("[{}] re-grip: object {} — shifting {:+.0f}mm along the entry and closing again",
-                       plan.label, "deep in the fingers" if deep else "not between the pads", shift * 1000)
+        logger.warning("[{}] re-grip: object {} (contact {}, gOBJ {}) — shifting {:+.0f}mm along the "
+                       "entry and closing again", plan.label,
+                       "deep in the fingers" if deep else "not between the pads", contact,
+                       st.gOBJ if st else "?", shift * 1000)
         g.gripper.open()
         if g.move_ee_line(target, rpy, speed=float(cfg.STAND_APPROACH_SPEED_M_S)) is None:
             logger.error("[{}] re-grip shift stalled", plan.label)
@@ -370,39 +404,6 @@ def held_weight(g: GripperMover, n: int = 30) -> "float | None":
             vals.append(f)
         time.sleep(0.01)
     return float(np.mean(vals)) if vals else None
-
-
-def measure_fingers(g: GripperMover, x: float, y: float) -> None:
-    """Touch the desk with the closed fingertips, tool down, and report the
-    flange-to-fingertip length. That constant (STAND_FINGER_LENGTH_M; 0.14 was the
-    guess) sets both the pinch depth and the place height; 0906 the touchdown
-    heights implied ~0.11, which would also mean the fingertips reach the bin
-    floor before the cylinder does."""
-    rpy = tuple(cfg.STAND_PLACE_RPY)
-    z_top = float(cfg.STAND_TRANSPORT_Z_M)
-    z_aim = float(cfg.STAND_DESK_Z_M) + 0.06          # well below any plausible fingertip contact
-    logger.info("[measure] -> ({:.3f},{:+.3f}) at z {:.3f}, tool down, fingers CLOSED", x, y, z_top)
-    if g.move_ee([x, y, z_top], rpy) is None:
-        return
-    g.gripper.close()
-    time.sleep(0.5)
-    touch = _guard(g, (0.0, 0.0, 1.0))
-    if touch is None:
-        logger.error("[measure] no wrench guard — not descending")
-        return
-    logger.info("[measure] descending to the desk (guard {:.0f}N)", cfg.STAND_CONTACT_N)
-    g.move_ee_vertical(z_aim, rpy, stop_fn=touch)
-    if touch.hit:  # type: ignore[attr-defined]
-        z = float(g.fk(g._q_cmd)[0][2])
-        logger.info("[measure] fingertips touched at EE z={:.4f} ({:.1f}N). If this was the DESK ({:.3f}): "
-                    "flange->fingertip = {:.4f} m (config {:.3f}). If it was another surface (bin floor): "
-                    "surface z = {:.4f} using the config finger length", z, touch.hit[0], cfg.STAND_DESK_Z_M,
-                    z - float(cfg.STAND_DESK_Z_M), cfg.STAND_FINGER_LENGTH_M, z - float(cfg.STAND_FINGER_LENGTH_M))
-    else:
-        logger.error("[measure] reached z {:.3f} without contact — desk lower than assumed or fingers shorter "
-                     "than 6 cm?!", z_aim)
-    g.move_ee_vertical(z_top, rpy)
-    g.gripper.open()
 
 
 def snapshot(g: GripperMover, tag: str) -> None:
@@ -438,11 +439,40 @@ class _Background(threading.Thread):
             self.error = e
 
 
+_warm: "_Background | None" = None   # the detector warmup, overlapped with boot
+
+
+def warmup_start() -> None:
+    """Kick off the OBB model warmup in the background, to be joined by the
+    first detect_scene. Boot spends ~25 s waiting on hardware (pin_torso, the
+    Robotiq activation, three arm-model builds, the camera) with the GPU idle,
+    and the warmup is 2.8 s, so it lands for free."""
+    global _warm
+    from .show_detect import warmup  # noqa: PLC0415
+    _warm = _Background(warmup, "detect-warmup")
+    _warm.start()
+
+
 def detect_scene(bot, save: bool = True):
     """Head to the training angle, one fresh frame, both detectors."""
     from .chassis_sequence import _head_rgb, _joints, set_head_pitch  # noqa: PLC0415
     from .show_detect import detect_scene as _detect, save_debug       # noqa: PLC0415
-    set_head_pitch(bot, angle=float(cfg.STAND_HEAD_ANGLE_DEG))
+    global _warm
+    if _warm is not None:
+        # Two threads inside show_detect._model would load the same weights
+        # twice, so the warmup has to be done before the first real detect.
+        # Boot is ~25 s against its 2.8 s, so this does not actually wait.
+        _warm.join()
+        if _warm.error is not None:
+            logger.warning("[detect] warmup failed ({}) — the first detection pays for it",
+                           _warm.error)
+        _warm = None
+    # tol_deg: skip the move (and its flat 5 s wait) when the head is already
+    # aimed. This is the only head command in the run and the angle never
+    # changes, so every detection after the first was paying the full 5 s on a
+    # head that did not move. _head_rgb below still waits for two fresh frames,
+    # so the settle is not lost.
+    set_head_pitch(bot, angle=float(cfg.STAND_HEAD_ANGLE_DEG), tol_deg=2.0)
     rgb = _head_rgb(bot)
     if rgb is None:
         logger.error("[detect] no head-camera frame")
@@ -481,14 +511,183 @@ def chassis_align(bot, from_xy, to_xy, what: str = "bin") -> tuple[float, float]
                          f"{what} ({from_xy[0]:.3f},{from_xy[1]:+.3f}) -> ({to_xy[0]:.3f},{to_xy[1]:+.3f})")
 
 
+def _row_alpha_deg(bin_yaw_deg: "float | None") -> float:
+    """Wrist spin at the place point that lines the slot row up with the bin's
+    long axis. 0 = the row along base y, the cylinder along base x.
+
+    Applied AFTER the proven in-air turn, as a spin about the tool axis with the
+    tool already down — that is what makes the whole range usable
+    (STAND_WRIST_SPIN_RANGE_DEG, measured 0911 over the full circle with the
+    real IK: final pose and descent column, all four slots). A cylinder is
+    symmetric end to end, so alpha and alpha+-180 lay it the same way; take the
+    smallest one that is in range."""
+    if bin_yaw_deg is None:
+        return 0.0
+    a = float(bin_yaw_deg) - 90.0
+    if abs(a) < float(cfg.STAND_ROW_ALPHA_MIN_DEG):
+        return 0.0
+    lo, hi = (float(v) for v in cfg.STAND_WRIST_SPIN_RANGE_DEG)
+    for cand in sorted((a, a - 180.0, a + 180.0), key=abs):
+        if lo <= cand <= hi:
+            return float(cand)
+    logger.warning("[row] the bin wants the row turned {:+.1f} deg, and neither that nor +-180 is inside "
+                   "{:+.0f}..{:+.0f} — leaving the row along base y", a, lo, hi)
+    return 0.0
+
+
+def _row_dir(alpha_deg: float) -> np.ndarray:
+    """Unit vector the slot row runs along, base xy. alpha 0 -> base +y."""
+    a = np.deg2rad(alpha_deg)
+    return np.array([-np.sin(a), np.cos(a)])
+
+
+def _place_rpy(alpha_deg: float) -> tuple[float, float, float]:
+    """STAND_PLACE_RPY turned by ``alpha_deg`` about base z."""
+    if alpha_deg == 0.0:
+        return tuple(cfg.STAND_PLACE_RPY)
+    R = Rotation.from_euler("z", np.deg2rad(alpha_deg)).as_matrix() @ \
+        Rotation.from_euler("xyz", cfg.STAND_PLACE_RPY).as_matrix()
+    return _rpy(R)
+
+
+def detect_scene_unclipped(bot, net: "list[float] | None" = None, move: bool = True):
+    """detect_scene, but when show_detect DROPS the bin for running off the BEV
+    edge, step the chassis toward the clipped side and look again.
+
+    Worth the moves because the dropped reading is the one that used to poison
+    the whole cycle: 0911 18:25, the pre-pick move pushed the bin off the +y
+    edge, the re-detect read its centre 17 cm short, the carry-time chassis move
+    stopped that much shy of the place spot and the cylinder was laid on the
+    desk beside the bin. Returns the last scene either way — with the bin still
+    None the caller stops, which beats placing into thin air."""
+    tries = int(cfg.STAND_BIN_UNCLIP_TRIES) if move else 0
+    for k in range(tries + 1):
+        scene = detect_scene(bot)
+        if scene is None or scene.bin_clip is None:
+            return scene
+        if k == tries:
+            break
+        step = float(cfg.STAND_BIN_UNCLIP_STEP_M)
+        dx, dy = (step * c for c in scene.bin_clip)
+        moved = chassis_drive(bot, dx, dy, f"bin off the BEV edge {scene.bin_clip} — step toward it")
+        if net is not None:
+            net[0] += moved[0]; net[1] += moved[1]
+        if not any(moved):
+            break
+    logger.error("[detect] bin still off the BEV edge after {} chassis step(s)", tries)
+    return scene
+
+
 def _in_pick_window(xy) -> bool:
     (x0, x1), (y0, y1) = cfg.STAND_CYL_PICK_WINDOW
     return x0 <= xy[0] <= x1 and y0 <= xy[1] <= y1
 
 
-def _pick_window_mid() -> tuple[float, float]:
+def _pick_window_fetch(xy) -> tuple[float, float]:
+    """Where to bring a cylinder that lies outside the pick window: the nearest
+    spot inside it with STAND_PICK_FETCH_MARGIN_M to spare, not the middle."""
     (x0, x1), (y0, y1) = cfg.STAND_CYL_PICK_WINDOW
-    return (0.5 * (x0 + x1), 0.5 * (y0 + y1))
+    m = float(cfg.STAND_PICK_FETCH_MARGIN_M)
+    return (float(np.clip(xy[0], x0 + m, x1 - m)), float(np.clip(xy[1], y0 + m, y1 - m)))
+
+
+def _slot_y_band(x: float) -> "tuple[float, float] | None":
+    """Reachable slot-y band at place x, from the measured STAND_SLOT_Y_BAND_BY_X
+    table. None = this x has no measured band (outside the table), so nothing
+    places there at all.
+
+    An x BETWEEN two table rows gets the INTERSECTION of the two that bracket
+    it: the band edges move by several cm per 25mm of x, so interpolating would
+    invent a band wider than anything that was measured. An x that lands ON a
+    row gets that row as measured (both brackets are the same row) — widening
+    the intersection to the neighbours as well would throw away the measurement
+    that is exactly right."""
+    rows = [(float(r[0]), float(r[1]), float(r[2])) for r in cfg.STAND_SLOT_Y_BAND_BY_X]
+    step = float(cfg.STAND_SLOT_BAND_X_STEP_M)
+    below = [r for r in rows if r[0] <= float(x) + 1e-9]
+    above = [r for r in rows if r[0] >= float(x) - 1e-9]
+    if not below or not above:
+        return None                     # off the end of the measured range
+    lo_row, hi_row = max(below), min(above)
+    if hi_row[0] - lo_row[0] > step + 1e-9:
+        return None                     # straddles a gap in the table (0.725/0.750)
+    return (max(lo_row[1], hi_row[1]), min(lo_row[2], hi_row[2]))
+
+
+def _row_fits(band, offsets) -> "tuple[float, float] | None":
+    """The band of place-centre y that keeps the WHOLE slot row inside ``band``
+    with STAND_PLACE_MARGIN_M to spare, or None if the row is too wide for it."""
+    if band is None:
+        return None
+    m = float(cfg.STAND_PLACE_MARGIN_M)
+    lo = band[0] + m - min(offsets)
+    hi = band[1] - m - max(offsets)
+    return (lo, hi) if lo <= hi else None
+
+
+def _place_target(bin_xy, offsets) -> tuple[tuple[float, float], "tuple[float, float] | None"]:
+    """The place centre for this whole run, and the base displacement that puts
+    the bin on it (None = the bin was not seen, so the carry has to start from
+    the STAND_CARRY_LEFT_M guess).
+
+    y: the centre is clamped so the whole slot row stays inside the band that x
+    actually has (_slot_y_band), minus STAND_PLACE_MARGIN_M, so the bin only
+    travels to the nearest edge of that band.
+
+    x: taken from the measurement whenever the row fits there with
+    STAND_PLACE_CENTRE_SLACK_M of centre room to spare — the pick window is
+    23 cm deep and the arm reaches for x, which is cheaper than a forward leg.
+    Otherwise the base drives x after all, to the NEAREST table x that hosts the
+    row WITH that slack (0914: a bin at 0.773 has no measured band at all, and
+    the nearest fitting x, 0.800, leaves only 20mm of centre room, so it goes to
+    0.825 instead). Slack matters because the plan is built at the clamped centre
+    while the hand goes to the bin as measured: a roomy centre is what keeps a
+    slightly-off carry inside the band the plan verified. Nothing else can fix a
+    bin that is simply too near — the row span is fixed and the wrist runs out of
+    range mid-flip. The drive is never strafed back (see the return leg), so it
+    is paid once per run."""
+    if bin_xy is None:
+        return tuple(cfg.STAND_BIN_PLACE_XY), None
+    x_m = float(bin_xy[0])
+    slack = float(cfg.STAND_PLACE_CENTRE_SLACK_M)
+
+    def room(x) -> "tuple[tuple[float, float], float] | None":
+        """(allowed centre band, its width) at place x, or None if the row cannot
+        fit there at all."""
+        b = _row_fits(_slot_y_band(x), offsets)
+        return None if b is None else (b, b[1] - b[0])
+
+    here = room(x_m)
+    if here is not None and here[1] >= slack:
+        y_t = float(np.clip(bin_xy[1], *here[0]))
+        return (x_m, y_t), (0.0, bin_xy[1] - y_t)
+    # not enough centre room where the bin is — move x to the nearest place that
+    # has it, and fall back to the roomiest x at all if nothing clears the slack
+    fits = [(float(r[0]), room(float(r[0]))) for r in cfg.STAND_SLOT_Y_BAND_BY_X]
+    fits = [(x, r) for x, r in fits if r is not None]
+    if not fits:
+        logger.warning("[place] {} slots spanning {:.0f} cm do not fit at ANY measured place x with a "
+                       "{:.0f} cm margin — using the nominal centre", len(offsets),
+                       (max(offsets) - min(offsets)) * 100, float(cfg.STAND_PLACE_MARGIN_M) * 100)
+        return tuple(cfg.STAND_BIN_PLACE_XY), (0.0, bin_xy[1] - cfg.STAND_BIN_PLACE_XY[1])
+    roomy = [(abs(x - x_m), x) for x, r in fits if r[1] >= slack]
+    if roomy:
+        x_t = min(roomy)[1]
+    else:
+        x_t = max(fits, key=lambda e: e[1][1])[0]
+        logger.warning("[place] no place x leaves {:.0f} mm of centre room for these slots — taking the "
+                       "roomiest ({:.3f}) instead", slack * 1000, x_t)
+    band, width = room(x_t)
+    y_t = float(np.clip(bin_xy[1], *band))
+    logger.warning("[place] bin x {:.3f}: {} for the {:.0f} cm slot row — place x moves to {:.3f} "
+                   "(band {:+.3f}..{:+.3f}, centre room {:.0f} mm), so the base drives {:+.0f} mm "
+                   "forward on the carry", x_m,
+                   "no measured band" if _slot_y_band(x_m) is None else
+                   ("band {:+.3f}..{:+.3f} is too narrow".format(*_slot_y_band(x_m)) if here is None
+                    else "only {:.0f} mm of centre room".format(here[1] * 1000)),
+                   (max(offsets) - min(offsets)) * 100, x_t, *_slot_y_band(x_t), width * 1000,
+                   (x_m - x_t) * 1000)
+    return (x_t, y_t), (x_m - x_t, bin_xy[1] - y_t)
 
 
 def go_home(g: GripperMover) -> None:
@@ -502,25 +701,55 @@ def go_home(g: GripperMover) -> None:
 
 def run_object(g: GripperMover, plan: ObjectPlan, pick_only: bool,
                chassis_move: "callable | None" = None,
-               refine_place: "callable | None" = None) -> "bool | None":
+               place_at: "callable | None" = None) -> "bool | None":
     """One object, start and end at transport height. False = gave up before
     lifting (logged). ``chassis_move`` (no-arg callable) is started in a thread
     right after the lift and runs while the arm carries the upright object over
     the slot and turns it; the descent waits for it. If it raises, the run
     stops with the object still held at transport height -> None.
-    ``refine_place`` (no-arg callable -> (dx, dy) or None) is asked after the
-    chassis has stopped and the turn is done; a non-None answer shifts the
-    place point by that much (a re-detection of the bin from where it ended
-    up) before the descent."""
+    Returns with the gripper still at the release width, tool clear above the
+    bin: the caller opens it fully, which overlaps the drive back.
+    ``place_at`` (no-arg callable -> (x, y, alpha_deg) or None) is asked after
+    the chassis has stopped and the turn is done — everything up to the hover
+    pose is identical every cycle, and only the LAY-DOWN changes. It measures
+    the bin from wherever the base ended up and answers with the point to place
+    at plus the wrist spin that lines the row up with the bin, so the chassis is
+    out of the final error chain (the arm, not the base, closes the loop on the
+    camera). The arm slides and spins there at transport height first. None, or
+    a point it cannot reach, leaves the object held -> None. It never falls back
+    to the planned point: that fallback is what laid a cylinder on the desk
+    beside the bin on 0911. An unreachable SPIN does fall back to the unturned
+    lay-down, which places correctly, just not parallel to the bin."""
     rpy = plan.rpy_pick
     g.gripper.open()
     snapshot(g, f"{plan.label} start")
+    # Going STRAIGHT to the standoff was tried 0911 and scraped the desk: the
+    # offline check that cleared it sampled the straight joint-space
+    # interpolation, but Ruckig gives every joint its own time profile, so the
+    # real path sags well below that line. The joint leg therefore still lands
+    # STAND_PRE_LIFT_M above the standoff and a tracked column takes it down.
+    # Still two legs — the joint leg lands STAND_PRE_LIFT_M above the standoff
+    # and a TRACKED column takes it down, because going straight to the standoff
+    # scraped the desk (0911: the offline check that cleared it sampled the
+    # straight joint-space interpolation, but Ruckig gives every joint its own
+    # time profile, so the real path sags well below that line).
+    #
+    # What changed is the HANDOVER. The joint leg used to end at rest and the
+    # column used to ramp in from zero, which is the pause at the waypoint;
+    # blending the junction in joint space cannot fix it, since 5 of the 7
+    # joints reverse direction there and a reversing joint crosses at zero
+    # whatever you do. So the joint leg now ARRIVES already moving down at
+    # STAND_HANDOVER_SPEED_M_S and the column starts from that speed. The path
+    # is unchanged; only the velocity at the junction is.
     z_pre = plan.p_standoff[2] + float(cfg.STAND_PRE_LIFT_M)
-    logger.info("[{}] -> {:.0f}mm above the standoff (joint-space)", plan.label, cfg.STAND_PRE_LIFT_M * 1000)
-    if g.move_ee([plan.p_standoff[0], plan.p_standoff[1], z_pre], rpy) is None:
+    logger.info("[{}] -> {:.0f}mm above the standoff, arriving in motion", plan.label,
+                cfg.STAND_PRE_LIFT_M * 1000)
+    g._handover_speed = 0.0
+    if g.move_ee([plan.p_standoff[0], plan.p_standoff[1], z_pre], rpy,
+                 v_out=(0.0, 0.0, -float(cfg.STAND_HANDOVER_SPEED_M_S))) is None:
         return False
     logger.info("[{}] straight down to pinch height z={:.3f}", plan.label, plan.p_standoff[2])
-    if g.move_ee_vertical(plan.p_standoff[2], rpy) is None:
+    if g.move_ee_vertical(plan.p_standoff[2], rpy, v_in=g._handover_speed) is None:
         return False
     time.sleep(0.3)
     stop = _guard(g, plan.approach_dir)
@@ -598,23 +827,50 @@ def run_object(g: GripperMover, plan: ObjectPlan, pick_only: bool,
             logger.error("[{}] chassis move failed ({}) — holding the object at transport height, "
                          "NOT placing", plan.label, mover.error)
             return None
-    place_xy = plan.p_place_hi[:2].copy()
-    if refine_place is not None:
-        d = refine_place()
-        if d is not None:
-            place_xy = place_xy + np.asarray(d, dtype=float)
-            logger.info("[{}] place point refined by ({:+.3f},{:+.3f}) -> ({:.3f},{:+.3f})", plan.label,
-                        d[0], d[1], *place_xy)
+    place_xy = np.asarray(plan.p_place_hi[:2], dtype=float)
+    if place_at is not None:
+        answer = place_at()
+        if answer is None:
+            logger.error("[{}] no trusted place point — holding the object at transport height, "
+                         "NOT placing", plan.label)
+            return None
+        place_xy = np.asarray(answer[:2], dtype=float)
+        alpha = float(answer[2])
+        moved = not np.allclose(place_xy, plan.p_place_hi[:2], atol=1e-4)
+        if moved or alpha != 0.0:
+            rpy = _place_rpy(alpha)
+            logger.info("[{}] lay-down from the camera: ({:.3f},{:+.3f}) {:.0f} mm off the planned point, "
+                        "wrist spun {:+.1f} deg — sliding there at transport height", plan.label,
+                        *place_xy, float(np.linalg.norm(place_xy - plan.p_place_hi[:2])) * 1000, alpha)
             if g.move_ee([place_xy[0], place_xy[1], plan.z_transport], rpy) is None:
-                logger.warning("[{}] refined point unreachable — using the nominal one", plan.label)
-                place_xy = plan.p_place_hi[:2].copy()
-                g.move_ee(plan.p_place_hi, rpy)
+                if alpha == 0.0:
+                    logger.error("[{}] that point is not reachable from here — holding the object, "
+                                 "NOT placing (no fallback to the planned point)", plan.label)
+                    return None
+                logger.warning("[{}] not reachable with the wrist spun {:+.1f} deg — retrying unturned "
+                               "(the cylinder will not lie parallel to the bin)", plan.label, alpha)
+                rpy = tuple(plan.rpy_place)
+                if g.move_ee([place_xy[0], place_xy[1], plan.z_transport], rpy) is None:
+                    logger.error("[{}] not reachable unturned either — holding the object, NOT placing",
+                                 plan.label)
+                    return None
     time.sleep(0.3)
     touch = _guard(g, (0.0, 0.0, 1.0))                       # tared WITH the object hanging
+    # Only the CREEP decides touchdown. The fast leg stops STAND_PLACE_SLOW_FROM_M
+    # above the resting height, so a trip there cannot be the floor: 0911 19:22
+    # cycle 2 tripped at 5.2N 164 ms in, 169 mm up with nothing under the
+    # cylinder, and the old code read that as a touchdown and released in mid
+    # air. But the fast leg is not free air either — by its end the cylinder is
+    # already below the rim — so it keeps a COARSE guard for a real obstruction
+    # (a wall, another cylinder), and that one aborts the place instead of
+    # releasing. STAND_DESCENT_ABORT_N = 0 turns it off.
+    abort = _guard(g, (0.0, 0.0, 1.0), limit=cfg.STAND_DESCENT_ABORT_N, tare=False) \
+        if (touch and float(cfg.STAND_DESCENT_ABORT_N) > 0) else None
     z_aim = plan.z_place - (float(cfg.STAND_PLACE_OVERSHOOT_M) if touch else 0.0)
     z_slow = plan.z_place + float(cfg.STAND_PLACE_SLOW_FROM_M)
-    logger.info("[{}] lower to the bin floor (resting EE z {:.3f}): normal to z {:.3f}, then slow to {:.3f}{}",
-                plan.label, plan.z_place, z_slow, z_aim,
+    logger.info("[{}] lower to the bin floor (resting EE z {:.3f}): normal to z {:.3f} (abort guard {}), "
+                "then creep to {:.3f}{}", plan.label, plan.z_place, z_slow,
+                f"{cfg.STAND_DESCENT_ABORT_N:.0f}N" if abort else "off", z_aim,
                 f" (touchdown guard {cfg.STAND_CONTACT_N:.0f}N)" if touch else " (NO force guard)")
     # two legs: the second is a constant CREEP so the arm is never more than a
     # millimetre or two behind its command when the floor arrives. (0906: a
@@ -622,10 +878,14 @@ def run_object(g: GripperMover, plan: ObjectPlan, pick_only: bool,
     # move_ee_vertical leg re-accelerated to cruise over its first 2 cm and
     # the arm, 17 mm behind the command at contact, kept pressing after the
     # guard froze it.)
-    g.move_ee_vertical(z_slow, rpy, stop_fn=touch)
-    if not touch or not touch.hit:  # type: ignore[attr-defined]
-        g.move_ee_line([place_xy[0], place_xy[1], z_aim], rpy,
-                       speed=float(cfg.STAND_PLACE_CREEP_M_S), stop_fn=touch, trace_tag="place")
+    g.move_ee_vertical(z_slow, rpy, stop_fn=abort)
+    if abort is not None and abort.hit:  # type: ignore[attr-defined]
+        logger.error("[{}] {:.1f}N during the FAST descent at z={:.4f} — something is under the tool "
+                     "(bin wall? another cylinder?). Holding the object at that height, NOT placing",
+                     plan.label, abort.hit[0], g.fk(g._q_cmd)[0][2])
+        return None
+    g.move_ee_line([place_xy[0], place_xy[1], z_aim], rpy,
+                   speed=float(cfg.STAND_PLACE_CREEP_M_S), stop_fn=touch, trace_tag="place")
     if touch is not None and touch.hit:  # type: ignore[attr-defined]
         logger.info("[{}] touchdown {:.1f}N at EE z={:.4f} ({:+.0f}mm vs resting)", plan.label,
                     touch.hit[0], g.fk(g._q_cmd)[0][2], (g.fk(g._q_cmd)[0][2] - plan.z_place) * 1000)
@@ -635,8 +895,36 @@ def run_object(g: GripperMover, plan: ObjectPlan, pick_only: bool,
     time.sleep(0.3)
     logger.info("[{}] straight up, empty", plan.label)
     g.move_ee_vertical(plan.z_transport, rpy)
-    g.gripper.open()                         # fully, now that the fingers are clear of the bin walls
+    # The fingers are clear of the bin walls here, but the FULL open is left to
+    # the caller: it takes ~0.8 s that the base can spend driving back.
     return True
+
+
+def run_cylinders(bot, g: GripperMover, args: "Args | None" = None) -> bool:
+    """The whole cylinder job as ONE STEP of a bigger session (chassis_sequence
+    task 5), instead of `python -m ik_demo.stand_place`.
+
+    The caller owns the robot: it has already connected, pinned the subscribers,
+    safe-homed both arms and initialised the Robotiq, and it does its own go /
+    no-go gate and run log. So this only borrows the right arm, sets its speed
+    for the job — the mover's motion limits were built at the session's
+    SPEED_SCALE_RIGHT, hence the rebuild — and runs the cycles."""
+    a = args or Args()
+    if g.gripper is None:
+        logger.error("[stand] the cylinder job needs the Robotiq — none available")
+        return False
+    was = float(cfg.SPEED_SCALE_RIGHT)
+    cfg.SPEED_SCALE_RIGHT = float(a.speed)
+    g._setup_ruckig()
+    logger.warning("[stand] right-arm speed scale {:.2f} for the cylinder job (STAND_SPEED_SCALE {:.2f}; "
+                   "the session's SPEED_SCALE_RIGHT {:.2f} is restored afterwards)",
+                   a.speed, cfg.STAND_SPEED_SCALE, was)
+    try:
+        go_home(g)
+        return _run_detected(bot, g, a)
+    finally:
+        cfg.SPEED_SCALE_RIGHT = was
+        g._setup_ruckig()
 
 
 def _main(a: Args) -> None:
@@ -651,7 +939,8 @@ def _main(a: Args) -> None:
     if a.detect and a.dry:
         logger.warning("DETECT ONLY (head moves, arms and chassis do not): cylinders + bin -> plan, no motion")
     else:
-        logger.warning("MOVES THE REAL RIGHT ARM + ROBOTIQ GRIPPER{}:", " + THE CHASSIS" if a.chassis else "")
+        logger.warning("MOVES THE REAL RIGHT ARM + ROBOTIQ GRIPPER{}:",
+                       " + THE CHASSIS" if (a.chassis and a.detect) else "")
     if a.detect:
         logger.warning("  cylinders + bin from the head camera (angle {:.0f}){}", cfg.STAND_HEAD_ANGLE_DEG,
                        "; chassis drives the bin to ({:.2f},{:+.2f}) at {:.2f} m/s".format(
@@ -659,9 +948,7 @@ def _main(a: Args) -> None:
     else:
         logger.warning("  cylinder at ({:.2f},{:+.2f}); bin at ({:.2f},{:+.2f}); {} cycle(s)",
                        a.cyl_x, a.cyl_y, a.bin_x, a.bin_y, len(_slot_offsets(a)))
-    logger.warning("  {}", "touch the desk with the closed fingertips at ({:.2f},{:+.2f}), report the finger "
-                   "length (--measure-fingers)".format(a.probe_x, a.probe_y) if a.measure_fingers
-                   else "grip, lift 10 cm, set back down, RELEASE (--pick-only)" if a.pick_only
+    logger.warning("  {}", "grip, lift 10 cm, set back down, RELEASE (--pick-only)" if a.pick_only
                    else "grip -> lift -> turn -> lay into the bin -> release")
     logger.warning("Clear the right arm's workspace. Keep the e-stop within reach.")
     logger.warning("=" * 60)
@@ -684,6 +971,18 @@ def _main(a: Args) -> None:
     with Robot(configs=robot_configs) as bot:
         if a.detect and not bot.sensors.head_camera.wait_for_active(timeout=5.0):
             logger.warning("head camera may not be active")
+        # The steering angles and the right wrench are each read in a burst
+        # (pre-steer polls, the descent guard) with a whole cycle of silence
+        # in between, so dexcontrol's 5 s idle policy pauses them every time
+        # and the next burst pays the resume. Measured 0911: 4.8 s and 2.5 s
+        # over a 202 s run. Pinning them ON is free — both are small state
+        # topics. NOT done globally: that would also pin right_rgb and depth,
+        # which this run never reads.
+        bot.chassis.set_subscription_policy("always_on")
+        if bot.right_arm.wrench_sensor is not None:
+            bot.right_arm.wrench_sensor.set_subscription_policy("always_on")
+        if a.detect:
+            warmup_start()   # runs while the arm/gripper/torso boot below
         g = GripperMover(bot)
         if a.detect and a.dry:
             _detect_dry(bot, g, a)
@@ -694,7 +993,7 @@ def _main(a: Args) -> None:
         if not g.ensure_ready(release_estop=release):
             logger.error("right arm not ready — aborting")
             return
-        plans = [] if (a.measure_fingers or a.detect) else build_plans(g, a)
+        plans = [] if a.detect else build_plans(g, a)
         if not all(p.ok for p in plans):
             logger.error("plan failed — arm not moved")
             return
@@ -706,12 +1005,11 @@ def _main(a: Args) -> None:
         # head-camera view and in the right arm's swing.
         safe_home(ArmMover(robot=bot, side="left", ee_frame=cfg.EE_FRAME))
         go_home(g)
-        if a.measure_fingers:
-            measure_fingers(g, a.probe_x, a.probe_y)
         if a.detect:
             _run_detected(bot, g, a)
         for plan in plans:
             ok = run_object(g, plan, a.pick_only)
+            g.gripper.open()
             logger.info("[{}] -> {} (slot y {:+.3f})", plan.label, "done" if ok else "SKIPPED",
                         plan.p_place_hi[1])
         if not a.keep:
@@ -723,17 +1021,18 @@ def _slot_offsets(a: Args) -> list[float]:
     return offsets or [0.0]
 
 
-def _plan_detected(g: GripperMover, scene, dy: float, chassis: bool) -> "ObjectPlan | None":
-    """Plan the NEAREST detected cylinder into the slot ``dy`` left of the bin
-    centre. With --chassis the bin will be driven to STAND_BIN_PLACE_XY, so the
-    place is planned there; otherwise at the detected bin."""
+def _plan_detected(g: GripperMover, scene, dy: float, place_c) -> "ObjectPlan | None":
+    """Plan the NEAREST detected cylinder into the slot ``dy`` along base y from
+    the place centre. ``place_c`` is the centre the base will bring the bin to;
+    None (--no-chassis) means place at the bin wherever it was detected. The row
+    is turned to the bin later, by the wrist, at the place point."""
     if not scene.cylinders:
         logger.warning("[detect] no cylinder in view")
         return None
-    if scene.bin is None:
-        logger.warning("[detect] no bin in view")
+    if place_c is None and scene.bin is None:
+        logger.warning("[detect] no bin in view — needed to place with --no-chassis")
         return None
-    bx, by = cfg.STAND_BIN_PLACE_XY if chassis else scene.bin[:2]
+    bx, by = place_c if place_c is not None else scene.bin[:2]
     x, y, conf = scene.cylinders[0]
     plan = plan_object(g, "cylinder", x, y, 0.0, (bx, by + dy),
                        np.asarray(cfg.STAND_HOME_JOINTS_RIGHT, dtype=float))
@@ -745,88 +1044,253 @@ def _detect_dry(bot, g: GripperMover, a: Args) -> None:
     scene = detect_scene(bot)
     if scene is None:
         return
-    plan = _plan_detected(g, scene, _slot_offsets(a)[0], a.chassis)
-    if a.chassis and scene.bin is not None:
-        tx, ty = cfg.STAND_BIN_PLACE_XY
-        logger.info("[chassis] would drive forward {:+.3f} m, left {:+.3f} m (bin ({:.3f},{:+.3f}) -> "
-                    "({:.2f},{:+.2f}))", scene.bin[0] - tx, scene.bin[1] - ty, scene.bin[0], scene.bin[1], tx, ty)
+    offsets = _slot_offsets(a)
+    target, need = _place_target(scene.bin[:2] if scene.bin else None, offsets) if a.chassis else (None, None)
+    if a.chassis and a.yaw_align:
+        logger.info("[row] bin long axis {} -> the wrist would spin {:+.1f} deg at the lay-down",
+                    f"{scene.bin[2]:.0f} deg" if scene.bin else "not in view from here (normal)",
+                    _row_alpha_deg(scene.bin[2]) if scene.bin else 0.0)
+    plan = _plan_detected(g, scene, offsets[0], target)
+    if a.chassis:
+        # the sequence the real run would follow, in the order it decides things
+        if need is None:
+            logger.info("[chassis] bin not in view from here, which is normal — cycle 1 runs on the "
+                        "nominal centre ({:.3f},{:+.3f}) and the {:.2f} m carry guess, then learns the "
+                        "real ones when it comes over the bin", target[0], target[1],
+                        cfg.STAND_CARRY_LEFT_M)
+        else:
+            logger.info("[chassis] bin IS in view from here: place centre would be ({:.3f},{:+.3f}) for "
+                        "slots {:+.3f}..{:+.3f}, carry {:+.3f} m left", target[0], target[1],
+                        target[1] + min(offsets), target[1] + max(offsets), need[1])
+        total = need or (0.0, cfg.STAND_CARRY_LEFT_M)
+        pre = (0.0, 0.0)
         if scene.cylinders:
             cyl = np.asarray(scene.cylinders[0][:2])
-            logger.info("[chassis] cylinder in the pick window now: {}; after that move: {}",
-                        _in_pick_window(cyl), _in_pick_window(cyl - np.array([scene.bin[0] - tx, scene.bin[1] - ty])))
+            if not _in_pick_window(cyl):
+                fetch = _pick_window_fetch(cyl)
+                pre = (0.0, cyl[1] - fetch[1])      # y only
+            logger.info("[chassis] 1. cylinder ({:.3f},{:+.3f}) {} -> pre-pick move forward {:+.3f} m, "
+                        "left {:+.3f} m", cyl[0], cyl[1],
+                        "in the pick window" if _in_pick_window(cyl) else "outside the pick window", *pre)
+        logger.info("[chassis] 2. loaded carry leg: forward {:+.3f} m, left {:+.3f} m (the total minus "
+                    "the pre-pick)", total[0] - pre[0], total[1] - pre[1])
+        logger.info("[chassis] 3. bin measured again from there; the correction folds into the total. "
+                    "Per cycle the base drives {:.2f} m out and the same back",
+                    abs(total[0] - pre[0]) + abs(total[1] - pre[1]))
     logger.info("detect dry run -> {}", "no plan" if plan is None else ("OK" if plan.ok else "FAIL"))
 
 
-def _run_detected(bot, g: GripperMover, a: Args) -> None:
-    """Cycle: detect (arm at home, out of the view) -> pick the nearest
-    cylinder -> lift -> [chassis drives the bin to the place spot while the arm
-    carries + turns] -> place -> home -> [chassis drives back by everything it
-    moved this cycle]. Re-detects every cycle."""
-    net = [0.0, 0.0]        # chassis displacement (forward, left) accumulated within a cycle
-    for k, dy in enumerate(_slot_offsets(a)):
+def _run_detected(bot, g: GripperMover, a: Args) -> bool:
+    """One cycle per slot: detect the CYLINDERS (the bin is not looked at yet)
+    -> the base fetches the nearest one into the pick window -> pick -> the base
+    carries toward the bin by the learned displacement while the arm lifts,
+    carries and turns -> only NOW detect the bin, correct the base onto the
+    place spot and keep that correction for the next cycle -> place -> home ->
+    the base returns to where the cycle started.
+
+    ``carry`` is the total LEFT displacement FROM THE CYCLE START that lands the
+    bin on the place centre, not the length of the carry leg: the pre-pick move
+    differs per cylinder (each is strafed to the pick window from a different
+    place on the desk), so the leg is this total minus what the pre-pick already
+    moved. The total is the thing that stays constant while the bin sits still,
+    which is what makes it learnable.
+
+    The base normally only strafes: x is left to the arm, since the pick window
+    is 23 cm deep and the place solves over 20 cm of x. Two things do drive x,
+    both on demand and neither strafed back — the STAND_PICK_RETRY nudge when a
+    plan fails outright (below), and the place-x fit when the bin is measured
+    somewhere the slot row cannot fit in y at all (_place_target).
+
+    True only if every slot got its cylinder."""
+    net = [0.0, 0.0]                                 # base displacement so far THIS cycle (forward, left)
+    offsets = _slot_offsets(a)
+    carry = [float(cfg.STAND_CARRY_LEFT_M)]          # learned LEFT displacement
+    # x the base still owes to put the bin where the slot row fits (_place_target).
+    # Usually 0 — only a bin measured too near/far to host the row asks for it.
+    pend_x = [0.0]
+    target = [float(v) for v in cfg.STAND_BIN_PLACE_XY]   # place centre; replaced at the first sighting
+    seen = [False]                                   # has the bin been measured yet this run
+    # Slot index, NOT a for-loop: a cycle that gave up before lifting (entry
+    # stalled, bump, or the grasp failed even after grasp_with_check's backoff
+    # re-grip) does not consume its slot. The end of the body already opens the
+    # gripper, strafes back and homes the arm, and the top re-detects, so the
+    # retry is exactly a fresh attempt at the same slot. Unlimited by request:
+    # the cylinder may need standing back up by hand, and the operator watches
+    # the attempt counter and takes over rather than the code giving up.
+    k, tries = 0, 0
+    while k < len(offsets):
+        dy = offsets[k]
         scene = detect_scene(bot)
         if scene is None:
             break
-        if a.chassis and scene.cylinders and scene.bin is not None:
-            # Pre-pick chassis move, only when needed. Preferred: the ONE move
-            # that will be needed for the bin anyway, if it also brings the
-            # nearest cylinder into the pick window. Otherwise, a cylinder
-            # outside the window is brought to the proven pick spot. Either
-            # way re-detect afterwards (the arm is at home, the view is clear).
+        if a.chassis and scene.cylinders:
             cyl = np.asarray(scene.cylinders[0][:2])
-            d_bin = np.asarray(scene.bin[:2]) - np.asarray(cfg.STAND_BIN_PLACE_XY)
-            moved = (0.0, 0.0)
-            if _in_pick_window(cyl - d_bin) and not (_in_pick_window(cyl) and np.hypot(*d_bin) < 0.02):
-                logger.info("[cycle {}] one chassis move serves both: bin -> place spot brings the cylinder to "
-                            "({:.3f},{:+.3f})", k + 1, *(cyl - d_bin))
-                moved = chassis_align(bot, scene.bin[:2], cfg.STAND_BIN_PLACE_XY, "bin")
-            elif not _in_pick_window(cyl):
-                logger.info("[cycle {}] cylinder ({:.3f},{:+.3f}) outside the pick window {} -> bring it to "
-                            "the window centre ({:.3f},{:+.3f})", k + 1, cyl[0], cyl[1], cfg.STAND_CYL_PICK_WINDOW,
-                            *_pick_window_mid())
-                moved = chassis_align(bot, tuple(cyl), _pick_window_mid(), "cylinder")
+            fetch = _pick_window_fetch(cyl)
+            if abs(cyl[1] - fetch[1]) >= float(cfg.STAND_CHASSIS_MIN_M):
+                logger.info("[cycle {}] cylinder ({:.3f},{:+.3f}) outside the pick window {} in y -> "
+                            "strafe it to {:+.3f} (y only; x is the arm's job unless a plan fails "
+                            "or the slot row needs a different place x)",
+                            k + 1, cyl[0], cyl[1], cfg.STAND_CYL_PICK_WINDOW, fetch[1])
+                moved = chassis_drive(bot, 0.0, float(cyl[1] - fetch[1]), "cylinder y -> pick window")
+                net[0] += moved[0]; net[1] += moved[1]
+                if any(moved):
+                    scene = detect_scene(bot)
+                    if scene is None:
+                        break
+        plan = _plan_detected(g, scene, dy, target if a.chassis else None)
+        # Last resort, after the row-angle fallback above: a plan can fail with
+        # the cylinder well INSIDE the pick window. Offline sweep 0911 at the
+        # torso the robot actually holds (see STAND_PICK_RETRY_STEP_M) found
+        # 1-2 cm islands where lift_top stalls a few mm short with the joints in
+        # limits and nothing colliding, solid ground on every side. Nudge the
+        # cylinder deeper into the window (+x, the direction that measured
+        # solid) and look again rather than ending the run.
+        for t in range(int(cfg.STAND_PICK_RETRY_TRIES)):
+            if plan is not None and plan.ok:
+                break
+            if not a.chassis or not scene.cylinders:
+                break
+            cyl = np.asarray(scene.cylinders[0][:2])
+            far_x = cfg.STAND_CYL_PICK_WINDOW[0][1] - float(cfg.STAND_PICK_FETCH_MARGIN_M)
+            to_x = min(cyl[0] + float(cfg.STAND_PICK_RETRY_STEP_M), far_x)
+            if to_x - cyl[0] < float(cfg.STAND_CHASSIS_MIN_M):
+                logger.error("[cycle {}] no feasible plan and the cylinder is already at the far edge "
+                             "of the pick window ({:.3f}) — nowhere left to nudge it", k + 1, far_x)
+                break
+            logger.warning("[cycle {}] no feasible plan for the cylinder at ({:.3f},{:+.3f}) — nudging it "
+                           "{:.0f}mm deeper into the pick window and re-detecting (retry {}/{})",
+                           k + 1, cyl[0], cyl[1], (to_x - cyl[0]) * 1000, t + 1,
+                           int(cfg.STAND_PICK_RETRY_TRIES))
+            moved = chassis_align(bot, tuple(cyl), (to_x, float(cyl[1])), "pick retry")
             net[0] += moved[0]; net[1] += moved[1]
-            if any(moved):
-                scene = detect_scene(bot)
-                if scene is None:
-                    break
-        plan = _plan_detected(g, scene, dy, a.chassis)
+            if not any(moved):
+                logger.error("[cycle {}] the nudge fell inside the chassis deadband — stopping", k + 1)
+                break
+            scene = detect_scene(bot)
+            if scene is None:
+                break
+            plan = _plan_detected(g, scene, dy, target if a.chassis else None)
         if plan is None or not plan.ok:
             logger.error("[cycle {}] no feasible plan — stopping", k + 1)
             break
 
-        def move(xy=scene.bin[:2] if scene.bin else None):
-            d = chassis_align(bot, xy, cfg.STAND_BIN_PLACE_XY, "bin")
+        def carry_base(n=k + 1):
+            """The blind leg, run while the arm carries and turns. Left is the
+            learned carry; forward is normally 0 — the bin's x is reached for,
+            not driven to — and non-zero only when _place_target had to move the
+            place x to fit the slot row (paid once, never strafed back)."""
+            leg = carry[0] - net[1]
+            leg_x = pend_x[0]
+            logger.info("[cycle {}] loaded carry: total left from the cycle start is {:+.3f}, {:+.3f} "
+                        "already strafed -> leg {:+.3f} m left{}", n, carry[0], net[1], leg,
+                        ", {:+.3f} m forward (place-x fit)".format(leg_x) if leg_x else "")
+            d = chassis_drive(bot, leg_x, leg, "loaded carry toward the bin (learned, bin not seen yet)")
             net[0] += d[0]; net[1] += d[1]
+            pend_x[0] -= d[0]
 
-        def refine():
-            """Bin re-detected from where the chassis stopped (the arm holds the
-            cylinder above the target, so the bin may be partly hidden): the
-            residual vs the place target, if small enough to trust."""
-            sc = detect_scene(bot, save=True)
+        def place_at(n=k + 1, slot_dy=dy):
+            """The one look at the bin this cycle, taken from wherever the blind
+            carry stopped. The HAND goes to the bin as measured, so the chassis
+            is out of the final error chain (it only has to get the bin roughly
+            under the arm, and its error shows up as a hand offset the camera
+            sees). Everything the next cycle needs is learned right here — the
+            bin is never in view from where a cycle starts:
+
+              * the carry, so the next blind leg lands closer,
+              * the place centre (y clamped into the band that x actually has,
+                x as measured unless the row needs a different one), so the next
+                plan is made where the bin really is,
+              * the x the next carry owes to get there (normally 0),
+            The row angle is NOT among them: it is measured and used here, in
+            this same cycle, every time. The base loses heading when it strafes,
+            so a yaw read one cycle ago would be wrong by the next."""
+            sc = detect_scene_unclipped(bot, net)
             if sc is None or sc.bin is None:
-                logger.warning("[refine] bin not re-detected after the chassis move — placing at the nominal point")
+                logger.error("[cycle {}] bin not measurable from here — not placing", n)
                 return None
-            d = np.asarray(sc.bin[:2]) - np.asarray(cfg.STAND_BIN_PLACE_XY)
-            if np.hypot(*d) > float(cfg.STAND_PLACE_REFINE_MAX_M):
-                logger.warning("[refine] bin residual ({:+.3f},{:+.3f}) too large to trust — nominal point",
-                               d[0], d[1])
+            off = np.asarray(sc.bin[:2]) - np.asarray(target)
+            if np.hypot(*off) > float(cfg.STAND_CARRY_CORRECT_MAX_M):
+                logger.error("[cycle {}] bin ({:.3f},{:+.3f}) is {:.3f} m off the planned centre — beyond "
+                             "STAND_CARRY_CORRECT_MAX_M ({:.2f}), so this is a bad detection, not an "
+                             "offset: not placing", n, sc.bin[0], sc.bin[1], float(np.hypot(*off)),
+                             cfg.STAND_CARRY_CORRECT_MAX_M)
                 return None
-            logger.info("[refine] bin residual after the chassis move: ({:+.3f},{:+.3f}) m", d[0], d[1])
-            return d
+            alpha = _row_alpha_deg(sc.bin[2]) if a.yaw_align else 0.0
+            logger.info("[cycle {}] bin measured at ({:.3f},{:+.3f}) yaw {:.0f}, {:.0f} mm off the planned "
+                        "centre -> the hand goes there, the base stays; row spun {:+.1f} deg",
+                        n, sc.bin[0], sc.bin[1], sc.bin[2], float(np.hypot(*off)) * 1000, alpha)
+            hand = np.asarray(sc.bin[:2], dtype=float) + slot_dy * _row_dir(alpha)
+            # ...and everything after this point is for the NEXT cycle
+            # The bin as it would read from where this cycle started. Only y is
+            # added: the carry strafes, and any x nudge happened BEFORE the plan
+            # was made, so the measured x is already in the planning frame.
+            p_bin = (sc.bin[0], sc.bin[1] + net[1])
+            t, need_next = _place_target(p_bin, offsets)
+            was_t, was_c = tuple(target), carry[0]
+            target[0], target[1] = t
+            carry[0] = p_bin[1] - target[1]
+            # x is not a "total from the cycle start" like the carry: it is never
+            # strafed back, so it is a one-shot debt the next carry pays off.
+            pend_x[0] = need_next[0] if need_next is not None else 0.0
+            logger.info("[cycle {}] learned for the next cycle: place centre ({:.3f},{:+.3f}) -> "
+                        "({:.3f},{:+.3f}) [slots {:+.3f}..{:+.3f}], carry left {:+.3f} -> {:+.3f}",
+                        n, *was_t, *target, target[1] + min(offsets), target[1] + max(offsets),
+                        was_c, carry[0])
+            if not seen[0]:
+                seen[0] = True
+                logger.info("[cycle {}] (first sighting of the bin this run — cycle 1 ran on the "
+                            "STAND_CARRY_LEFT_M guess)", n)
+            return (float(hand[0]), float(hand[1]), float(alpha))
 
-        ok = run_object(g, plan, a.pick_only, chassis_move=move if a.chassis else None,
-                        refine_place=refine if a.chassis else None)
+        ok = run_object(g, plan, a.pick_only,
+                        chassis_move=carry_base if a.chassis else None,
+                        place_at=place_at if a.chassis else None)
         if ok is None:
             logger.error("[cycle {}] stopped with the cylinder held — take over", k + 1)
-            return
-        logger.info("[cycle {}] -> {} (slot y {:+.3f})", k + 1, "done" if ok else "SKIPPED", plan.p_place_hi[1])
+            return False
+        logger.info("[cycle {}] -> {} (slot y {:+.3f})", k + 1,
+                    "done" if ok else "no lift — retrying this slot", plan.p_place_hi[1])
+        # The return leg runs WHILE the arm turns back and homes, the mirror of
+        # the outbound carry — the arm is empty here, and go_home's first move
+        # is straight up, clear of the bin. Both must finish before the next
+        # detection: the base has to be settled and the arm out of the head view.
+        back = None
+        if a.chassis and abs(net[1]) > 1e-6:
+            # Strafe back to where this cycle started, so the learned carry is
+            # measured from the same pose every cycle. y ONLY: whatever x the
+            # on-demand nudges and the place-x fit gave the base, it keeps.
+            # Undoing x would walk
+            # straight back into the pose whose plan had just failed, and
+            # nothing needs it — the cylinders are re-detected every cycle and
+            # the carry is a strafe distance.
+            dy_back = -net[1]
+            back = _Background(lambda: chassis_drive(bot, 0.0, dy_back,
+                                                     "strafe back to the cycle start (y only)"),
+                               "chassis-back")
+            back.start()
+        g.gripper.open()    # fully — alongside the drive back, not before it
         go_home(g)          # clear the head view before the next detection
-        if a.chassis and (abs(net[0]) > 1e-6 or abs(net[1]) > 1e-6):
-            # back to where this cycle started (arm at home), so the remaining
-            # cylinders are where the first detection saw them
-            chassis_drive(bot, -net[0], -net[1], "return to the cycle start")
-            net[0] = net[1] = 0.0
+        if back is not None:
+            back.join()
+            if back.error is not None:
+                logger.error("[cycle {}] the return strafe failed ({}) — stopping; the base is part way "
+                             "back, so the next cycle's carry would be measured from the wrong pose",
+                             k + 1, back.error)
+                return False
+            net[1] = 0.0
+        if ok:
+            k += 1
+            tries = 0
+        else:
+            tries += 1
+            logger.warning("[cycle {}] gave up before lifting — home and re-detected, trying this slot "
+                           "again (attempt {}). Nothing was placed and the gripper is empty; stand the "
+                           "cylinder back up if it fell, or e-stop to take over.", k + 1, tries + 1)
+    logger.info("[carry] final learned total: {:+.3f} m left (STAND_CARRY_LEFT_M is {:.2f}); place centre "
+                "({:.3f},{:+.3f}); the base also ended {:+.3f} m forward of where the run started, from "
+                "the on-demand x nudges and any place-x fit (never strafed back)", carry[0], cfg.STAND_CARRY_LEFT_M,
+                target[0], target[1], net[0])
+    return k >= len(offsets)
 
 
 if __name__ == "__main__":

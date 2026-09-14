@@ -225,6 +225,16 @@ LID_PLACE_START_EE_Z_M: float = 0.405
 # arm base down and over so it does. arm.pin_torso re-models at it, and the
 # stance is restored to TORSO_JOINTS after the release.
 LID_PLACE_TORSO_DEG: tuple[float, float, float] = (14.8, 59.0, -60.3)
+# The place column must keep this much ELBOW range in hand at every step, not
+# just solve. A column that only solves with the elbow against its bound passes
+# every reach test and is still a bad place: 0914, the lid place ran at cup
+# (0.932,+0.029) where the elbow pinned from ee_z 0.323 down and the bottom of
+# the column was 8.5mm off (inside REACH_TOL_M, so no chassis move was asked
+# for) — a 0mm Cartesian step then demanded 2.6x the per-tick joint cap.
+# Offline scan at this torso, column 0.383->0.283: that spot has 0.00 rad of
+# slack, while (0.88,+0.03) has 0.58 and (0.84,+0.03) 0.86 — pulling the lid
+# 5-10cm closer in x is all it takes, so this margin is cheap to satisfy.
+LID_PLACE_ELBOW_MARGIN_RAD: float = 0.15   # 8.6 deg; 0.30+ is also reachable
 # Torso speed for the lean INTO that stance (lid_place_stance) and the un-lean
 # back to TORSO_JOINTS after the release, as a fraction of the torso's velocity
 # ceiling. Its own knob because the lean is a 75 deg swing on the third joint,

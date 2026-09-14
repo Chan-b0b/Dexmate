@@ -45,6 +45,8 @@ class Scene:
     bev: "np.ndarray | None" = None
     cyl_px: list[np.ndarray] = field(default_factory=list)                     # 4x2 OBB corners, BEV px
     bin_px: "np.ndarray | None" = None
+    bin_clip: "tuple[int, int] | None" = None   # bin dropped: side(s) of the canvas it ran off,
+                                                # as base-axis signs (forward, left) to move toward
 
 
 def _model(path: str):
@@ -57,6 +59,51 @@ def _model(path: str):
             raise FileNotFoundError(f"OBB weights not found at {p}")
         _models[path] = YOLO(str(p))
     return _models[path]
+
+
+def warmup() -> None:
+    """Load both OBB models and run one inference, so the first real detection
+    does not pay for it.
+
+    Measured 0911: the first detect_scene spent 2.8 s before returning a box —
+    1.04 s importing ultralytics (it is imported lazily in _model, so nothing
+    touches torch until then), 0.12 s reading the two .pt files, and 1.60 s on
+    the first predict while the GPU picks kernels and allocates for this model
+    at this input size. Every predict after that is 0.02 s.
+
+    The dummy frame is the real BEV canvas size on purpose: the kernels the GPU
+    prepares are tied to the input shape, so warming up at another size would
+    pay the 1.60 s again on the first real frame.
+
+    Safe to call from a thread and safe to call twice (_models is the cache),
+    but do not let it run CONCURRENTLY with a real detect — two threads in
+    _model would load the same weights twice. Join first.
+    """
+    t0 = time.monotonic()
+    w, h = bev.canvas_size()
+    dummy = np.zeros((h, w, 3), dtype=np.uint8)
+    for path in (cfg.STAND_BIN_WEIGHTS, cfg.STAND_CYL_WEIGHTS):
+        _model(path).predict(dummy, conf=float(cfg.STAND_DET_CONF), verbose=False)
+    logger.info("[detect] models warm ({:.2f}s)", time.monotonic() - t0)
+
+
+def _clip_dir(px: np.ndarray, size: tuple[int, int]) -> "tuple[int, int] | None":
+    """Which canvas edges the OBB touches, as base-axis signs (forward, left),
+    or None if it sits clear of all four with STAND_DET_EDGE_MARGIN_PX to spare.
+
+    The BEV canvas is a fixed metric window (cfg.BEV_X_RANGE/BEV_Y_RANGE), and
+    bu||+base_x, bv||+base_y. A bin whose rim leaves that window is fitted to
+    the visible sliver only, so its centre reads metres wrong -- 0911: the rim
+    ran off the +y edge, the centre read 17 cm short, the chassis stopped that
+    much shy of the place spot and the cylinder was laid on the desk beside the
+    bin. Only the canvas border is tested; the unmapped wedge (where the canvas
+    reaches outside the camera view) is far from where the bin ever stands."""
+    w, h = size
+    m = float(cfg.STAND_DET_EDGE_MARGIN_PX)
+    u, v = px[:, 0], px[:, 1]
+    dx = -1 if u.min() <= m else (1 if u.max() >= w - 1 - m else 0)
+    dy = -1 if v.min() <= m else (1 if v.max() >= h - 1 - m else 0)
+    return None if (dx == 0 and dy == 0) else (dx, dy)
 
 
 def _obb_long_axis_deg(w: float, h: float, r_rad: float) -> float:
@@ -93,15 +140,20 @@ def detect_scene(rgb: np.ndarray, q_torso, q_head) -> Scene:
     bins = run(cfg.STAND_BIN_WEIGHTS)
     if bins:
         xy, yaw, conf, px = bins[0]
-        X, Y = bev.reproject_plane(xy, plane_z, float(cfg.STAND_BIN_RIM_Z_M), cam) \
-            + np.asarray(cfg.STAND_BIN_DET_OFFSET_XY, dtype=float)
-        scene.bin = (float(X), float(Y), float(yaw), conf)
         scene.bin_px = px
+        scene.bin_clip = _clip_dir(px, mapper.size)
+        if scene.bin_clip is not None:
+            logger.warning("[detect] bin OBB runs off the BEV edge (move {} in base x/y to see it whole) "
+                           "— dropped, its centre cannot be trusted", scene.bin_clip)
+        else:
+            X, Y = bev.reproject_plane(xy, plane_z, float(cfg.STAND_BIN_RIM_Z_M), cam) \
+                + np.asarray(cfg.STAND_BIN_DET_OFFSET_XY, dtype=float)
+            scene.bin = (float(X), float(Y), float(yaw), conf)
     # cylinders: a STANDING cylinder smears in the BEV from its base to its top,
-    # so the OBB centre sits at about mid-height -> reproject to desk + h/2.
+    # so the OBB centre sits somewhere in between -> reproject to STAND_CYL_DET_Z_M.
     # Drop weak boxes (the lying one in the bin / one in a hand scored 0.65 in
     # the training frames, standing ones 0.89+) and anything inside the bin OBB.
-    dz = float(cfg.STAND_DESK_Z_M) + 0.5 * float(cfg.STAND_OBJECTS["cylinder"]["height"])
+    dz = float(cfg.STAND_CYL_DET_Z_M)
     off = np.asarray(cfg.STAND_CYL_DET_OFFSET_XY, dtype=float)
     cyls = []
     for xy, _yaw, conf, px in run(cfg.STAND_CYL_WEIGHTS):
@@ -133,11 +185,13 @@ def save_debug(scene: Scene, tag: str = "show") -> "Path | None":
         u, v = px.mean(axis=0).astype(int)
         cv2.putText(img, f"cyl ({x:.2f},{y:+.2f}) {c:.2f}", (int(u) + 6, int(v)),
                     cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 255, 0), 1)
-    if scene.bin is not None and scene.bin_px is not None:
-        cv2.polylines(img, [scene.bin_px.astype(np.int32)], True, (255, 0, 255), 2)
+    if scene.bin_px is not None:
+        clipped = scene.bin is None
+        colour = (0, 0, 255) if clipped else (255, 0, 255)
+        cv2.polylines(img, [scene.bin_px.astype(np.int32)], True, colour, 2)
         u, v = scene.bin_px.mean(axis=0).astype(int)
-        cv2.putText(img, f"bin ({scene.bin[0]:.2f},{scene.bin[1]:+.2f})", (int(u) + 6, int(v)),
-                    cv2.FONT_HERSHEY_SIMPLEX, 0.6, (255, 0, 255), 2)
+        label = "bin CLIPPED - dropped" if clipped else f"bin ({scene.bin[0]:.2f},{scene.bin[1]:+.2f})"
+        cv2.putText(img, label, (int(u) + 6, int(v)), cv2.FONT_HERSHEY_SIMPLEX, 0.6, colour, 2)
     out = _CASE_DET / "out"
     out.mkdir(parents=True, exist_ok=True)
     path = out / f"{tag}_{time.strftime('%Y%m%d_%H%M%S')}.png"

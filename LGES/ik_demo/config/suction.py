@@ -85,7 +85,7 @@ WRENCH_REF_WARMUP_S: float = 0.10      # force decisions stay OFF until the wind
 # x,y here would drag mx,my along for no gain (lateral torque is diagnostics
 # only) and still could not express the swap.
 WRENCH_AXIS_SIGN: tuple[float, float, float] = (1.0, 1.0, -1.0)
-DESCENT_APPROACH_SPEED_M_S: float = 0.3    # fast free-air descent (cup-tip)
+DESCENT_APPROACH_SPEED_M_S: float = 0.35    # fast free-air descent (cup-tip)
 # Cruise for the CORNER-SEAT descent only (_descend_corner_seat) — the one place
 # descent still streamed per-tick from the hover. The arm's tracking error is
 # proportional to the commanded speed and it is NOT along the commanded column:
@@ -96,10 +96,14 @@ DESCENT_APPROACH_SPEED_M_S: float = 0.3    # fast free-air descent (cup-tip)
 # tilted and corner-first: 15:20:35 went 1.4N -> 26.3N of lateral in 90ms and
 # aborted on CASE_CORNER_LAT_LIMIT_N with the case held over the bin. 0.08
 # keeps the same profile shape at ~1/4 the deviation for +1.4s per case place.
-# Only the CASE reaches this: the battery's approach ends BELOW creep_z
-# (DESCENT_CREEP_GAP_SETTLED_M), so its corner descent creeps from tick one.
+# BOTH corner seats reach this since 0910: the battery place's approach used to
+# end BELOW creep_z (DESCENT_CREEP_GAP_SETTLED_M) so it crept from tick one, but
+# that made the PLANNED leg the whole descent into the slot and the arm could
+# not track it — 0909 measured 56-94mm of x lag at 8.5-18.4 deg of pitch as the
+# battery entered the case mouth (see place()'s to_creep). It now descends from
+# the hover on this profile like the case.
 CORNER_DESCENT_SPEED_M_S: float = 0.15
-DESCENT_CREEP_SPEED_M_S: float = 0.06      # slow creep in the contact zone
+DESCENT_CREEP_SPEED_M_S: float = 0.08      # slow creep in the contact zone
 DESCENT_RAMP_S: float = 0.2                 # ease descent speed in from 0 (no jerk
                                             # from the rest->descend handoff)
 DESCENT_CREEP_BLEND_M: float = 0.05         # decelerate fast->creep smoothly over this
@@ -122,6 +126,37 @@ DESCENT_CREEP_BLEND_M: float = 0.05         # decelerate fast->creep smoothly ov
 # descent. DESCENT_CREEP_BLEND_M above stays as the corner seat's lateral-drive
 # gate so the place's travel budget is unchanged.
 DESCENT_DECEL_BAND_M: float = 0.12
+# Shape of the LAST stretch of a per-tick descent that runs all the way to
+# contact (the corner seats). Instead of reaching DESCENT_CREEP_SPEED_M_S at
+# the creep line and holding it flat across the whole DESCENT_CREEP_GAP_M, the
+# profile keeps DECELERATING into the gap: it reaches DESCENT_TOUCH_SPEED_M_S
+# only DESCENT_TOUCH_TAIL_M above the expected contact and holds it flat just
+# over that tail. 0910, corner seat (cruise 0.15, hover 0.25 above contact):
+# the old shape crawled the last 50mm at 0.08 for 0.63s and touched at 0.08;
+# the 0.15->0.06 taper touches at 0.06 — ~25% less press overshoot in the one
+# reaction tick that follows detection — and is still DECELERATING when it
+# arrives instead of holding one speed for the last 50mm.
+# BAND, and why it is not shorter: it also sets where the case's airborne
+# lateral drive can start (CASE_CORNER_DRIVE_GATE_M_S), and that window is the
+# whole time budget for latching two walls. Measured hover->touch / gate height
+# / airborne travel at CASE_CORNER_SPEED_M_S: 80mm -> 2.17s / 63mm / 36mm,
+# 100mm -> 2.25s / 74mm / 42mm, 120mm -> 2.33s / 84mm / 47mm (old flat-creep
+# shape: 2.25s / 104mm / 49mm). 100mm is the time-neutral one: same descent
+# duration as the old shape, a gentler touch, and 42mm of window against the
+# 37-68mm the walls have needed. Going to 80mm buys 0.08s of the ~2.2s descent
+# and pays 6mm of that window for it — a bad trade; shorten this only with the
+# wall latches watched.
+# TAIL: cannot go below the error in the expected contact z (~10mm off the
+# chained ZTracker), or a surface sitting HIGH is met mid-taper — i.e. faster
+# than the tail speed, which is the one thing the tail exists to bound. 20mm is
+# the same error budget DESCENT_CREEP_GAP_SETTLED_M carries.
+# BAND: the taper has to FINISH before the arm's ~0.2s tracking lag runs out,
+# or the arm arrives at the touch still doing the speed it was commanded a lag
+# ago (0909: a 50mm decel ended with the arm at 0.23 m/s, 10mm of overshoot and
+# a 10mm bounce at the creep line). 80mm of taper lasts 0.84s, 4x the lag.
+DESCENT_TOUCH_SPEED_M_S: float = 0.06
+DESCENT_TOUCH_TAIL_M: float = 0.02
+DESCENT_TOUCH_BAND_M: float = 0.10
 DESCENT_CREEP_GAP_M: float = 0.05           # creep starts this far above expected contact.
 # Sized from the CUP DEVIATION the fast stretch leaves behind, not from the
 # contact-detection margin. The arm lags its command while moving fast and the
@@ -242,6 +277,22 @@ CASE_CORNER_AIM_BIAS_M: float = 0.03       # shift the descent aim AWAY from
 CASE_CORNER_SPEED_M_S: float = 0.04        # lateral drive speed. The drive is
 # on for the WHOLE descent (hover -> contact): the tall bin walls latch each
 # axis at whatever height the case bumps them, then it rides the corner down.
+# The AIRBORNE part of that drive waits for the descent to have slowed to this
+# commanded speed. It used to be a height (z <= creep_z + DESCENT_CREEP_BLEND_M),
+# which meant 0.106 m/s under the old flat-creep profile — but the same height
+# is still full cruise once the deceleration is spread down to the touch tail
+# (DESCENT_TOUCH_BAND_M), and it is the SPEED that matters: at cruise the arm
+# trails its command off-axis (0905: 55mm of x, 10 deg of pitch, 83mm at the
+# cup tip) and a case driven into its wall up there arrives tilted and
+# corner-first (15:20:35 went 1.4 -> 26.3N in 90ms and aborted).
+# Cost of the tapered profile here: the gate opens 74mm above contact instead
+# of 104mm, so the airborne drive gets 1.05s = 42mm at CASE_CORNER_SPEED_M_S
+# instead of 1.23s = 49mm. The walls have needed 37-68mm, so slightly more of
+# the drive falls after the first vertical contact, where it is uncapped anyway
+# (CASE_CORNER_MAX_TRAVEL_M) — but if a case ever seats without latching both
+# walls, widen DESCENT_TOUCH_BAND_M (120mm restores the old 49mm for +0.08s)
+# before touching this.
+CASE_CORNER_DRIVE_GATE_M_S: float = 0.11
 CASE_CORNER_STOP_N: float = 4.5            # per-axis stop threshold, applied to
 # that axis' wall-reaction channel (NOT the channel named after the axis — see
 # CASE_CORNER_LAT_CHANNEL and WRENCH_AXIS_SIGN). Must clear the
@@ -308,7 +359,7 @@ CASE_CORNER_DROP_GRACE_S: float = 1.0       # both axes stopped but no drop yet
 # pressing this long for the sink before classifying it a misseat.
 CASE_CORNER_PRESS_N: float = 5.0            # light press held during the drive
 # LIFT-then-drive (only a case placed with place(corner_touch_first=True), i.e.
-# the run's first one): once the descent has TOUCHED the seat, rise this far
+# the standalone case_to_bin task): once the descent has TOUCHED the seat, rise this far
 # before the lateral drive runs, so the case hangs clear of the surface it
 # would otherwise be dragged across and the lateral channel carries the wall
 # reaction ALONE. A pressed drag adds mu * (part weight + press) pointing
@@ -400,9 +451,14 @@ BATTERY_CORNER_AIM_BIAS_M: tuple[float, float] = (0.01, 0.01)  # (x, y) aim shif
                                              # away from the corner (free-side
                                              # approach) — x widened past y for
                                              # a firmer forward-wall contact
-BATTERY_CORNER_SPEED_M_S: float = 0.02      # lateral drive speed (slot-scale,
+BATTERY_CORNER_SPEED_M_S: float = 0.03      # lateral drive speed (slot-scale,
                                              # separate from the case's)
 BATTERY_CORNER_MAX_TRAVEL_M: float = 0.04   # per-axis post-contact travel cap
+BATTERY_PLACE_HOVER_M: float = 0.15         # battery place hover above the expected
+                                             # seat (HOVER_HEIGHT_M 0.25 elsewhere):
+                                             # the battery drops vertically with no
+                                             # airborne lateral drive, so the 0914
+                                             # 208mm / 2.0s free descent was dead time
 # (bias + landing scatter + slot clearance — the old recovery's XY excursion
 # cap); must reach the slot walls or the place gates to the operator.
 

@@ -358,8 +358,12 @@ class ArmMover:
         # L_arm_j4 (elbow) from swinging above -0.5 rad, well inside its URDF
         # range of [-3.071, 0.244] (and inside the 95% band [-2.988, +0.161],
         # so this stays the binding constraint for j4).
+        # j4 is the elbow on both arms; remembered so callers can ask how much
+        # of its range a solution still has (elbow_margin_rad).
+        self._elbow_idx = int(self._model.idx_qs[self._model.getJointId(
+            ("R" if self._side == "right" else "L") + "_arm_j4")])
         if self._side == "left":
-            j4_idx = self._model.idx_qs[self._model.getJointId("L_arm_j4")]
+            j4_idx = self._elbow_idx
             self._q_hi[j4_idx] = min(float(self._q_hi[j4_idx]), -0.5)
             self._model.upperPositionLimit[j4_idx] = self._q_hi[j4_idx]
         if not self.in_limits(self._home_seed):
@@ -744,6 +748,21 @@ class ArmMover:
         hi = np.array([self._q_hi[self._model.idx_qs[j]] for j in self._arm_joint_ids])
         return bool(np.all(arm_q >= lo - margin) and np.all(arm_q <= hi + margin))
 
+    def elbow_margin_rad(self, arm_q: np.ndarray) -> float:
+        """How much elbow range a solution has LEFT before the elbow straightens:
+        the gap from j4 to its IK upper bound.
+
+        A pose can solve to the millimetre with this at zero, and then the arm
+        has nothing left to trade — the Jacobian is ill-conditioned, so a
+        near-zero Cartesian step demands a big joint step and the arm wobbles in
+        the reach direction. 0914 lid place: the elbow hit its bound at ee_z
+        0.323 and the descent went 4 cm further with it pinned, which showed up
+        as a 0 mm Cartesian step asking 2.6x the per-tick joint cap, j5 wanting
+        2.8 rad/s, IK ticks at 48-100 ms instead of 10, and a place that looked
+        unstable to the eye while passing every reach test."""
+        return float(self._q_hi[self._elbow_idx]
+                     - np.asarray(arm_q, dtype=float)[self._elbow_idx])
+
     def in_collision(self, arm_q: np.ndarray) -> bool:
         if not self._collision_ok_setup:
             return False
@@ -813,14 +832,20 @@ class ArmMover:
     # ------------------------------------------------------------------
     # Trajectory generation + streaming
     # ------------------------------------------------------------------
-    def plan_joint_traj(self, q_start: np.ndarray, q_goal: np.ndarray) -> Trajectory:
-        """Jerk-limited joint-space trajectory (Ruckig) under the arm's limits."""
+    def plan_joint_traj(self, q_start: np.ndarray, q_goal: np.ndarray,
+                        v_goal: "np.ndarray | None" = None) -> Trajectory:
+        """Jerk-limited joint-space trajectory (Ruckig) under the arm's limits.
+
+        ``v_goal``: joint velocity to ARRIVE with, default rest. Lets a leg hand
+        straight over to a streamed Cartesian leg instead of stopping first —
+        see move_ee_vertical's ``v_in`` and joint_vel_for_ee_vel."""
         inp = InputParameter(_ARM_DOF)
         inp.current_position = list(map(float, q_start))
         inp.current_velocity = [0.0] * _ARM_DOF
         inp.current_acceleration = [0.0] * _ARM_DOF
         inp.target_position = list(map(float, q_goal))
-        inp.target_velocity = [0.0] * _ARM_DOF
+        inp.target_velocity = ([0.0] * _ARM_DOF if v_goal is None
+                               else list(map(float, v_goal)))
         inp.target_acceleration = [0.0] * _ARM_DOF
         inp.max_velocity = list(map(float, self._ruckig_vmax))
         inp.max_acceleration = list(map(float, self._ruckig_amax))
@@ -829,13 +854,15 @@ class ArmMover:
         self._otg.calculate(inp, traj)
         return traj
 
-    def move_joints(self, q_goal: np.ndarray) -> None:
-        """Stream a Ruckig joint-space trajectory to q_goal at CONTROL_HZ."""
+    def move_joints(self, q_goal: np.ndarray, v_goal: "np.ndarray | None" = None) -> None:
+        """Stream a Ruckig joint-space trajectory to q_goal at CONTROL_HZ.
+        ``v_goal``: arrive with this joint velocity instead of at rest."""
         q_start = self._start_q()
-        traj = self.plan_joint_traj(q_start, np.asarray(q_goal, dtype=float))
+        traj = self.plan_joint_traj(q_start, np.asarray(q_goal, dtype=float), v_goal)
         dt = 1.0 / float(cfg.CONTROL_HZ)
-        logger.info("[arm] move_joints: {:.2f}s, {} steps", traj.duration,
-                    max(1, int(np.ceil(traj.duration / dt))))
+        logger.info("[arm] move_joints: {:.2f}s, {} steps{}", traj.duration,
+                    max(1, int(np.ceil(traj.duration / dt))),
+                    "" if v_goal is None else " (arriving in motion)")
         self._stream_traj(traj, dt)
 
     def _stream_traj(self, traj: Trajectory, dt: float, tick_cb=None,
@@ -981,7 +1008,37 @@ class ArmMover:
             if cb is not None:
                 cb()
 
-    def move_ee(self, pos, rpy, quiet: bool = True) -> np.ndarray | None:
+    def joint_vel_for_ee_vel(self, q, pos, v_ee, rpy
+                             ) -> "tuple[np.ndarray, float] | None":
+        """Joint velocity that moves the EE at ``v_ee`` (m/s, base frame) from
+        pose ``pos`` at config ``q``, plus the Cartesian speed actually used.
+
+        Reuses solve_step's one-tick IK rather than a Jacobian, so it inherits
+        the same joint-speed budget the streamed legs run under. The speed is
+        DERATED until no joint needs more than JOINT_HANDOVER_VMAX_FRAC of its
+        vmax: the wrist configurations near the pick standoff need 100% of vmax
+        to follow a 0.35 m/s descent (measured 0911, Ruckig rejects it outright)
+        but only ~50% at 0.15. None = even the smallest trial does not fit."""
+        dt = 1.0 / float(cfg.CONTROL_HZ)
+        q = np.asarray(q, dtype=float)
+        v = np.asarray(v_ee, dtype=float)
+        speed = float(np.linalg.norm(v))
+        if speed <= 1e-9:
+            return np.zeros(_ARM_DOF), 0.0
+        unit = v / speed
+        cap = float(cfg.JOINT_HANDOVER_VMAX_FRAC)
+        for trial in (1.0, 0.6, 0.35, 0.2):
+            s_try = speed * trial
+            p_to = np.asarray(pos, dtype=float) + unit * s_try * dt
+            sol, _ = self.solve_step(q, pos, p_to, rpy, dt)
+            if sol.pos_err_m > cfg.REACH_TOL_M:
+                continue
+            qd = (sol.q - q) / dt
+            if float(np.max(np.abs(qd) / self._ruckig_vmax)) <= cap:
+                return qd, s_try
+        return None
+
+    def move_ee(self, pos, rpy, quiet: bool = True, v_out=None) -> np.ndarray | None:
         """Move the EE frame to an absolute base_link pose (solve IK from the live
         config, min-motion, then move_joints). Returns the commanded target joints
         (so a caller can continue a stream from exactly there), or None if the
@@ -995,7 +1052,15 @@ class ArmMover:
         if not sol.converged:
             log = logger.debug if quiet else logger.warning
             log("[arm] target {:.1f}mm short (within reach tol) — moving", sol.pos_err_m * 1000)
-        self.move_joints(sol.q)
+        v_goal = None
+        if v_out is not None:
+            hand = self.joint_vel_for_ee_vel(sol.q, pos, v_out, rpy)
+            if hand is None:
+                logger.info("[arm] cannot arrive in motion here — stopping at the waypoint")
+            else:
+                v_goal, used = hand
+                self._handover_speed = used
+        self.move_joints(sol.q, v_goal)
         return sol.q
 
     def move_ee_line(self, pos, rpy, speed: float | None = None, stop_fn=None,
@@ -1073,7 +1138,8 @@ class ArmMover:
         return prev_q
 
     def move_ee_vertical(self, z_target: float, rpy, stop_fn=None,
-                         creep_out_m: float = 0.0) -> np.ndarray | None:
+                         creep_out_m: float = 0.0,
+                         v_in: float = 0.0) -> np.ndarray | None:
         """Straight vertical EE move to base-frame z_target, x,y,rpy held EVERY
         tick (per-tick warm IK stream) — the free-air analog of the suction
         descent legs. move_ee only constrains the endpoints; its joint-space
@@ -1111,8 +1177,9 @@ class ArmMover:
         elapsed = 0.0
         trace_s = float(cfg.DESCENT_TRACE_S)
         trace_t, tick_acc, tick_n, t_tick = 0.0, 0.0, 0, time.perf_counter()
-        logger.info("[arm] move_ee_vertical: z {:.4f} -> {:.4f} (xy held at {:.4f},{:.4f})",
-                    z, z_target, x, y)
+        logger.info("[arm] move_ee_vertical: z {:.4f} -> {:.4f} (xy held at {:.4f},{:.4f}){}",
+                    z, z_target, x, y,
+                    "" if v_in <= 0 else f" entering at {float(v_in):.3f} m/s")
         pace = TickPacer(dt)
         while abs(z_target - z) > 1e-4:
             dist = abs(z_target - z)
@@ -1133,7 +1200,16 @@ class ArmMover:
                 g = g * g * (3.0 - 2.0 * g)
                 base = min(base, creep + (fast - creep) * g)
             r = min(1.0, elapsed / max(float(cfg.DESCENT_RAMP_S), 1e-6))
-            speed = base * (r * r * (3.0 - 2.0 * r))       # smoothstep ramp-in
+            ss = r * r * (3.0 - 2.0 * r)
+            # smoothstep ramp-in, from v_in rather than from rest. v_in is what
+            # the previous leg actually ARRIVED with (move_ee's v_out), so the
+            # handover carries velocity through instead of stopping: the joint
+            # leg used to end at rest and this ramp used to start at zero, which
+            # is the visible pause at the waypoint. Clamped to the leg's own
+            # speed so a short leg already inside the decel band cannot be sped
+            # up by the handover.
+            v_start = min(max(0.0, float(v_in)), base)
+            speed = v_start + (base - v_start) * ss
             z_next = z + direction * min(speed * dt, dist)
             sol, p = self.solve_step(prev_q, (x, y, z), (x, y, z_next), rpy, dt)
             if sol.pos_err_m > cfg.REACH_TOL_M:

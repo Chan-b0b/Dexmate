@@ -77,7 +77,7 @@ GRASP_ORIENTATION_RPY: tuple[float, float, float] = (np.pi, 0.0, 0.0)
 # Values are conservative starting points — TUNE on the robot.
 # ---------------------------------------------------------------------------
 SPEED_SCALE_LEFT: float = 1.0        # multiplier on every cap below, left (suction) arm
-SPEED_SCALE_RIGHT: float = 0.2      # multiplier on every cap below, right (gripper) arm
+SPEED_SCALE_RIGHT: float = 0.6      # multiplier on every cap below, right (gripper) arm
 # (0.7 = normal; lowered for first slow handoff test)
 
 CONTROL_HZ: float = 100.0          # motion streaming rate (set_joint_pos_vel)
@@ -117,6 +117,14 @@ CMD_CARRY_TOL_RAD: float = 0.05
 # junction does not, which is why it appeared when the approach became one
 # continuous stream. Waiting is the fix, not putting the stop back: the motion
 # already ends here, it just was not waited for.
+# Handing a joint leg over to a streamed Cartesian leg without stopping (see
+# arm.joint_vel_for_ee_vel): the arrival speed is derated until no joint needs
+# more than this fraction of its vmax. Measured 0911 at the pick standoff, over
+# the five cylinder positions of the 19:48 run: a 0.35 m/s handover (the descent
+# cruise) needs 100-101% of vmax and Ruckig rejects it, 0.15 needs 47-52%, 0.10
+# needs 31-37%. 0.6 keeps the 0.15 handover comfortably inside and still refuses
+# anything that would saturate a joint.
+JOINT_HANDOVER_VMAX_FRAC: float = 0.6
 APPROACH_SETTLE_TOL_M: float = 0.002
 APPROACH_SETTLE_MAX_S: float = 1.0
 

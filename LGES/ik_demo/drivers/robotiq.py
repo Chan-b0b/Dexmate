@@ -133,12 +133,21 @@ class RobotiqGripper:
 
     def wait_until_done(
         self,
+        target_pos: "int | None" = None,
         timeout: float = 3.0,
         poll_interval: float = 0.1,
         fallback_sleep: float = 1.5,
         required_done_count: int = 2,
     ) -> bool:
-        """Block until gOBJ confirms motion done, with fallback sleep on timeout."""
+        """Block until the fingers stop, with fallback sleep on timeout.
+
+        ``target_pos``: the position just commanded. A status frame is only
+        believed once it ECHOES it (gPR == target_pos) — without that gate the
+        first polls read the PREVIOUS motion's gOBJ and the wait returns
+        immediately. 0910: pick_box logged "close -> GRASPED" 0.5 s after
+        commanding a close, having read the gOBJ=3 left over from the preceding
+        open() with the fingers still wide apart. None skips the gate (raw
+        waits that did not command a position)."""
         start = time.time()
         got_any = False
         done_count = 0
@@ -151,7 +160,8 @@ class RobotiqGripper:
             got_any = True
             if status.has_fault:
                 logger.warning("[Robotiq] fault gFLT={}", status.gFLT)
-            if status.motion_done:
+            echoed = target_pos is None or status.gPR == int(target_pos)
+            if echoed and status.motion_done:
                 done_count += 1
                 if done_count >= required_done_count:
                     return True
@@ -235,11 +245,64 @@ class RobotiqGripper:
         _last_cmd_pos = pos
 
     def goto(self, pos: int, speed: int | None = None, force: int | None = None) -> bool:
-        """Move to raw position (0=open .. 255=closed) and wait for completion."""
+        """Move to raw position (0=open .. 255=closed) and wait for completion.
+
+        Does NOT try to recover a gripper that has dropped out of its activated
+        state — see ensure_activated() for why that cannot be done from here —
+        but it does say so in the log, because the symptom alone (the fingers
+        do not move and the grasp check reports no object) looks exactly like a
+        missed grasp. 0910 / 0911 box discard: the close found gFLT=5
+        ("re-activation must be completed prior to renewed action") with gSTA=0
+        ("gripper in reset"), so the command never reached the fingers and the
+        status still echoed gPR=0 from the startup open."""
+        pos = max(0, min(255, int(pos)))
         self.write_control(pos, speed=speed, force=force)
         time.sleep(0.15)  # let command settle before polling status
         self._flush_responses(0.1)
-        return self.wait_until_done()
+        if self.wait_until_done(target_pos=pos):
+            return True
+        st = self.read_status()
+        if st is not None and (st.gFLT in (0x05, 0x07) or st.gSTA != 3):
+            logger.error("[Robotiq] the command was REFUSED, the fingers never moved "
+                         "(gFLT={}, gSTA={} — the gripper is out of its activated "
+                         "state). Not a missed grasp; it needs re-activation with the "
+                         "hand clear.", st.gFLT, st.gSTA)
+        return False
+
+    def ensure_activated(self) -> bool:
+        """True if the gripper is activated and ready to take commands; if it is
+        not, reset + activate it and report whether that worked.
+
+        *** SWEEPS THE FINGERS. *** Robotiq activation runs a calibration cycle
+        (full close, then full open) to find the finger range, so this may only
+        be called with the hand in FREE AIR — never at a grasp pose.
+
+        0911 is why the check is a separate call and not folded into goto():
+        the close at the box-wall grasp pose found gFLT=5 / gSTA=0, and the
+        recovery attempt that ran from inside goto() there could not possibly
+        work — the fingers were straddling the box wall, so the calibration
+        cycle had nothing to close onto and activation timed out ("activation
+        did not complete within 5.0s"). It also risked driving the fingers into
+        the wall. The check belongs at the hover, before the descent: there the
+        fingers are above the rim in open air, and a gripper that cannot be
+        brought back is found BEFORE the arm goes down for a grasp it cannot
+        make."""
+        st = self.read_status()
+        if st is not None and st.gSTA == 3 and st.gFLT not in (0x05, 0x07):
+            return True
+        if st is None:
+            logger.warning("[Robotiq] no status before the grasp — trying reset + activate")
+        else:
+            logger.warning("[Robotiq] NOT ready before the grasp (gFLT={}, gSTA={}) — "
+                           "reset + activate (this sweeps the fingers; the hand must be "
+                           "clear)", st.gFLT, st.gSTA)
+        if self.initialize():
+            logger.info("[Robotiq] re-activated, ready for the grasp")
+            return True
+        logger.error("[Robotiq] re-activation failed — the gripper is not usable this run "
+                     "(check the RS485 cable and the gripper's power at the {} arm's EE "
+                     "connector)", self._side)
+        return False
 
     def open(self) -> bool:
         return self.goto(cfg.ROBOTIQ_OPEN_POS)
@@ -259,6 +322,17 @@ class RobotiqGripper:
         """
         status = self.read_status()
         if not status:
+            return False
+        if _last_cmd_pos is not None and status.gPR != int(_last_cmd_pos):
+            # the status still echoes an EARLIER target, so gOBJ/gPO describe
+            # that motion — reading them here is what reported a wide-open
+            # gripper as gripped (0910, see wait_until_done). Compared against
+            # the last commanded position rather than CLOSE_POS: a soft grip
+            # freezes the fingers at gPO + squeeze (vla_training collect.py),
+            # which is a legitimate hold well short of CLOSE_POS.
+            logger.warning(
+                "[Robotiq] grasp check: status echoes gPR={}, not the last "
+                "commanded {} — reporting NO object", status.gPR, _last_cmd_pos)
             return False
         if status.gOBJ == 2:
             return True

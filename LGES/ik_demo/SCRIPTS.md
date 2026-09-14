@@ -75,6 +75,7 @@ python -m ik_demo.box_pick --detect --box-long-m 0.62 --dry  # 헤드 카메라 
 python -m ik_demo.box_pick --detect                          # 감지 + 오른쪽 벽 집기 (잡고 → 10cm 들고 → 내려놓고 → 놓고 → 홈)
 python -m ik_demo.box_pick --detect --home-left              # 왼팔 먼저 홈
 python -m ik_demo.box_pick --detect --box-long-m 0.62 --carry  # 실제로 들어올리기 (chassis_sequence --box 의 집기 단계와 동일)
+python -m ik_demo.box_pick --detect --seat-probe              # 진단: 목표 높이를 지나쳐 천천히 내리며 힘-높이 기록 (절대 안 잡음)
 ```
 - `--detect`: BEV OBB 모델(case_detection/runs/obb/box)로 상자 중심·크기·yaw 감지 → 로봇 오른쪽 긴 벽 중점을 집음 (`BOX_GRASP_EDGE_INSET_M`)
 - `run_box_pick()`이 이 단계 전체(홈 → 감지 → 집기 → 홈)이며, `chassis_sequence --box`(메뉴 3)가 집기 단계에 호출하는 것과 **같은 함수**입니다. 시퀀스 없이 이 단계만 연습할 때 위 명령을 쓰세요
@@ -83,6 +84,7 @@ python -m ik_demo.box_pick --detect --box-long-m 0.62 --carry  # 실제로 들�
 - 감지 없이: 박스 윗면 중심 (x, y, top_z)과 장축 yaw를 직접 입력
 - 홈 → hover(윗면 15 cm 위) → 수직 하강 → 그리퍼 닫기 → 수직 상승 → (기본) 열고 홈
 - 밑에 아무것도 없으면 `no_object`로 보고하고 그대로 올라옵니다 (허공 테스트)
+- `--seat-probe`: **진단 전용, 그리퍼가 닫히지 않습니다.** 손가락 사이 팜이 박스 림에 앉는 높이를 힘으로 찾기 위한 사전 측정 — 계획된 그립 높이 위 `BOX_SEAT_PROBE_START_M`부터 아래 `BOX_SEAT_PROBE_EXTRA_M`까지 creep 속도로만 내려가며 매 틱 손목 힘을 기록하고, `BOX_SEAT_PROBE_BACKSTOP_N`에서만 멈춥니다. 결과: `ztrack_logs/seat_probe_*.csv` (`tip_depth_mm` vs `fz_n`) + 실행 로그에 1/2/3/5/7/10 N 최초 통과 깊이. 0914에 `BOX_WALL_HEIGHT_M`(140mm)이 실측 벽(105mm)보다 커서 31mm만 물고 얕게 잡힌 건이 이 측정의 이유
 - 튠 값: `BOX_FINGER_LENGTH_M`(베이스→손끝 실측), `BOX_GRASP_YAW_OFFSET_RAD`, `BOX_GRASP_DEPTH_M`, `BOX_HOVER_HEIGHT_M`
 
 ---
@@ -137,12 +139,10 @@ python -m ik_demo.chassis_sequence
 ```
 
 **작업 메뉴** (로봇 연결·양팔 홈 후 표시, 작업 하나 끝나면 다시 메뉴로 돌아옴, `q` 로 종료):
-1. case + battery 이재 → 소스 레이어 수(실제 쌓인 개수) / 타겟 레이어 수 / 마지막 case→bin 여부를 물음 (Enter = 기본값 3 / 1 / 예). case+battery 반복은 소스 − 1 회 (3 → 2회), 그 뒤 맨 아래 case 를 bin 으로
-2. bin 뚜껑 버리기 (`--lid` 와 동일): 상자 앞에서 `d` → 뚜껑 집기 → (필요하면 물러난 뒤) `d` → 토르소 기울임 + 팔 stow → 하차 지점으로 수동 이동 후 `d` → 바닥 뚜껑 위에 놓기
-3. box 버리기 (`--box` 와 동일): 상자 앞에서 `d` → 잡고 듦 → 하역 지점으로 수동 이동 후 `d` → 오른쪽 앞에 내려놓고 홈
-4. case 1개 → bin (`--case-bin` 과 동일): 샤시는 외부에서 위치시킴, 자체 strafe 없음 (팔이 안 닿을 때만 닿는 가장 가까운 위치로 최소 이동). case 앞에서 `d` → 감지(1 layer)·픽·파킹 → bin 앞에서 `d` → **bin 감지** 기반으로 내려놓고 홈
-
-1번의 마지막 case → bin 단계도 bin 안의 case가 아니라 **bin 자체를 감지**해서 놓습니다 (bin 안 case 수 `FINAL_BIN_CASE_LAYERS` 는 놓는 높이 계산에만 쓰임).
+1. bin 뚜껑 버리기 (`--lid` 와 동일): 상자 앞에서 `d` → 뚜껑 집기 → (필요하면 물러난 뒤) `d` → 토르소 기울임 + 팔 stow → 하차 지점으로 수동 이동 후 `d` → 바닥 뚜껑 위에 놓기
+2. case 1개 → bin (`--case-bin` 과 동일): 샤시는 외부에서 위치시킴, 자체 strafe 없음 (팔이 안 닿을 때만 닿는 가장 가까운 위치로 최소 이동). case 앞에서 `d` → 감지(1 layer)·픽·파킹 → bin 앞에서 `d` → **bin 감지** 기반으로 코너 시팅(다른 case place와 같은 매커니즘)으로 내려놓고 홈
+3. case + battery 이재 → 소스 레이어 수(실제 쌓인 개수) / 타겟 레이어 수 / 마지막 case 이재 여부를 물음 (Enter = 기본값 3 / 1 / 예). case+battery 반복은 소스 − 1 회 (3 → 2회), 그 뒤 맨 아래 case(배터리 없음)를 앞 case들과 똑같은 방식으로 타겟에
+4. box 버리기 (`--box` 와 동일): 상자 앞에서 `d` → 잡고 듦 → 하역 지점으로 수동 이동 후 `d` → 오른쪽 앞에 내려놓고 홈
 
 `--lid` / `--box` / `--box-lid` / `--case-bin` 플래그를 주면 메뉴 없이 바로 그 작업으로 감. 바코드 분류(구 `--gripper`)와 자동 샤시 이동(구 `--auto-move`)은 항상 켜져 있음. `--dashboard`, `--state-publish` 는 그대로 옵션.
 

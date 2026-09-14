@@ -8,15 +8,16 @@
 # Pass --dashboard to the demo if you want live joints/EE/wrench/camera in
 # the viewer; omit it if you just want the robot to run without data spooling.
 #
-#   PORT=9090 SPOOL=/tmp/foo REVIEW_PORT=9091 RECORD_DIR=recordings ./run_dashboard_demo.sh
+#   PORT=9095 SPOOL=/tmp/foo REVIEW_PORT=9091 RECORD_DIR=recordings ./run_dashboard_demo.sh
 #
-# Then open http://<robot-ip>:8080/ (live) and :8081/ (take review) in a browser.
+# Then open http://<robot-ip>:9090/ (live) and :8081/ (take review) in a browser.
+# (8080 is taken by the nav bringup web UI, so the live view defaults to 9090.)
 # Ctrl-C here tears down the background services.
 set -uo pipefail
 
 cd "$(dirname "$0")"                       # LGES/ — package import root
 SPOOL="${SPOOL:-/tmp/cns_dashboard}"
-PORT="${PORT:-8080}"
+PORT="${PORT:-9090}"
 REVIEW_PORT="${REVIEW_PORT:-8081}"
 RECORD_DIR="${RECORD_DIR:-recordings}"     # must match the demo's --record-dir
 

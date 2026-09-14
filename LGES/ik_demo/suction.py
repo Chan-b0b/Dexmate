@@ -243,28 +243,44 @@ class SuctionMover(ArmMover):
     # Vertical descent (detect-and-freeze)
     # ------------------------------------------------------------------
     def _descent_speed(self, z: float, creep_z: float, elapsed: float,
-                       fast: "float | None" = None) -> float:
+                       fast: "float | None" = None,
+                       touch_z: "float | None" = None) -> float:
         """Descent cup-tip speed with two smoothstep shapes and no velocity step:
         ramp IN from rest over DESCENT_RAMP_S (rest->descend handoff), and blend
-        fast->creep over DESCENT_DECEL_BAND_M above creep_z (so there's no jerk
-        at the creep line). At/below creep_z the speed is the creep speed.
+        fast->slow over a band above the line where the slow speed is reached
+        (so there's no jerk there). At/below that line the speed is constant.
 
         ``fast``: cruise override (default DESCENT_APPROACH_SPEED_M_S). The
         corner seat passes the slower CORNER_DESCENT_SPEED_M_S — it is the only
         place descent that still streams per-tick from the hover, and the
         tracking deviation that cruise builds is what threw the case into the
-        bin wall (see the config comment)."""
-        creep = cfg.DESCENT_CREEP_SPEED_M_S
+        bin wall (see the config comment).
+
+        ``touch_z``: expected CONTACT z, for a loop that descends all the way to
+        it. Then the deceleration does not stop at the creep line: it carries on
+        down to DESCENT_TOUCH_SPEED_M_S, reached DESCENT_TOUCH_TAIL_M above the
+        contact, over DESCENT_TOUCH_BAND_M — so the descent starts the last
+        stretch at cruise and is still slowing when it arrives, instead of
+        crawling the whole DESCENT_CREEP_GAP_M at one speed. Without it the
+        profile is the original one, which reaches DESCENT_CREEP_SPEED_M_S at
+        ``creep_z`` and holds it: that is what _descend_open needs, since it
+        ENDS at creep_z and hands off to a creep loop running at that speed."""
+        if touch_z is None:
+            slow, floor_z = cfg.DESCENT_CREEP_SPEED_M_S, creep_z
+            band = max(float(cfg.DESCENT_DECEL_BAND_M), 1e-6)
+        else:
+            slow = float(cfg.DESCENT_TOUCH_SPEED_M_S)
+            floor_z = float(touch_z) + float(cfg.DESCENT_TOUCH_TAIL_M)
+            band = max(float(cfg.DESCENT_TOUCH_BAND_M), 1e-6)
         fast = cfg.DESCENT_APPROACH_SPEED_M_S if fast is None else float(fast)
-        band = max(float(cfg.DESCENT_DECEL_BAND_M), 1e-6)
-        if z <= creep_z:
-            base = creep
-        elif z >= creep_z + band:
+        if z <= floor_z:
+            base = slow
+        elif z >= floor_z + band:
             base = fast
         else:
-            f = (z - creep_z) / band            # 0 at creep_z -> 1 at band top
+            f = (z - floor_z) / band            # 0 at floor_z -> 1 at band top
             f = f * f * (3.0 - 2.0 * f)          # smoothstep
-            base = creep + (fast - creep) * f
+            base = slow + (fast - slow) * f
         r = min(1.0, elapsed / max(float(cfg.DESCENT_RAMP_S), 1e-6))
         return base * (r * r * (3.0 - 2.0 * r))  # smoothstep ramp-in
 
@@ -437,7 +453,8 @@ class SuctionMover(ArmMover):
 
     def _approach_and_hover(self, ee_pos, rpy, ez, to_creep_z: bool = False,
                             tick_cb=None, approach_z: "float | None" = None,
-                            creep_gap: "float | None" = None):
+                            creep_gap: "float | None" = None,
+                            hover_m: "float | None" = None):
         """Travel to the column at transport height (sideways clearance), then
         drop over the true xy — as ONE blended stream (move_joints_through), the
         intermediate waypoints crossed at blend speed rather than stopped at.
@@ -450,10 +467,12 @@ class SuctionMover(ArmMover):
         there: ruckig bounds accel/jerk (the per-tick stream commanded up to 84
         rad/s^2 against a 2.5 limit, which is what threw the cup 34-40mm off
         line, 0903) and the arm gets the whole planned deceleration to settle
-        into the creep waypoint. NOT for the case place: the case drives
-        sideways from the hover on down (air_travel=max, tall bin walls) and it
-        earns its 37-68mm of lateral travel during that stretch — a planned
-        move would take that away.
+        into the creep waypoint. NOT for either corner seat (see place()'s
+        ``to_creep``): the case drives sideways from the hover on down
+        (air_travel=max, tall bin walls) and earns its 37-68mm of lateral
+        travel during that stretch, which a planned move would take away; and
+        for the battery this leg WAS the whole descent into the slot, which the
+        arm tracked 56-94mm behind at up to 18 deg of pitch (0909).
 
         ``tick_cb(z, f)``: optional per-tick guard for the streamed move, same
         shape as the descent loops'. With ``to_creep_z`` the planner replaces a
@@ -493,7 +512,7 @@ class SuctionMover(ArmMover):
         # grabbed the case 5-6cm off. The hover waypoint is what recovers the
         # true xy before the vertical leg starts holding it, exactly as its
         # original comment said; the pitch ring is the cheaper problem.
-        zs = [min(z_app, ez + cfg.HOVER_HEIGHT_M)]
+        zs = [min(z_app, ez + float(cfg.HOVER_HEIGHT_M if hover_m is None else hover_m))]
         if abs(zs[0] - z_app) < 1e-3:
             zs = []          # a low approach IS the hover — no duplicate waypoint
         if to_creep_z:
@@ -849,10 +868,11 @@ class SuctionMover(ArmMover):
         CASE_CORNER_AIM_BIAS_M hanging clear of the surface, so the lateral
         channel carries the wall reaction with no mu * (weight + press) mixed
         into it, and it is set back down on the press servo only once both
-        walls have latched. The battery never gets the lift (low slot walls). The run's FIRST case uses it: its
-        target bin is empty (it lands on the floor, not on a case below) and it
-        is the datum every later place is measured from, so a phantom latch
-        there offsets the whole run."""
+        walls have latched. The battery never gets the lift (low slot walls). Used by the standalone
+        one-case-to-bin task (case_to_bin), whose bin is empty — the case lands
+        on the floor, not on a case below. The SEQUENCE's first case does NOT
+        use it (0910): it keeps the case's own creep-band drive like every case
+        above it."""
         ee_pos, rpy = self.taught_target(pose)
         # NOTE corner_seat: the *_CORNER_AIM_BIAS_M shift away from the datum
         # corner is applied by the CALLER (chassis_sequence.run_item) BEFORE
@@ -860,18 +880,34 @@ class SuctionMover(ArmMover):
         # bias is added here.
         ez = float(ee_pos[2]) if expected_z is None else float(expected_z)
         logger.info("[suction] place: approach@transport -> hover -> descend -> release")
-        # One blended stream down to the creep line for everything EXCEPT the
-        # case corner seat: the case drives sideways WHILE descending
-        # (air_travel=max) and earns its 37-68mm of lateral travel over the
-        # creep-band stretch, which a planned leg ending at ez +
-        # DESCENT_CREEP_GAP_SETTLED_M would fly straight past — so it keeps the
-        # hover + per-tick descent.
-        to_creep = corner_seat != "case"
+        # One blended stream down to the creep line for a PLAIN place only.
+        # Both corner seats end the stream at the HOVER and descend per-tick
+        # from there, for two different reasons:
+        #   case    — it drives sideways WHILE descending (air_travel=max) and
+        #             earns its 37-68mm of lateral travel over the creep-band
+        #             stretch, which a planned leg ending at ez +
+        #             DESCENT_CREEP_GAP_SETTLED_M would fly straight past.
+        #   battery — 0910: the planned hover->creep leg was the whole descent
+        #             into the slot, and the arm could not track it. Five
+        #             battery places on 0909 measured the arm 56-94mm behind in
+        #             x and 81-172mm behind in z at 8.5-18.4 deg of pitch (tip
+        #             80-141mm off line) at the moment the battery enters the
+        #             case mouth; the command was already AT the creep line, so
+        #             the last ~150mm was the arm's own servo closing that error
+        #             at whatever speed it liked, with no speed profile and no
+        #             force guard over it. _settle_at only reads xy, so it
+        #             logged "settled 1.97mm" straight through the plunge.
+        #             The per-tick path caps the cruise (CORNER_DESCENT_SPEED_M_S),
+        #             blends fast->creep over DESCENT_DECEL_BAND_M and guards
+        #             force every tick — the same profile the case has used
+        #             since 0905 and the case PICK since 0909.
+        to_creep = corner_seat is None
         q_hover = self._approach_and_hover(
             ee_pos, rpy, ez, to_creep_z=to_creep,
             tick_cb=(self._approach_force_guard(cfg.FORCE_HARD_LIMIT_PLACE_N)
                      if to_creep else None),
-            approach_z=approach_z, creep_gap=creep_gap)
+            approach_z=approach_z, creep_gap=creep_gap,
+            hover_m=(cfg.BATTERY_PLACE_HOVER_M if corner_seat == "battery" else None))
         if q_hover is None:
             return PickResult(False, "unreachable")
         if corner_seat:
@@ -1143,8 +1179,8 @@ class SuctionMover(ArmMover):
         warm-up, and slow drift never eats the threshold.
 
         x,y: drive toward CASE_CORNER_DIR at ``lat_speed`` (CASE_/BATTERY_
-        CORNER_SPEED_M_S) from the creep blend band (creep_z +
-        DESCENT_CREEP_BLEND_M) on down, where the descent is decelerating and
+        CORNER_SPEED_M_S) from wherever the commanded descent speed has fallen
+        to CASE_CORNER_DRIVE_GATE_M_S on down, where the descent is decelerating and
         tracks its command — never at cruise, where the arm trails it tilted
         and off-axis (battery, and a case placed with corner_touch_first:
         only after contact, via air_travel=0) — each axis latches
@@ -1227,6 +1263,9 @@ class SuctionMover(ArmMover):
         relief_logged = [False, False]
         descended = 0.0
         elapsed = 0.0
+        speed = float(cfg.CORNER_DESCENT_SPEED_M_S)   # last commanded descent
+        # speed; the lateral drive's airborne gate reads it (only the descent
+        # branch below reassigns it, and the gate short-circuits once pressing)
         press_t = 0.0
         grace = 0.0
         dbg_t = 0.0
@@ -1318,7 +1357,8 @@ class SuctionMover(ArmMover):
                                 fz, z, latched[0], latched[1], f_last[0], f_last[1])
                 else:
                     speed = self._descent_speed(z, creep_z, elapsed,
-                                                fast=cfg.CORNER_DESCENT_SPEED_M_S)
+                                                fast=cfg.CORNER_DESCENT_SPEED_M_S,
+                                                touch_z=target_ee_z)
                     z_next = z - speed * dt
                     descended += (z - z_next)
                     z = z_next
@@ -1521,15 +1561,18 @@ class SuctionMover(ArmMover):
             # of x, 10 deg of pitch, 83mm at the cup tip), so a case driven into
             # its wall up there arrives tilted and corner-first and the reaction
             # goes straight past CASE_CORNER_STOP_N into the lateral abort
-            # (15:20:35: 1.4 -> 26.3N in 90ms). Below creep_z + the blend band
-            # the profile is decelerating into the creep and the deviation is
-            # already shedding, so the wall is met slowly, flat and readable.
-            # Travel budget for the case: ~35mm of blend (~0.055 m/s mean) plus
-            # the 50mm creep gap is ~2.3s before touchdown = ~91mm of lateral at
-            # CASE_CORNER_SPEED_M_S, against the 37-68mm the walls have needed.
+            # (15:20:35: 1.4 -> 26.3N in 90ms). Once the commanded speed is down
+            # to CASE_CORNER_DRIVE_GATE_M_S the profile is well into its
+            # deceleration and the deviation is already shedding, so the wall is
+            # met slowly, flat and readable. The gate is on the SPEED and not,
+            # as before, on a height that happened to mean that speed under the
+            # old flat-creep profile (see the config comment for what the
+            # tapered one costs the case's airborne travel budget: 35mm at
+            # CASE_CORNER_SPEED_M_S, against the 37-68mm the walls have needed,
+            # with the remainder falling after first contact).
             # Post-contact (pressing) the gate is off — that drive is uncapped
             # and is the battery's only mode (air_travel=0 never drives here).
-            slowed = pressing or z <= creep_z + float(cfg.DESCENT_CREEP_BLEND_M)
+            slowed = pressing or speed <= float(cfg.CASE_CORNER_DRIVE_GATE_M_S)
             if slowed and not settling and (fz is None or not pressing or ready):
                 cap = float(max_travel if pressing else air_travel)
                 # A force latch means "this axis was DRIVEN into its datum

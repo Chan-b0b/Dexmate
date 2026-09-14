@@ -47,7 +47,7 @@ CHASSIS_SETTLE_S: float = 0.5           # settle pause after a strafe, before de
 # source<->target leg is a fixed open-loop DISTANCE at CHASSIS_STRAFE_SPEED_MS
 # (overrides CHASSIS_MANUAL). Station spacing is known ~0.6-0.7 m; detection
 # recenters at each visit, so the leg only needs to land the case in view/reach.
-CHASSIS_AUTO_STRAFE_DIST_M: float = 0.5
+CHASSIS_AUTO_STRAFE_DIST_M: float = 0.6
 # Auto-adjust on a failed reach pre-check (auto-move): turn the chassis so the
 # detected case yaw reads 0 (as before), then drive the SMALLEST forward/back +
 # strafe that puts the failing pose's descent column inside reach — offsets on
@@ -211,22 +211,13 @@ CHASSIS_PRESTEER_TIMEOUT_S: float = 5.0
 # stack heights at run start (an aborted run logs the values to resume with).
 SRC_LAYERS_REMAINING: int = 3           # source stack height at run start
 TGT_LAYERS_REMAINING: int = 1          # target stack height at run start
-# FINAL case -> bin box (run() epilogue): the layer loop moves the top
+# FINAL case (run() epilogue): the layer loop moves the top
 # SRC_LAYERS_REMAINING - 1 layers, so ONE case (the bottom one, no batteries)
-# is still in the source box. Pick it,
-# strafe RIGHT the fixed leg below to the bin box (bin floor = the box floor,
-# so the standard model plane applies), detect the BIN (not the case already
-# in it) and place from its center + SEED_BIN_CENTER_OFFSET (plain aligned
-# place, no corner seat — the bin's wall geometry is not the target jig's),
-# then strafe back LEFT the same leg and finish. Both legs are fixed excursions
-# (not ChassisNav legs; learning is skipped, as in the divert).
+# is still in the source box. It goes through the SAME per-item cycle as every
+# case above it — normal learned leg RIGHT, target case detection, aligned
+# corner-seat place on the target stack, normal leg back LEFT — just with no
+# batteries following it.
 FINAL_CASE_TO_BIN: bool = True
-FINAL_CASE_STRAFE_RIGHT_M: float = 1.2   # source -> bin box leg (tune on site)
-FINAL_BIN_CASE_LAYERS: int = 1           # cases ALREADY in the bin: sets the
-                                         # modelled seat ee_z (floor + (this+1)
-                                         # * pitch + suction) the misseat gate
-                                         # works off; nothing is detected at
-                                         # that height
 # Arm joint pose that clears the head-camera view of the target while an item is
 # carried during transport (TUNE; defaults to the left-arm home).
 ARM_VIEW_PARK_JOINTS: tuple[float, ...] = HOME_JOINTS_LEFT
@@ -301,7 +292,11 @@ TARGET_DEFAULT_CASE_CENTER: tuple[float, float, float, float] = (
 # FORWARD of its true center (front wall + plane mismatch; measured on-robot
 # 2026-08-06, hand-centered cup vs detection). Detect fail -> the default pose.
 SEED_BIN_CENTER_OFFSET: tuple[float, float] = (-0.12, 0.0)
-# PLAIN bin place (the final case -> bin box, task 4 one case -> bin): the case
+# UNUSED since 0914: the bin place (task 2, one case -> bin) corner-seats like
+# every other case place, so it aims at SEED_BIN_CENTER_OFFSET + the corner bias
+# and the walls finish the job. Kept for the measurements below, which is what a
+# plain no-corner-drive aim would need again.
+# What it was for — a PLAIN bin place: the case
 # lands where it AIMS, there is no corner drive after it. The seed place aims
 # at center + SEED_BIN_CENTER_OFFSET shifted CASE_CORNER_AIM_BIAS_M (30mm)
 # AWAY from the datum corner (+x, -y), and its corner drive then registers only

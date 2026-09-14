@@ -27,7 +27,7 @@ def _run(program_id: int) -> None:
     """Stop running programs, then trigger weblogic program *program_id*."""
     r_stop = requests.post(f"{cfg.SUCTION_BASE_URL}/stop", timeout=5.0)
     # logger.debug("[Suction] stop → {} {}", r_stop.status_code, r_stop.text[:80])
-    time.sleep(0.5)
+    time.sleep(0.3)
     r_run = requests.post(f"{cfg.SUCTION_BASE_URL}/run/{program_id}", timeout=5.0)
     # logger.debug("[Suction] run/{} → {} {}", program_id, r_run.status_code, r_run.text[:80])
 
@@ -98,7 +98,7 @@ def release() -> None:
     """Release a held object: suction off, then a short blow pulse."""
     suction_off()
     blow_on()
-    time.sleep(2)
+    time.sleep(0.7)
     # logger.info("[Suction] released")
 
 

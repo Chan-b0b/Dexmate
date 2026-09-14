@@ -161,7 +161,7 @@ BCR_PORT: int = 23
 # is diverted to the right-hand gripper (placed lower-right); everything else
 # follows the normal suction-into-case workflow. Empty = nothing matches, so
 # the demo behaves exactly like the original suction-only choreography.
-TARGET_BARCODES: list[str] = ['UDCG7B0289', 'UDCG7B0291']
+TARGET_BARCODES: list[str] = ['UDCG7B0289', 'UDCG7B0294']
 # The barcode is read during the suction pick descent (bcr.BackgroundScanner).
 # A scan is accepted only if at least BCR_MIN_READS successful reads were
 # collected and they all agree; any disagreement is treated as "no target".
