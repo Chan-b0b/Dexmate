@@ -1,7 +1,7 @@
 """Chassis-based, detection-driven pick & place.
 
 Loops over LAYERS until ONE case is left in the source: each layer runs the
-full item set (case -> battery_1 -> battery_2), then the stack heights step
+full item set (case -> battery_2 -> battery_1), then the stack heights step
 automatically (source -1, target +1) so the BEV warp plane stays on the true
 top face. The last case (no batteries) then goes to the target on its own,
 through the SAME per-item cycle as every case above it.
@@ -15,16 +15,16 @@ Per item, one chassis round trip:
       -> park the arm (clear the head-camera view) IN PARALLEL with the next
          strafe, joined before anything needs the camera (_park_during_legs)
     strafe RIGHT (target ~ robot center)
-      -> place at the target:
-             run's FIRST case -> the target is empty by definition, so case
-                          detection is SKIPPED (only the source stack would be
-                          in view); seed the stack at the default front pose,
-                          bin-anchored under --auto-move
-             otherwise -> detect the case, place aligned to it (same
-                          case-frame offset); a miss is a DETECTION failure ->
-                          re-detect once, then operator prompt (never
-                          blind-stack)
+      -> place at the target: detect the case, place aligned to it (same
+         case-frame offset); a miss is a DETECTION failure -> re-detect once,
+         then operator prompt (never blind-stack)
     strafe LEFT  (back, for the next item)
+
+    The run's FIRST case does not make that trip at all: it goes LEFT instead
+    (DIVERT_CASE_STRAFE_LEFT_M, the diverted target battery's leg) into the
+    EMPTY bin there, placed closed-loop on a BIN detection with no case
+    detection (the only case in view would be the source stack), then strafes
+    back RIGHT to the source.
 
 The chassis strafe is OPEN-LOOP (move_sideways = speed*time, no odometry); a
 fresh BEV detection recenters the case in base_link at every visit, so the
@@ -110,10 +110,11 @@ from utils import set_head_pitch  # perception/utils (path added above)  # noqa:
 
 # item label -> pose key in resolve_poses (case-frame offset, same for pick@source
 # and place@target — only the detected center differs).
+# battery_2 (left slot, robot +y) goes FIRST, then battery_1 (right slot).
 ITEMS: tuple[tuple[str, str], ...] = (
     ("case", "CASE_PICK"),
-    ("battery_1", "BAT_SRC_1"),
     ("battery_2", "BAT_SRC_2"),
+    ("battery_1", "BAT_SRC_1"),
 )
 
 
@@ -280,16 +281,19 @@ class ZTracker:
                 return None
             z, ly = self._last.get(("source", "case"), (None, None))
             return z if (z is not None and ly == layers) else None
+        # Chain within the SAME station (was hardcoded "target", which was the
+        # only place station until the seed got its own — a "seedbin" case must
+        # not borrow the right target's measurements or vice versa).
         if is_bat:
             # seats in THIS layer's case, one compartment depth up
-            z, ly = self._last.get(("target", "case"), (None, None))
+            z, ly = self._last.get((station, "case"), (None, None))
             return (z + float(cfg.BATTERY_SEAT_ABOVE_CASE_M)
                     if (z is not None and ly == layers) else None)
         # a case seats on the PREVIOUS layer's batteries — on the HIGHEST of
         # them, which is also the safe (high) choice for a creep line
         top = None
         for lb in ("battery_1", "battery_2"):
-            z, ly = self._last.get(("target", lb), (None, None))
+            z, ly = self._last.get((station, lb), (None, None))
             if z is not None and ly == layers - 1:
                 top = z if top is None else max(top, z)
         return None if top is None else top + float(cfg.CASE_SEAT_ABOVE_BATTERY_M)
@@ -338,13 +342,40 @@ class ZTracker:
                 return cz, cfg.BATTERY_OVER_CASE_MAX_M
         return None, None
 
-    def record(self, station: str, label: str, layers: int, z: "float | None") -> None:
+    def record(self, station: str, label: str, layers: int, z: "float | None",
+               seated: bool = True) -> None:
         """Record a measured contact ee-z: first contact anchors the column,
         later ones are compared against the prediction (misalign flag); a
-        contact well BELOW the prediction replaces the anchor (lower = truth)."""
+        contact well BELOW the prediction replaces the anchor (lower = truth).
+
+        ``seated=False``: the place was GATED (rim landing / jam) and the
+        operator seated the part by hand, so this z is where the cup stopped,
+        NOT where the part ended up. It updates the chain source only and never
+        anchors — the layer model must stay built from clean seats.
+
+        Feeding the chain anyway fixes a cascade: the chain for a target battery
+        is THIS layer's case seat + BATTERY_SEAT_ABOVE_CASE_M, so dropping a
+        gated case seat entirely left the battery on the borrow path (the
+        case's own-anchor extrapolation at the nominal LAYER_PITCH_M, with the
+        battery offset gone). Measured 0914: both batteries of such a layer
+        expected 28-30mm BELOW where they actually contacted, so both were
+        gated in turn. One case misseat took its whole layer down.
+
+        A gated z is the RIM, i.e. above the true seat, so the chain it feeds
+        reads high. That is the safe direction on both counts: the creep line
+        starts higher (a low one is what met those surfaces still at cruise —
+        the 20N hard pushes of the same runs), and the one-sided misseat gate
+        cannot false-trip. The cost is a real battery rim landing going
+        unnoticed in a layer whose case was already gated."""
         if z is None:
             return
         self._last[(station, label)] = (float(z), int(layers))
+        if not seated:
+            logger.info("[{}] {} gated contact ee_z={:.4f} @ {} layers — chain "
+                        "expectation only, NOT anchored", label, station, z, layers)
+            self.log_event("contact_gated", station, label, layers, z,
+                           self.predict_ee_z(station, label, layers))
+            return
         pred = self.predict_ee_z(station, label, layers)
         if pred is None:
             self._anchors[(station, label)] = (float(z), int(layers))
@@ -517,6 +548,30 @@ def _log_pick_depth(bot, label: str, pick_pose, plane_z: "float | None",
             zt.log_event(f"depth_{point}", station, label, layers, ee_z, expected_ee_z)
     except Exception as e:  # noqa: BLE001 — a log line must not stop a run
         logger.warning("[{}] {}-point depth failed ({})", label, point, e)
+
+
+def _depth_face_z(bot, label: str, xy, plane_guess: float) -> "tuple[float | None, int, float]":
+    """Measured base-frame z of the surface under `xy`, from the ZED depth —
+    the same read `_log_pick_depth` logs, but RETURNED so a caller can use it
+    as a warp plane. `plane_guess` is the plane `xy` was detected on;
+    plane_from_depth re-projects through the height it measures, so a guess
+    tens of mm off still converges onto the real surface point. Returns
+    (z, n_px, spread); z is None when too few depth pixels landed. Never raises."""
+    try:
+        import depth_plane as dp
+
+        rgb = _head_rgb(bot, fresh=False)
+        depth = bot.sensors.head_camera.get_depth()
+        if rgb is None or depth is None:
+            logger.warning("[{}] face depth: no frame (rgb={}, depth={})",
+                           label, rgb is not None, depth is not None)
+            return None, 0, 0.0
+        q_torso, q_head = _joints(bot)
+        return dp.plane_from_depth(depth, rgb.shape, q_torso, q_head,
+                                   (float(xy[0]), float(xy[1])), float(plane_guess))
+    except Exception as e:  # noqa: BLE001 — a diagnostic read must not stop a run
+        logger.warning("[{}] face depth failed ({})", label, e)
+        return None, 0, 0.0
 
 
 def _log_det(zt: "ZTracker | None", station: str, label: str, layers: int, det) -> None:
@@ -1063,11 +1118,20 @@ def _park_during_legs(label: str, arm_moves, chassis_legs) -> None:
 
 
 def _arms_home(bot, mover: SuctionMover) -> None:
-    """Safe-home BOTH arms before a failure strafe (lift-if-low first, so a low
-    EE doesn't sweep through the box walls on the way home)."""
-    logger.info("failure recovery: both arms -> safe home")
+    """Safe-home BOTH arms (lift-if-low first, so a low EE doesn't sweep
+    through the box walls on the way home). Called before a failure strafe AND
+    on task 2's clean finish, so the message says no more than it knows — every
+    failure caller logs its own reason line right before this.
+
+    The RIGHT mover is passed explicitly: without it both_arms_home builds a
+    fresh ArmMover for that side on EVERY call, i.e. a full URDF model + IK
+    solver + 351-pair self-collision rebuild (~6 s and three log lines, seen at
+    the end of every task 2) for an arm the session already built at start-up.
+    _right_arm hands back that one, and still falls back to a fresh mover for
+    callers that run outside a session (the case_to_bin script)."""
+    logger.info("both arms -> safe home")
     from .go_home import both_arms_home
-    both_arms_home(bot, left=mover)
+    both_arms_home(bot, left=mover, right=_right_arm(bot))
 
 
 def _detect_bin_xy(bot, n: "int | None" = None) -> "tuple[float, float] | None":
@@ -1700,7 +1764,8 @@ def lid_place_stance(bot, mover) -> None:
     it does is re-model at the stance reached."""
     torso_target = np.deg2rad(np.asarray(cfg.LID_PLACE_TORSO_DEG, dtype=float))
     q_stow = mover.clip_to_band(cfg.LID_UNLOAD_STOW_JOINTS, "LID_UNLOAD_STOW_JOINTS")
-    moves = [lambda: mover.move_joints(q_stow)]
+    v_stow = float(cfg.LID_STOW_VEL_SCALE)
+    moves = [lambda: mover.move_joints(q_stow, vel_scale=v_stow)]
     if cfg.LID_UNLOAD_RIGHT_JOINTS is not None:
         # The RIGHT arm goes to its own taught park in the same breath: the torso
         # carries both arm bases, so a right arm left wherever the last run put
@@ -1709,7 +1774,7 @@ def lid_place_stance(bot, mover) -> None:
         right = _right_arm(bot)
         q_right = right.clip_to_band(cfg.LID_UNLOAD_RIGHT_JOINTS,
                                      "LID_UNLOAD_RIGHT_JOINTS")
-        moves.append(lambda: right.move_joints(q_right))
+        moves.append(lambda: right.move_joints(q_right, vel_scale=v_stow))
     logger.info("=== torso -> {} deg AND both arms -> their stow joints, "
                 "together ===", cfg.LID_PLACE_TORSO_DEG)
     _park_during_legs("lid", moves,
@@ -2581,14 +2646,19 @@ def _place_case_in_bin(bot, mover: SuctionMover, label: str, source_yaw: float,
     back in from the creep blend band down — the walls fix the final xy instead
     of the detection alone. The offset moves with it: SEED_BIN_CENTER_OFFSET is
     the one paired with that bias + drive, and BIN_PLACE_CENTER_OFFSET existed
-    only for the plain aim this no longer does. PLACE_X_PLANE_TRIM_M rides along
-    for the same reason (the seed aim includes it). NOT corner_touch_first — the
-    sequence's first case dropped that timing on 0910 and kept the creep-band
-    drive, and this place follows it.
+    only for the plain aim this no longer does. PLACE_X_PLANE_TRIM_M does NOT
+    ride along: the seed aim does not include it either (run_item gates it on a
+    measured target warp plane, which the run's first case never has). NOT
+    corner_touch_first — the sequence's first case dropped that timing on 0910
+    and kept the creep-band drive, and this place follows it.
 
     expected_z stays None so place() gates the misseat off that modelled seat z
     (SEED_MISSEAT_TOL_M, 25mm: a rim/wall landing contacts well above it and is
     HELD, a one-layer count error still releases).
+
+    A bin detected below BIN_PLACE_MIN_Y_M (too far to the robot's right, where
+    the seat point crosses the centre line) is strafed back up to that floor
+    before anything else — there is no y alignment on this path otherwise.
 
     A missed detection first walks SEED_BIN_SEARCH_STRAFES_M when `auto`
     (changes the view), then hands the operator the keyboard (`d` re-detects
@@ -2604,6 +2674,7 @@ def _place_case_in_bin(bot, mover: SuctionMover, label: str, source_yaw: float,
               + cfg.SUCTION_LENGTH_M)
     search = [float(s) for s in cfg.SEED_BIN_SEARCH_STRAFES_M] if auto else []
     adjusts = 0
+    y_moves = 0
     while True:
         bxy = _detect_bin_xy(bot)
         if bxy is None:
@@ -2621,6 +2692,24 @@ def _place_case_in_bin(bot, mover: SuctionMover, label: str, source_yaw: float,
                 logger.error("[{}] stopping at the bin (case still held)", label)
                 return None
             continue
+        if bxy[1] < cfg.BIN_PLACE_MIN_Y_M and y_moves < cfg.CHASSIS_ADJUST_MAX_ATTEMPTS:
+            # Bin too far to the robot's RIGHT (see BIN_PLACE_MIN_Y_M): strafe
+            # RIGHT to bring it back up to the floor — strafing right raises
+            # everything's base-frame y — then re-detect, because the base
+            # frame moved and the bin-anchored pose is stale.
+            move = float(np.clip(cfg.BIN_PLACE_MIN_Y_M - bxy[1], 0.0,
+                                 cfg.DIVERT_BIN_MAX_STRAFE_M))
+            y_moves += 1
+            logger.warning("[{}] bin y {:+.3f} below the {:+.3f} floor — strafe RIGHT "
+                           "{:.3f} m, re-detect ({}/{})", label, bxy[1],
+                           cfg.BIN_PLACE_MIN_Y_M, move, y_moves,
+                           cfg.CHASSIS_ADJUST_MAX_ATTEMPTS)
+            strafe_right(bot, distance_m=move)
+            continue
+        if bxy[1] < cfg.BIN_PLACE_MIN_Y_M:
+            logger.warning("[{}] bin y {:+.3f} still below the {:+.3f} floor after {} "
+                           "strafe(s) — placing from here anyway", label, bxy[1],
+                           cfg.BIN_PLACE_MIN_Y_M, y_moves)
         center = (bxy[0] + cfg.SEED_BIN_CENTER_OFFSET[0],
                   bxy[1] + cfg.SEED_BIN_CENTER_OFFSET[1], seat_z, float(source_yaw))
         logger.info("[{}] bin center ({:.3f},{:+.3f}) -> place ({:.3f},{:+.3f}) seat "
@@ -2628,15 +2717,13 @@ def _place_case_in_bin(bot, mover: SuctionMover, label: str, source_yaw: float,
                     "{:+.1f} deg", label, bxy[0], bxy[1], center[0], center[1], seat_z,
                     int(layers_in_bin), float(np.rad2deg(source_yaw)))
         place_pose = resolve_poses(center)["CASE_PICK"]
-        if cfg.PLACE_X_PLANE_TRIM_M:
-            # Same x as the seed place: SEED_BIN_CENTER_OFFSET was tuned with
-            # this trim on top of it (run_item applies it whenever the tracker
-            # has a MEASURED target plane), so the aim would sit that much
-            # forward of the seed case without it. Unconditional here — this
-            # task runs no plane probe and has no tracker to ask.
-            place_pose = (place_pose[0] + cfg.PLACE_X_PLANE_TRIM_M, *place_pose[1:])
-            logger.info("[{}] place x plane trim {:+.1f} mm (seed parity)",
-                        label, cfg.PLACE_X_PLANE_TRIM_M * 1000)
+        # NO PLACE_X_PLANE_TRIM_M here — the seed place this task mirrors never
+        # applies it either: run_item gates the trim on a MEASURED target warp
+        # plane, and the run's first case has none (the ZTracker is empty until
+        # a target contact is recorded). It was applied unconditionally for one
+        # day (0914) on a "seed parity" reading that was backwards, which put
+        # this place 10mm nearer the robot than the seed case it is supposed to
+        # match. Restore it only together with a plane probe here.
         # corner-seat aim bias — applied HERE (not in suction.place) so the reach
         # pre-check below checks the pose that is actually FLOWN, exactly as
         # run_item does it
@@ -2684,7 +2771,9 @@ def run_item(bot, mover: SuctionMover, label: str, pose_key: str,
              zt: "ZTracker | None" = None,
              divert_slots: "list[str] | None" = None,
              strict_start: bool = False) -> bool:
-    """One item's full left->pick->right->place->left cycle.
+    """One item's full left->pick->right->place->left cycle. The run's FIRST
+    case is the exception: it strafes LEFT to the bin beside the source and
+    back RIGHT, the same excursion a diverted target battery makes.
 
     `src_layers` / `tgt_layers` are the CURRENT stack heights for this layer
     (the layer loop in run() steps them; cfg.SRC/TGT_LAYERS_REMAINING are only
@@ -2827,26 +2916,70 @@ def run_item(bot, mover: SuctionMover, label: str, pose_key: str,
                            "seating in the target case", label, res.barcode)
 
     # --- TARGET: park the arm (clear the head view) IN PARALLEL with the
-    #     strafe right, then detect + place in the case ---
-    _park_during_legs(label, [lambda: _view_park(mover, label)],
-                      lambda: strafe(bot, "right", auto, leg))
+    #     station leg, then detect + place in the case ---
+    # The run's FIRST case does NOT go to the target on the right: it is placed
+    # in the bin to the LEFT of the source, reached exactly like a diverted
+    # TARGET battery — divert_leg's learned distance (seeded from
+    # DIVERT_CASE_STRAFE_LEFT_M), back right afterwards. The place itself is
+    # unchanged (the closed-loop bin-anchored seed place below); only which
+    # station it happens at moves. The excursion is not the main leg's, so it
+    # neither teaches `leg` nor is taught by it (skip_next_learn, as
+    # _divert_case_place).
+    seed = label == "case" and tgt_layers <= 1
+    seed_dist = ((divert_leg.dist("left") if divert_leg is not None
+                  else cfg.DIVERT_CASE_STRAFE_LEFT_M) if seed else 0.0)
+    # The seed's contact is NOT a measurement of the target station any more:
+    # it is a DIFFERENT physical case, in the bin one divert leg to the LEFT.
+    # The two bins are the same height (0914 bin-floor contacts: left 0.7203,
+    # right 0.7269, 0.7293 — within 9mm), so this is not a station offset — but
+    # the target's z model does not want a nominally-equal case, it wants THE
+    # case the next items actually touch, and 9mm is past the 5mm chained
+    # tolerance. Recorded as "target" it broke both:
+    #   z chain: layer 1's batteries seat into task 2's case on the right, but
+    #     were handed the LEFT case's contact -> 0914 14:44 battery_1 came in
+    #     "+8.6mm ABOVE the expected seat (tol 5mm)" and misseated; the same
+    #     items passed in the 11:38 run, where the seed measured the very case
+    #     they then seated into.
+    #   warp plane: plane_z extrapolates the anchor at LAYER_PITCH_M (13.8mm)
+    #     per layer, but the real step from a case on the BIN FLOOR up to a
+    #     battery in it is ~37mm, so every later target plane read -48.3mm off
+    #     the model, biased the BEV detection +22.3mm forward, and ran layer
+    #     2's corner drive 98.8mm in x before it found a wall (in_slot=False ->
+    #     auto release). That extrapolation was already wrong in the old
+    #     seed-to-the-right flow (11:38 logged a constant -39.3mm all run); it
+    #     only started failing once the anchor was a different case too.
+    # Its own station keeps them apart: the target stays on the MODEL plane
+    # until the first place that really happens there anchors it.
+    tgt_station = "seedbin" if seed else "target"
+    if seed:
+        from .move_chassis import strafe_left
+        logger.info("[{}] first case -> the bin LEFT of the source: strafe LEFT "
+                    "{:.2f} m (divert leg)", label, seed_dist)
+        _park_during_legs(label, [lambda: _view_park(mover, label)],
+                          lambda: strafe_left(bot, distance_m=seed_dist,
+                                              speed=cfg.CHASSIS_LEG_SPEED_MS))
+        if leg is not None:
+            leg.skip_next_learn = True
+    else:
+        _park_during_legs(label, [lambda: _view_park(mover, label)],
+                          lambda: strafe(bot, "right", auto, leg))
     adjusts = 0
     redetects = 0
-    tgt_plane = zt.plane_z("target", tgt_layers) if zt is not None else None
+    tgt_plane = zt.plane_z(tgt_station, tgt_layers) if zt is not None else None
     if tgt_plane is not None:
         logger.info("[{}] target warp plane: measured {:.4f} (model {:.4f}, {:+.1f}mm)",
                     label, tgt_plane, dcb.bev.top_face_z(tgt_layers),
                     (tgt_plane - dcb.bev.top_face_z(tgt_layers)) * 1000.0)
-        zt.log_event("plane", "target", label, tgt_layers,
+        zt.log_event("plane", tgt_station, label, tgt_layers,
                      tgt_plane, dcb.bev.top_face_z(tgt_layers))
-    pz, mtol = (zt.place_expectation("target", label, tgt_layers)
+    pz, mtol = (zt.place_expectation(tgt_station, label, tgt_layers)
                 if zt is not None else (None, None))
-    # The run's FIRST case: the target is empty BY DEFINITION, so case
-    # detection (and its centering moves) is skipped entirely — the only case
-    # in view would be the SOURCE stack one leg away (observed: it won the
-    # detection and dragged the robot back left). Later layers, the layer's
-    # batteries, and resumed runs (TGT_LAYERS_REMAINING > 1) always detect.
-    seed = label == "case" and tgt_layers <= 1
+    # `seed` (set above with its leg): the run's FIRST case places into an
+    # EMPTY bin, so case detection (and its centering moves) is skipped
+    # entirely — the only case in view would be the SOURCE stack one leg away
+    # (observed: it won the detection and dragged the robot back). Later
+    # layers, the layer's batteries, and resumed runs (TGT_LAYERS_REMAINING >
+    # 1) always detect.
     while True:
         tdet = None
         if not seed:
@@ -2862,19 +2995,21 @@ def run_item(bot, mover: SuctionMover, label: str, pose_key: str,
                 # Strafe so the BIN center sits where the seed will land the
                 # case center (TARGET_DEFAULT y) — the closed-loop detection
                 # below then only absorbs the small aligned residual. This IS
-                # the right leg's arrival measurement (no separate case
-                # detection runs for the seed), so its residual — net of the
-                # deliberate ref change from this item's y_ref to the bin's
-                # target_y — teaches the shared leg distance directly.
-                deliberate = leg.ref_change(cfg.TARGET_DEFAULT_CASE_CENTER[1]) if leg is not None else 0.0
+                # the arrival measurement of the LEFT leg that just ran (no
+                # separate case detection runs for the seed), so its residual —
+                # net of the deliberate ref change from this item's y_ref to
+                # the bin's target_y — teaches the DIVERT leg, the one that
+                # actually carried the case here.
+                deliberate = (divert_leg.ref_change(cfg.TARGET_DEFAULT_CASE_CENTER[1])
+                              if divert_leg is not None else 0.0)
                 dy = _align_to_bin(bot, label,
                                    target_y=cfg.TARGET_DEFAULT_CASE_CENTER[1],
                                    fallback_right_m=0.0,
                                    max_err_m=cfg.CHASSIS_DETECT_Y_GATE_M)
-                if leg is not None and dy != 0.0:
+                if divert_leg is not None and dy != 0.0:
                     # dy==0.0 also covers "no bin found, stayed put" (no real
                     # measurement) — only teach on an actual observed move.
-                    leg.learn(dy - deliberate, "target")
+                    divert_leg.learn(dy - deliberate, "divert")
             # CLOSED-LOOP seed: the place center comes from a bin detection
             # (+ SEED_BIN_CENTER_OFFSET), trusted AS-IS (no deviation gates —
             # a bad aim is still caught by the reach pre-check and by the
@@ -2927,8 +3062,44 @@ def run_item(bot, mover: SuctionMover, label: str, pose_key: str,
 
         elif tdet is not None and tdet.found:
             logger.info("[{}] target case found -> aligned place", label)
+            if tgt_plane is None:
+                # No measured plane for this station yet, so the detection just
+                # above was warped on the MODEL plane — which is not close. Every
+                # measured plane of 0914-0915 sat 26-31mm (source) / 35-48mm
+                # (target) BELOW top_face_z, and a wrong plane scales the warp
+                # about the camera nadir, so the detected centre is displaced too
+                # (0914: a 48.3mm plane error biased x by +22.3mm). The target
+                # only hits this at layer 1: the run's first case goes to the
+                # seedbin, whose contact is deliberately NOT the target's
+                # (tgt_station above), so ("target","case") has no anchor until
+                # layer 2's case place. Measure the case's top face with the
+                # DEPTH camera instead and re-detect on it. Depth is not exact
+                # (source pick-point reads run +0.8..+9.5mm above the contact
+                # they predict) but it beats the model by an order of magnitude.
+                # It also fixes exp_z below, which falls back to the same plane.
+                fz, n_px, spread = _depth_face_z(
+                    bot, label, _center_from_det(tdet)[:2],
+                    dcb.bev.top_face_z(tgt_layers))
+                if fz is None:
+                    logger.warning("[{}] target face depth: only {} valid px — "
+                                   "keeping the model plane", label, n_px)
+                else:
+                    model = dcb.bev.top_face_z(tgt_layers)
+                    logger.info("[{}] target face depth: z={:.4f} vs model {:.4f} "
+                                "({:+.1f}mm, {} px, relief {:.0f}mm) — re-detecting "
+                                "on it", label, fz, model, (fz - model) * 1000.0,
+                                n_px, spread * 1000.0)
+                    fresh = detect(bot, tgt_layers, fz)
+                    if fresh is None or not fresh.found:
+                        logger.warning("[{}] re-detect on the depth plane failed — "
+                                       "keeping the model-plane detection", label)
+                    else:
+                        tgt_plane, tdet = fz, fresh
+                        if zt is not None:
+                            zt.log_event("plane_depth", tgt_station, label,
+                                         tgt_layers, fz, model)
             tdet = _refine_det(bot, tgt_layers, tdet, tgt_plane)   # median-of-N for the pose
-            _log_det(zt, "target", label, tgt_layers, tdet)
+            _log_det(zt, tgt_station, label, tgt_layers, tdet)
             tc = _center_from_det(tdet)
             place_pose = resolve_poses(tc)[pose_key]
             intended = [tc[0], tc[1], float(np.rad2deg(tc[3]))]
@@ -2948,7 +3119,7 @@ def run_item(bot, mover: SuctionMover, label: str, pose_key: str,
                            "chassis (f/b/l/r), `d` to re-detect + retry, `q` to stop "
                            "(item still held)", label)
             if not (cfg.CHASSIS_MANUAL or auto) or not _manual_strafe(bot, "adjust"):
-                logger.error("[{}] stopping on the right side (item still held)", label)
+                logger.error("[{}] stopping at the place station (item still held)", label)
                 return False
             continue
         if cfg.PLACE_X_LAYER_TRIM_M and tgt_layers > 1:
@@ -3004,14 +3175,14 @@ def run_item(bot, mover: SuctionMover, label: str, pose_key: str,
             logger.warning("[{}] place pose out of reach — adjust the chassis (f/b/l/r), "
                            "`d` to re-detect + retry, `q` to stop (item still held)", label)
             if not (cfg.CHASSIS_MANUAL or auto) or not _manual_strafe(bot, "adjust"):
-                logger.error("[{}] stopping on the right side (item still held)", label)
+                logger.error("[{}] stopping at the place station (item still held)", label)
                 return False
             continue
-        _dual_plane_probe(bot, tgt_layers, tgt_plane, "target", label, zt)
+        _dual_plane_probe(bot, tgt_layers, tgt_plane, tgt_station, label, zt)
         if label.startswith("battery") and exp_z is not None:
             # DIAGNOSIS ONLY — nothing below reads it (see _log_pick_depth)
             _log_pick_depth(bot, label, place_pose, tgt_plane, tgt_layers,
-                            exp_z, zt, station="target", point="place")
+                            exp_z, zt, station=tgt_station, point="place")
         # misseat check only with a measured-anchored expectation (own / sibling /
         # case anchor, each with its tolerance) — the model plane has been seen off
         # by more than any of those tolerances (0804 layer 5)
@@ -3046,7 +3217,7 @@ def run_item(bot, mover: SuctionMover, label: str, pose_key: str,
                            "`q` to stop", label)
             if _manual_strafe(bot, "adjust"):
                 continue
-            logger.error("[{}] stopping on the right side (case still held)", label)
+            logger.error("[{}] stopping at the bin (case still held)", label)
             return False
         break
     if zt is not None and pres is not None:
@@ -3054,17 +3225,17 @@ def run_item(bot, mover: SuctionMover, label: str, pose_key: str,
         # the (final) contact, and the recovery outcome if any retries ran
         ci = getattr(pres, "contact_info", None) or {}
         if "fz" in ci:
-            zt.log_event("contact_wrench", "target", label, tgt_layers, ci["fz"],
+            zt.log_event("contact_wrench", tgt_station, label, tgt_layers, ci["fz"],
                          resid="fx=%+.1f;fy=%+.1f;mx=%+.2f;my=%+.2f;mz=%+.3f"
                                % (ci.get("fx", 0.0), ci.get("fy", 0.0),
                                   ci.get("mx", 0.0), ci.get("my", 0.0), ci.get("mz", 0.0)))
         if "yaw_track_err_deg" in ci:
-            zt.log_event("contact_yaw", "target", label, tgt_layers,
+            zt.log_event("contact_yaw", tgt_station, label, tgt_layers,
                          ci["yaw_meas_deg"], ci["yaw_cmd_deg"],
                          resid="%+.2fdeg" % ci["yaw_track_err_deg"])
         for h in (getattr(pres, "recover_history", None) or []):
             zt.log_event(
-                "recover_step", "target", label, tgt_layers,
+                "recover_step", tgt_station, label, tgt_layers,
                 resid="a%d;%s;dyaw=%+.1fdeg;dxy=(%+.1f/%+.1f)mm;%s;z=%s;fx=%s;fy=%s;mz=%s" % (
                     h["attempt"], h["mode"], h["dyaw_deg"], h["dx_mm"], h["dy_mm"],
                     h["reason"],
@@ -3074,56 +3245,73 @@ def run_item(bot, mover: SuctionMover, label: str, pose_key: str,
                     "n/a" if h["mz"] is None else "%+.3f" % h["mz"]))
         if getattr(pres, "recover_attempts", 0):
             zt.log_event("recovered" if pres.success else "recover_fail",
-                         "target", label, tgt_layers,
+                         tgt_station, label, tgt_layers,
                          resid="attempts=%d" % pres.recover_attempts)
     if pres is not None and not getattr(pres, "success", True):
         if zt is not None:
-            zt.log_event("place_" + pres.reason, "target", label, tgt_layers,
+            zt.log_event("place_" + pres.reason, tgt_station, label, tgt_layers,
                          pres.contact_ee_z, exp_z)
         if pres.reason == "unreachable" and pres.contact_ee_z is None:
             # the HOVER leg failed BEFORE the release gate — the part is still
             # on the cup, so continuing would carry it into the next item
-            logger.error("[{}] place failed: {} (part still held) — stopping on "
-                         "the right side", label, pres.reason)
+            logger.error("[{}] place failed: {} (part still held) — stopping at "
+                         "the place station", label, pres.reason)
             return False
         # every other failure passed the operator release gate (hand-guided
         # seat + Enter -> blow-off): the item is on the target — log it and
         # keep the run moving; the z anchor stays clean (success-gated below)
         logger.warning("[{}] place failed ({}) — operator resolved it at the "
                        "gate, continuing with the next item", label, pres.reason)
-    if zt is not None and pres is not None and getattr(pres, "success", True):
-        zt.record("target", label, tgt_layers, pres.contact_ee_z)
+    if zt is not None and pres is not None:
+        # a GATED place still feeds the chain (never the anchor) — see record()
+        zt.record(tgt_station, label, tgt_layers, pres.contact_ee_z,
+                  seated=getattr(pres, "success", True))
 
-    # Fold the KNOWN offset from THIS item's ref to the NEXT item's ref into
-    # the return leg itself (see run_item docstring) — the detection-based
-    # centering at the next item's source only has to correct real residual.
-    extra = leg.ref_change(next_y_ref) if leg is not None else 0.0
+    # Return leg. Normally the LEFT leg back to the source, with the KNOWN
+    # offset from THIS item's ref to the NEXT item's ref folded into it (see
+    # run_item docstring) so the detection-based centering at the next item's
+    # source only has to correct real residual. The first case went LEFT to the
+    # bin instead, so its return is the mirror RIGHT leg of that divert-style
+    # excursion — no ref folding, because the main leg never moved and the next
+    # source centering starts from the frame it started in.
+    if seed:
+        from .move_chassis import strafe_right
+        extra = 0.0
+        logger.info("[{}] first case placed — strafe back RIGHT {:.2f} m to the "
+                    "source", label, seed_dist)
+
+        def _return_leg():
+            strafe_right(bot, distance_m=seed_dist, speed=cfg.CHASSIS_LEG_SPEED_MS)
+    else:
+        extra = leg.ref_change(next_y_ref) if leg is not None else 0.0
+
+        def _return_leg():
+            strafe(bot, "left", auto, leg, extra_m=extra)
     if cfg.PLACE_VERIFY_DETECT and label == "case" and zt is not None:
         # --- place verification: park the arm to clear the view (SYNC — the
         #     check needs a still chassis), re-detect the just-placed case,
         #     log landed-vs-intended in the SAME base frame, then strafe ---
         _view_park(mover, label)
-        chk = detect(bot, tgt_layers, zt.plane_z("target", tgt_layers))
+        chk = detect(bot, tgt_layers, zt.plane_z(tgt_station, tgt_layers))
         if chk is not None and chk.found:
             dyaw = (chk.base_yaw_deg - intended[2] + 90.0) % 180.0 - 90.0
             logger.info("[{}] place check: landed ({:+.1f}, {:+.1f}) mm, {:+.2f} deg "
                         "vs intended", label,
                         (chk.base_xy[0] - intended[0]) * 1000.0,
                         (chk.base_xy[1] - intended[1]) * 1000.0, dyaw)
-            zt.log_event("place_chk_x", "target", label, tgt_layers,
+            zt.log_event("place_chk_x", tgt_station, label, tgt_layers,
                          chk.base_xy[0], intended[0])
-            zt.log_event("place_chk_y", "target", label, tgt_layers,
+            zt.log_event("place_chk_y", tgt_station, label, tgt_layers,
                          chk.base_xy[1], intended[1])
-            zt.log_event("place_chk_yaw", "target", label, tgt_layers,
+            zt.log_event("place_chk_yaw", tgt_station, label, tgt_layers,
                          chk.base_yaw_deg, intended[2], resid=f"{dyaw:+.2f}deg")
         else:
             logger.warning("[{}] place check: case not detected — no landing sample", label)
-        strafe(bot, "left", auto, leg, extra_m=extra)
+        _return_leg()
     else:
         # --- park again (clear the head view for the SOURCE detect) IN PARALLEL
-        #     with the return LEFT ---
-        _park_during_legs(label, [lambda: _view_park(mover, label)],
-                          lambda: strafe(bot, "left", auto, leg, extra_m=extra))
+        #     with the return leg ---
+        _park_during_legs(label, [lambda: _view_park(mover, label)], _return_leg)
     return True
 
 
@@ -3176,7 +3364,7 @@ def run(bot, mover: SuctionMover,
             layer += 1
             logger.info("=== layer {}: source stack {}, target stack {} ===", layer, src, tgt)
             for i, (label, key) in enumerate(ITEMS):
-                next_key = ITEMS[(i + 1) % len(ITEMS)][1]   # cycles to CASE_PICK after battery_2
+                next_key = ITEMS[(i + 1) % len(ITEMS)][1]   # cycles to CASE_PICK after the last battery
                 if not run_item(bot, mover, label, key, src, tgt, next_key,
                                 scan=scan, auto=auto, leg=leg, divert_leg=divert_leg, zt=zt,
                                 divert_slots=divert_slots,
@@ -3353,15 +3541,19 @@ def run_case_to_bin_here(bot, mover: SuctionMover) -> bool:
     triggers:
 
       1. chassis at the case -> `d`: BEV-detect the case (a single layer, so
-         the warp plane is the one-case height), pick it, park the arm out of
-         the head-camera view
+         the warp plane is the one-case height), CENTER the chassis on it
+         (_center_case, strict start deadbands — the operator's park is what
+         the lift out of the box walls has to live with), pick it, park the arm
+         out of the head-camera view
       2. chassis at the bin -> `d`: BEV-detect the BIN and place the case into
          it at the empty-bin seat height (_place_case_in_bin), then home
 
-    No bin-align strafe and no search strafes. The chassis moves on its own
-    only if the place pose is out of reach: the smallest move that fixes it
-    (_auto_adjust, CHASSIS_ADJUST_MAX_ATTEMPTS rounds); a missed detection
-    goes straight to the operator (`adjust` prompt, `d` re-detects, `q` stops).
+    No full bin-align strafe and no search strafes on the PLACE side. The
+    chassis moves on its own to center the pick, and at the bin only to lift a
+    detection below BIN_PLACE_MIN_Y_M back to that floor, or if the place pose
+    is out of reach: the smallest move that fixes it (_auto_adjust,
+    CHASSIS_ADJUST_MAX_ATTEMPTS rounds); a missed detection goes straight to
+    the operator (`adjust` prompt, `d` re-detects, `q` stops).
     """
     from .case_to_bin import _pick_source_case
     label = "case_bin"
@@ -3560,6 +3752,11 @@ def _announce_task(task: str, src: int, tgt: int, final_to_bin: bool) -> None:
         logger.warning("Barcode divert (target codes -> divert case, {:.2f} m LEFT of the "
                        "source; first -> left slot, second -> right).",
                        cfg.DIVERT_CASE_STRAFE_LEFT_M)
+        logger.warning("FIRST case goes LEFT ({:.2f} m, the divert leg) into the empty bin "
+                       "there, then back right — NOT to the target on the right. So the "
+                       "TARGET must ALREADY hold a case (task 2 puts one there): this "
+                       "layer's batteries seat into THAT case, not into the one just "
+                       "carried left.", cfg.DIVERT_CASE_STRAFE_LEFT_M)
         logger.warning("AUTO chassis: {:.2f} m legs + detection-based adjust.",
                        cfg.CHASSIS_AUTO_STRAFE_DIST_M)
     logger.warning("=" * 60)

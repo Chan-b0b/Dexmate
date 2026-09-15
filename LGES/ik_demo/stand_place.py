@@ -18,8 +18,9 @@ For each cylinder (one cycle per --slots entry):
             cylinder lying along base x)
          [chassis: NOW detect the bin — the only place it is measurable — and
           send the HAND to it, base unmoved, spinning the WRIST by the bin's
-          yaw so the cylinder lands parallel to its walls — everything up to
-          the hover pose is identical every cycle and only the lay-down turns.
+          yaw so the cylinder lands parallel to its walls — the carry and the
+          turn run at ONE fixed pose (STAND_TURN_XY), so everything up to
+          there is the same motion every cycle and only the lay-down differs.
           That same reading teaches the next cycle its carry and place centre
           (but never the yaw: the base loses heading when it strafes). Bin not
           measurable, or further off than STAND_CARRY_CORRECT_MAX_M? the
@@ -103,8 +104,12 @@ class ObjectPlan:
     p_standoff: np.ndarray                # EE origin, entry start
     p_pinch: np.ndarray                   # EE origin, fingers around the object
     z_transport: float
-    p_place_hi: np.ndarray                # EE origin above the slot at z_transport
+    p_place_hi: np.ndarray                # EE origin above the PLANNED slot at z_transport
+    p_turn_hi: np.ndarray                 # EE origin where the in-air turn runs (fixed, cfg.STAND_TURN_XY)
     z_place: float                        # EE z with the object resting on the bin floor
+    p_lay_hi: "np.ndarray | None" = None  # EE origin above the PLACE CENTRE at z_transport, lying
+    q_carry: "np.ndarray | None" = None   # PLANNED joints at p_turn_hi — flown as-is, see cfg.STAND_TURN_XY
+    q_lay_hi: "np.ndarray | None" = None  # ... and at p_lay_hi: the turn IS the move between the two
     q_rotate: list[np.ndarray] = field(default_factory=list)   # in-air turn waypoints
     ok: bool = False
     problems: list[str] = field(default_factory=list)
@@ -138,7 +143,10 @@ def plan_object(g: GripperMover, label: str, x: float, y: float, yaw: float,
     z_transport = float(cfg.STAND_TRANSPORT_Z_M)
     z_place = float(cfg.STAND_BIN_FLOOR_Z_M) + float(obj["lying_half"]) + reach
     plan = ObjectPlan(label, _rpy(R_pick), tuple(cfg.STAND_PLACE_RPY), d, p_standoff, p_pinch,
-                      z_transport, np.array([slot_xy[0], slot_xy[1], z_transport]), z_place)
+                      z_transport, np.array([slot_xy[0], slot_xy[1], z_transport]),
+                      np.array([cfg.STAND_TURN_XY[0], cfg.STAND_TURN_XY[1], z_transport]), z_place,
+                      p_lay_hi=np.array([cfg.STAND_BIN_PLACE_XY[0], cfg.STAND_BIN_PLACE_XY[1],
+                                         z_transport]))
 
     def check(name: str, pos, rpy, q_seed):
         """Warm solve from q_seed; if that branch falls short, retry from the
@@ -178,21 +186,39 @@ def plan_object(g: GripperMover, label: str, x: float, y: float, yaw: float,
                                                       z_transport, p_pinch[2], seed=q_pinch):
         plan.problems.append("lift column: see [arm] column pre-check")
     q = check("lift_top", [p_pinch[0], p_pinch[1], z_transport], plan.rpy_pick, _or(q_pinch, seed))
-    q = check("carry_hi", plan.p_place_hi, plan.rpy_pick, _or(q, seed))
-    # the in-air turn, above the slot: shortest rotation approach -> place
+    # Solved from the TASK HOME, not from the pick, and KEPT (plan.q_carry) so
+    # run_object can fly exactly these joints: that is what makes the posture —
+    # and the whole turn chained off it — the same every cycle. Seeded from the
+    # pick instead, the posture follows wherever the cylinder happened to be
+    # (61 deg of spread, measured 0914). See cfg.STAND_TURN_XY.
+    q = check("carry_hi", plan.p_turn_hi, plan.rpy_pick, seed)
+    plan.q_carry = None if q is None else np.array(q, dtype=float)
+    # the in-air turn, at the FIXED turn point (cfg.STAND_TURN_XY): shortest
+    # rotation approach -> place. Same motion every cycle, which is the whole
+    # reason it is not done over the slot any more.
     R_place = Rotation.from_euler("xyz", plan.rpy_place).as_matrix()
     slerp = Slerp([0.0, 1.0], Rotation.from_matrix(np.stack([R_pick, R_place])))
     steps = int(cfg.STAND_ROTATE_STEPS)
     for k in range(1, steps + 1):
         rpy_k = _rpy(slerp([k / steps]).as_matrix()[0])
-        q = check(f"turn[{k}/{steps}]", plan.p_place_hi, rpy_k, _or(q, seed))
+        q = check(f"turn[{k}/{steps}]", plan.p_turn_hi, rpy_k, _or(q, seed))
         if q is None:
             break
         plan.q_rotate.append(q)
-    # down to the floor
+    # B: the lay-down hover over the PLACE CENTRE, lying. run_object flies it
+    # straight from q_carry, so the flip happens WHILE the arm travels the gap
+    # from the turn pose instead of in place (0914, the user's call). Seeded
+    # from q_carry, which is itself fixed, so this posture is the same every
+    # cycle and the camera slide that follows always starts from it.
+    q = check("lay_hi", plan.p_lay_hi, plan.rpy_place, _or(plan.q_carry, seed))
+    plan.q_lay_hi = None if q is None else np.array(q, dtype=float)
+    # Down to the floor at the PLANNED slot. This stays an early sanity check
+    # only — the arm descends where the camera says, which run_object
+    # column-checks for real once it has that answer (from the turn pose, with
+    # the object safely held, so a refusal costs nothing).
     if q is not None and not g.column_reachable(plan.p_place_hi[0], plan.p_place_hi[1], plan.rpy_place,
                                                 z_transport, z_place - float(cfg.STAND_PLACE_OVERSHOOT_M),
-                                                seed=q):
+                                                seed=plan.q_lay_hi):
         plan.problems.append("place column: see [arm] column pre-check")
     plan.ok = not plan.problems
     return plan
@@ -202,10 +228,11 @@ def describe(plan: ObjectPlan) -> None:
     obj = cfg.STAND_OBJECTS[plan.label]
     logger.info("[{}] pinch at EE ({:.3f},{:+.3f},{:.3f}) -> object centre z {:.3f} ({:.0f}mm above the desk); "
                 "entry from ({:.3f},{:+.3f}) along ({:+.2f},{:+.2f}); transport z {:.3f}; "
-                "slot ({:.3f},{:+.3f}) resting EE z {:.3f}; turn waypoints {}",
+                "turn at ({:.3f},{:+.3f}); slot ({:.3f},{:+.3f}) resting EE z {:.3f}; turn waypoints {}",
                 plan.label, *plan.p_pinch, plan.p_pinch[2], obj["grasp_h"] * 1000,
                 plan.p_standoff[0], plan.p_standoff[1], plan.approach_dir[0], plan.approach_dir[1],
-                plan.z_transport, plan.p_place_hi[0], plan.p_place_hi[1], plan.z_place,
+                plan.z_transport, plan.p_turn_hi[0], plan.p_turn_hi[1],
+                plan.p_place_hi[0], plan.p_place_hi[1], plan.z_place,
                 len(plan.q_rotate))
     if plan.ok:
         logger.info("[{}] plan OK", plan.label)
@@ -246,6 +273,85 @@ def _guard(g: GripperMover, axis, limit: "float | None" = None, tare: bool = Tru
 
     stop.hit = hit  # type: ignore[attr-defined]
     return stop
+
+
+def _corner_guard(g: GripperMover, plan):
+    """(tick_cb, stop_fn) for the rounded-corner approach: tare the wrist wrench
+    IN-STREAM on the steady part of the descent, then watch the entry for a bump
+    with it — what _guard does, minus the standstill it needs.
+
+    The stationary tare is why the descent used to stop dead at the corner: the
+    baseline has to be read with nothing but gravity on the sensor. Holding the
+    orientation every tick keeps that load constant through the descent, and the
+    sample window sits in the constant-speed stretch (before STAND_CORNER_DECEL_M
+    starts bleeding the speed off), so the reading is the same one the standstill
+    gave. Fewer samples: one per control tick instead of one per 5ms.
+
+    The guard arms only once the path has actually started turning IN (lateral
+    travel past 1mm), so the descent itself is not policed by a threshold that
+    was picked for the entry.
+    """
+    axis = plan.approach_dir
+    st: dict = {"raw": [], "done": False, "p0": None, "in": 0.0, "warned": False}
+    hit: list[float] = []
+
+    def tick(s: float, p) -> None:
+        # NEVER raises: this runs INSIDE the motion stream, so an exception here
+        # aborts the leg with the arm partway down beside the object (0914: a
+        # config key added while a session was already running did exactly
+        # that). Losing the guard is recoverable — the entry then runs unguarded,
+        # the same state _guard's own failure path leaves it in. Crashing the
+        # motion is not.
+        try:
+            p = np.asarray(p, dtype=float)
+            if st["p0"] is None:
+                st["p0"] = p.copy()
+            st["in"] = float(np.dot(p - st["p0"], axis))   # travel along the entry
+            if st["done"] or g._wrench is None:
+                return
+            if s < float(cfg.STAND_CORNER_TARE_FROM_M):
+                return
+            if s <= float(cfg.STAND_CORNER_TARE_TO_M):
+                w = g._wrench.get_wrench_state()
+                if w is not None and np.all(np.isfinite(w)):
+                    st["raw"].append(np.asarray(w, dtype=float).ravel()[:3])
+                return
+            st["done"] = True      # one shot either way — never retry mid-leg
+            if g.tare_wrench(st["raw"], need=int(cfg.STAND_CORNER_TARE_MIN_N)):
+                logger.info("[{}] wrench tared in-stream over {:.0f}mm of the descent "
+                            "({} samples) — the corner is never stopped for it",
+                            plan.label,
+                            (float(cfg.STAND_CORNER_TARE_TO_M)
+                             - float(cfg.STAND_CORNER_TARE_FROM_M)) * 1000,
+                            len(st["raw"]))
+            else:
+                logger.warning("[{}] in-stream tare got only {} readings — entry bump "
+                               "guard OFF for this pick", plan.label, len(st["raw"]))
+        except Exception as e:  # noqa: BLE001 — must not kill the motion
+            st["done"] = True
+            g._force_baseline = None
+            logger.error("[{}] in-stream tare failed ({}) — entry bump guard OFF "
+                         "for this pick, the move continues", plan.label, e)
+
+    def stop() -> bool:
+        # same rule as tick(): inside the stream, so it reports "no contact"
+        # rather than raising. A dead guard is the _guard-returned-None state;
+        # a raise here would abort the leg mid-corner.
+        try:
+            if st["done"] and st["in"] >= float(cfg.STAND_CORNER_GUARD_FROM_M):
+                f = g.axis_force(axis)
+                if f is not None and abs(f) > float(cfg.STAND_CONTACT_N):
+                    hit.append(f)
+                    return True
+        except Exception as e:  # noqa: BLE001 — must not kill the motion
+            if not st["warned"]:
+                st["warned"] = True
+                logger.error("[{}] entry bump guard read failed ({}) — unguarded "
+                             "for the rest of this entry", plan.label, e)
+        return False
+
+    stop.hit = hit  # type: ignore[attr-defined]
+    return tick, stop
 
 
 def soft_close(grip) -> int:
@@ -504,6 +610,65 @@ def chassis_drive(bot, dx: float, dy: float, what: str) -> tuple[float, float]:
     return (dx if go_x else 0.0, dy if go_y else 0.0)
 
 
+def _search_cylinder(bot, net, cycle: int):
+    """The pick window came up EMPTY. ONE blind strafe
+    cfg.STAND_CYL_SEARCH_RIGHT_M to the right, re-detect, and if that still
+    finds nothing, hand the chassis to the OPERATOR (`l/r/f/b [dist_m]`, `d`
+    re-detects, `q` stops) instead of ending the run — 0914 15:53 cycle 3 died
+    on "[detect] no cylinder in view" with cylinders still on the desk.
+
+    Returns a scene that HAS cylinders, or None if the operator gives up or a
+    detection fails.
+
+    Every leg, the blind one and the operator's, goes through chassis_drive so
+    that what it commands lands in ``net``: the cycle's carry leg is
+    ``carry - net[1]`` and its return is ``-net[1]``, so a move this function
+    forgot to record would bend both. It is also why the operator drives
+    through here rather than through chassis_sequence._manual_strafe — the
+    chassis is open-loop (no odometry to read back), so the only record of a
+    move is the distance that was commanded."""
+    d = chassis_drive(bot, 0.0, -float(cfg.STAND_CYL_SEARCH_RIGHT_M),
+                      f"cycle {cycle}: nothing in view — blind search right")
+    net[0] += d[0]; net[1] += d[1]
+    scene = detect_scene(bot)
+    if scene is not None and scene.cylinders:
+        logger.info("[cycle {}] found {} cylinder(s) after the blind search right",
+                    cycle, len(scene.cylinders))
+        return scene
+    step = float(cfg.STAND_CYL_SEARCH_RIGHT_M)
+    while True:
+        logger.warning("[cycle {}] STILL nothing in view — drive the chassis by hand: "
+                       "`l/r/f/b [dist_m]` (default {:.2f}), `d` = re-detect, `q` = stop",
+                       cycle, step)
+        parts = input(f"cylinder search[cycle {cycle}]> ").strip().lower().split()
+        if not parts:
+            continue
+        cmd = parts[0]
+        if cmd == "q":
+            logger.error("[cycle {}] operator gave up on the search", cycle)
+            return None
+        if cmd == "d":
+            scene = detect_scene(bot)
+            if scene is None:
+                return None
+            if scene.cylinders:
+                logger.info("[cycle {}] found {} cylinder(s)", cycle, len(scene.cylinders))
+                return scene
+            continue
+        if cmd not in ("l", "r", "f", "b"):
+            logger.warning("commands: l/r/f/b [dist_m], d = re-detect, q = stop")
+            continue
+        try:
+            dist = abs(float(parts[1])) if len(parts) > 1 else step
+        except ValueError as e:
+            logger.warning("parse error: {} — `l/r/f/b [dist_m]`", e)
+            continue
+        dx = dist if cmd == "f" else -dist if cmd == "b" else 0.0
+        dy = dist if cmd == "l" else -dist if cmd == "r" else 0.0
+        d = chassis_drive(bot, dx, dy, f"cycle {cycle}: operator search")
+        net[0] += d[0]; net[1] += d[1]
+
+
 def chassis_align(bot, from_xy, to_xy, what: str = "bin") -> tuple[float, float]:
     """Drive so a feature now at ``from_xy`` (base_link) ends up at ``to_xy``.
     Returns the displacement commanded (forward, left)."""
@@ -704,14 +869,17 @@ def run_object(g: GripperMover, plan: ObjectPlan, pick_only: bool,
                place_at: "callable | None" = None) -> "bool | None":
     """One object, start and end at transport height. False = gave up before
     lifting (logged). ``chassis_move`` (no-arg callable) is started in a thread
-    right after the lift and runs while the arm carries the upright object over
-    the slot and turns it; the descent waits for it. If it raises, the run
+    right after the lift and runs while the arm carries the upright object to
+    the fixed turn pose and turns it; the descent waits for it. If it raises, the run
     stops with the object still held at transport height -> None.
     Returns with the gripper still at the release width, tool clear above the
     bin: the caller opens it fully, which overlaps the drive back.
     ``place_at`` (no-arg callable -> (x, y, alpha_deg) or None) is asked after
-    the chassis has stopped and the turn is done — everything up to the hover
-    pose is identical every cycle, and only the LAY-DOWN changes. It measures
+    the chassis has stopped and the turn is done — the carry and the turn run
+    at cfg.STAND_TURN_XY, one fixed spot, so everything up to there really is
+    the same motion every cycle and only the LAY-DOWN changes (0914; the turn
+    used to run over the cycle's own slot, which the slot offsets alone move by
+    15cm across a four-cylinder run). It measures
     the bin from wherever the base ended up and answers with the point to place
     at plus the wrist spin that lines the row up with the bin, so the chassis is
     out of the final error chain (the arm, not the base, closes the loop on the
@@ -721,6 +889,13 @@ def run_object(g: GripperMover, plan: ObjectPlan, pick_only: bool,
     beside the bin on 0911. An unreachable SPIN does fall back to the unturned
     lay-down, which places correctly, just not parallel to the bin."""
     rpy = plan.rpy_pick
+    if plan.q_carry is None or plan.q_lay_hi is None:
+        # The two fixed postures the carry and the turn are flown as; without
+        # them there is nothing to fly. Refuse BEFORE the pick (the --no-detect
+        # path does not gate on plan.ok, unlike _run_detected).
+        logger.error("[{}] plan has no {} posture — not picking", plan.label,
+                     "carry" if plan.q_carry is None else "lay-down hover")
+        return False
     g.gripper.open()
     snapshot(g, f"{plan.label} start")
     # Going STRAIGHT to the standoff was tried 0911 and scraped the desk: the
@@ -748,17 +923,38 @@ def run_object(g: GripperMover, plan: ObjectPlan, pick_only: bool,
     if g.move_ee([plan.p_standoff[0], plan.p_standoff[1], z_pre], rpy,
                  v_out=(0.0, 0.0, -float(cfg.STAND_HANDOVER_SPEED_M_S))) is None:
         return False
-    logger.info("[{}] straight down to pinch height z={:.3f}", plan.label, plan.p_standoff[2])
-    if g.move_ee_vertical(plan.p_standoff[2], rpy, v_in=g._handover_speed) is None:
-        return False
-    time.sleep(0.3)
-    stop = _guard(g, plan.approach_dir)
-    logger.info("[{}] entry {:.0f}mm along ({:+.2f},{:+.2f}) at {:.3f} m/s{}", plan.label,
-                float(cfg.STAND_STANDOFF_M) * 1000, *plan.approach_dir[:2],
-                float(cfg.STAND_APPROACH_SPEED_M_S),
-                f" (bump guard {cfg.STAND_CONTACT_N:.0f}N)" if stop else " (NO force guard)")
-    q = g.move_ee_line(plan.p_pinch, rpy, speed=float(cfg.STAND_APPROACH_SPEED_M_S), stop_fn=stop,
-                       trace_tag="entry")
+    corner_r = float(cfg.STAND_CORNER_RADIUS_M)
+    if corner_r > 0.0:
+        # ONE stream: straight down, rounded corner, straight in. The arm does
+        # not stop where the two legs meet, so the velocity DIRECTION turns
+        # through the arc instead of the leg restarting from rest. The wrench
+        # tare that the old full stop existed for is taken in-stream.
+        logger.info("[{}] down to pinch height z={:.3f}, {:.0f}mm rounded corner, "
+                    "then {:.0f}mm entry along ({:+.2f},{:+.2f}) at {:.3f} m/s "
+                    "(bump guard {:.0f}N)", plan.label, plan.p_standoff[2],
+                    corner_r * 1000,
+                    (float(cfg.STAND_STANDOFF_M) - corner_r) * 1000,
+                    *plan.approach_dir[:2], float(cfg.STAND_APPROACH_SPEED_M_S),
+                    cfg.STAND_CONTACT_N)
+        tick, stop = _corner_guard(g, plan)
+        q = g.move_ee_corner(plan.p_standoff, plan.p_pinch, rpy, corner_r,
+                             float(cfg.DESCENT_APPROACH_SPEED_M_S),
+                             float(cfg.STAND_APPROACH_SPEED_M_S),
+                             v_in=g._handover_speed,
+                             decel_m=float(cfg.STAND_CORNER_DECEL_M),
+                             stop_fn=stop, tick_cb=tick, trace_tag="entry")
+    else:
+        logger.info("[{}] straight down to pinch height z={:.3f}", plan.label, plan.p_standoff[2])
+        if g.move_ee_vertical(plan.p_standoff[2], rpy, v_in=g._handover_speed) is None:
+            return False
+        time.sleep(0.3)
+        stop = _guard(g, plan.approach_dir)
+        logger.info("[{}] entry {:.0f}mm along ({:+.2f},{:+.2f}) at {:.3f} m/s{}", plan.label,
+                    float(cfg.STAND_STANDOFF_M) * 1000, *plan.approach_dir[:2],
+                    float(cfg.STAND_APPROACH_SPEED_M_S),
+                    f" (bump guard {cfg.STAND_CONTACT_N:.0f}N)" if stop else " (NO force guard)")
+        q = g.move_ee_line(plan.p_pinch, rpy, speed=float(cfg.STAND_APPROACH_SPEED_M_S), stop_fn=stop,
+                           trace_tag="entry")
     if q is None:
         logger.error("[{}] entry stalled — backing out", plan.label)
         g.move_ee_line(plan.p_standoff, rpy)
@@ -800,14 +996,18 @@ def run_object(g: GripperMover, plan: ObjectPlan, pick_only: bool,
     if chassis_move is not None:
         mover = _Background(chassis_move, "chassis")
         mover.start()
-    logger.info("[{}] carry (upright) over the slot ({:.3f},{:+.3f}){}", plan.label, *plan.p_place_hi[:2],
-                " while the chassis drives" if mover else "")
-    if g.move_ee(plan.p_place_hi, rpy) is None:
-        if mover:
-            mover.join()
-        return False
-    logger.info("[{}] in-air turn ({} waypoints) at speed scale {:.2f}: object ends lying along x, tool down",
-                plan.label, len(plan.q_rotate), cfg.STAND_TURN_SPEED_SCALE or cfg.SPEED_SCALE_RIGHT)
+    logger.info("[{}] carry (upright) to the fixed turn pose ({:.3f},{:+.3f}){}", plan.label,
+                *plan.p_turn_hi[:2], " while the chassis drives" if mover else "")
+    # move_JOINTS, not move_ee: the planned joints are flown as they were
+    # planned, so the arm arrives in the same posture every cycle and the turn
+    # waypoints chained off it are the same motion every cycle. move_ee would
+    # re-solve the pose from wherever the arm is and land somewhere else
+    # (cfg.STAND_TURN_XY).
+    g.move_joints(plan.q_carry)
+    logger.info("[{}] turn AND travel in ONE move at speed scale {:.2f}: ({:.3f},{:+.3f}) upright -> "
+                "({:.3f},{:+.3f}) lying along x, tool down", plan.label,
+                cfg.STAND_TURN_SPEED_SCALE or cfg.SPEED_SCALE_RIGHT,
+                plan.p_turn_hi[0], plan.p_turn_hi[1], plan.p_lay_hi[0], plan.p_lay_hi[1])
     # the turn gets its own (slower) joint-speed budget: the cylinder is held
     # along the axis the turn's decelerations act on, and it crept ~1 cm in the
     # pads at 0.5 / less at 0.3 (0906) — rebuild the Ruckig limits around it
@@ -816,7 +1016,18 @@ def run_object(g: GripperMover, plan: ObjectPlan, pick_only: bool,
         cfg.SPEED_SCALE_RIGHT = float(cfg.STAND_TURN_SPEED_SCALE)
         g._setup_ruckig()
     try:
-        g.move_joints_through(plan.q_rotate)
+        # ONE move, like go_home, and it carries the TRAVEL as well as the flip.
+        # The old version streamed 6 slerp waypoints that each held the
+        # POSITION: the hand stayed within 20mm but it cost 5.43s (4.5-6.0s over
+        # the 0911 cycles) and then still had to slide. This is 1.98s and ends
+        # where the slide used to start. The price is a free joint path — the
+        # hand swings ~340mm out and back instead of staying put; measured on
+        # that swing (command side), the held cylinder clears the bin rim by
+        # 66mm and passes 146mm over cylinders still standing on the desk.
+        # Ending at the place CENTRE and not at the measured lay-down point is
+        # what keeps the wrist spin usable: from here the slide solves -45..+45
+        # deg, against +0..-45 when the move ran all the way to the slot.
+        g.move_joints(plan.q_lay_hi)
     finally:
         cfg.SPEED_SCALE_RIGHT = run_scale
         g._setup_ruckig()
@@ -828,32 +1039,66 @@ def run_object(g: GripperMover, plan: ObjectPlan, pick_only: bool,
                          "NOT placing", plan.label, mover.error)
             return None
     place_xy = np.asarray(plan.p_place_hi[:2], dtype=float)
+    alpha = 0.0
     if place_at is not None:
         answer = place_at()
         if answer is None:
-            logger.error("[{}] no trusted place point — holding the object at transport height, "
+            logger.error("[{}] no trusted place point — holding the object at the turn pose, "
                          "NOT placing", plan.label)
             return None
         place_xy = np.asarray(answer[:2], dtype=float)
         alpha = float(answer[2])
-        moved = not np.allclose(place_xy, plan.p_place_hi[:2], atol=1e-4)
-        if moved or alpha != 0.0:
+        if alpha != 0.0:
             rpy = _place_rpy(alpha)
-            logger.info("[{}] lay-down from the camera: ({:.3f},{:+.3f}) {:.0f} mm off the planned point, "
-                        "wrist spun {:+.1f} deg — sliding there at transport height", plan.label,
-                        *place_xy, float(np.linalg.norm(place_xy - plan.p_place_hi[:2])) * 1000, alpha)
-            if g.move_ee([place_xy[0], place_xy[1], plan.z_transport], rpy) is None:
-                if alpha == 0.0:
-                    logger.error("[{}] that point is not reachable from here — holding the object, "
-                                 "NOT placing (no fallback to the planned point)", plan.label)
-                    return None
-                logger.warning("[{}] not reachable with the wrist spun {:+.1f} deg — retrying unturned "
-                               "(the cylinder will not lie parallel to the bin)", plan.label, alpha)
-                rpy = tuple(plan.rpy_place)
-                if g.move_ee([place_xy[0], place_xy[1], plan.z_transport], rpy) is None:
-                    logger.error("[{}] not reachable unturned either — holding the object, NOT placing",
-                                 plan.label)
-                    return None
+    trim = float(cfg.STAND_PLACE_Y_TRIM_M)
+    if trim:
+        # base-frame nudge, after the row offset and the camera answer, so it
+        # lands wherever the cylinder actually goes down (cfg.STAND_PLACE_Y_TRIM_M)
+        place_xy = place_xy + np.array([0.0, trim])
+        logger.info("[{}] base-y place trim {:+.0f}mm -> ({:.3f},{:+.3f})", plan.label,
+                    trim * 1000.0, *place_xy)
+    z_bottom = plan.z_place - float(cfg.STAND_PLACE_OVERSHOOT_M)
+
+    def reach_lay_down(rpy_try) -> bool:
+        """Check the DESCENT COLUMN at the lay-down point, then slide there.
+
+        The column, not just the pose: the turn now runs at a fixed spot
+        (cfg.STAND_TURN_XY), so the planner's column pre-check is no longer at
+        the place point — it only sanity-checks the PLANNED slot, while the arm
+        descends where the camera says. Checking the real column from here, at
+        the turn pose with the object still safely held, is what keeps a
+        "cannot descend there" from being discovered with a cylinder in the
+        hand and nowhere to put it. A pose that solves at transport height but
+        runs out of arm on the way down to the bin floor is exactly the case
+        the old point-only check missed.
+
+        Seeded from the arm's CURRENT command, i.e. the pose the turn ended at:
+        column_reachable warm-chains from its seed, and a cold solve lands on a
+        different branch and reports FAIL for columns the arm reaches perfectly
+        well from here (measured offline 0914 — every slot failed cold and
+        passed warm). The planner has the same warm-seeding for its own
+        pre-check."""
+        if not g.column_reachable(place_xy[0], place_xy[1], rpy_try, plan.z_transport, z_bottom,
+                                  seed=g._q_cmd):
+            return False
+        return g.move_ee([place_xy[0], place_xy[1], plan.z_transport], rpy_try) is not None
+
+    logger.info("[{}] lay-down at ({:.3f},{:+.3f}), {:.0f} mm from the turn pose, wrist spun "
+                "{:+.1f} deg — column-checking it, then sliding there at transport height",
+                plan.label, *place_xy,
+                float(np.linalg.norm(place_xy - plan.p_turn_hi[:2])) * 1000, alpha)
+    if not reach_lay_down(rpy):
+        if alpha == 0.0:
+            logger.error("[{}] the column down to the bin floor there does not solve — holding the "
+                         "object at the turn pose, NOT placing (no fallback point)", plan.label)
+            return None
+        logger.warning("[{}] no column with the wrist spun {:+.1f} deg — retrying unturned (the "
+                       "cylinder will not lie parallel to the bin)", plan.label, alpha)
+        rpy = tuple(plan.rpy_place)
+        if not reach_lay_down(rpy):
+            logger.error("[{}] no column unturned either — holding the object at the turn pose, "
+                         "NOT placing", plan.label)
+            return None
     time.sleep(0.3)
     touch = _guard(g, (0.0, 0.0, 1.0))                       # tared WITH the object hanging
     # Only the CREEP decides touchdown. The fast leg stops STAND_PLACE_SLOW_FROM_M
@@ -1123,6 +1368,13 @@ def _run_detected(bot, g: GripperMover, a: Args) -> bool:
         scene = detect_scene(bot)
         if scene is None:
             break
+        if a.chassis and not scene.cylinders:
+            # Nothing in view: search before giving up (_search_cylinder). The
+            # ladder below only nudges a cylinder it can SEE, so without this
+            # an empty view ended the run outright.
+            scene = _search_cylinder(bot, net, k + 1)
+            if scene is None:
+                break
         if a.chassis and scene.cylinders:
             cyl = np.asarray(scene.cylinders[0][:2])
             fetch = _pick_window_fetch(cyl)

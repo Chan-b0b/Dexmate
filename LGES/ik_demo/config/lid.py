@@ -240,7 +240,15 @@ LID_PLACE_ELBOW_MARGIN_RAD: float = 0.15   # 8.6 deg; 0.30+ is also reachable
 # ceiling. Its own knob because the lean is a 75 deg swing on the third joint,
 # which at the shared TORSO_VEL_SCALE (0.2, sized for mm of drift correction)
 # crawls. Every other torso move keeps TORSO_VEL_SCALE.
-LID_TORSO_VEL_SCALE: float = 0.3
+LID_TORSO_VEL_SCALE: float = 0.5
+# ARM speed for the same step: both arms swing out to their stow joints while
+# the torso leans, and at the arms' normal SPEED_SCALE that spread is a fast
+# sweep with the picked lid on the cup. TIME-scales those two move_joints calls
+# only (arm.plan_joint_traj's vel_scale): 0.5 = twice as long, so the spread
+# runs ~1.8s instead of ~0.9s. Every other arm move keeps
+# SPEED_SCALE_LEFT/RIGHT. The torso is NOT slowed with it, so it finishes its
+# lean (LID_TORSO_VEL_SCALE) before the arms finish spreading.
+LID_STOW_VEL_SCALE: float = 0.5
 # BEV warp plane for detecting the lid ALREADY ON THE FLOOR at the unload spot
 # = its TOP FACE. Measured: the cup touched down on it at EE z 0.35, one
 # cup-length above, so 0.35 - SUCTION_LENGTH_M.

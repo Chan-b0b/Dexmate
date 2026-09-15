@@ -52,11 +52,9 @@ generalists ignoring newly added sensors~\cite{fuse}, and FM-VLA diagnoses a his
 shortcut in its own force stream and patches it with augmentation---verifying the fix, again,
 only by task success~\cite{fmvla}.
 We instantiate this literature where it has not been applied---force conditioning in fine-tuned
-VLAs---and add two elements: a quantitative demonstration that \emph{training loss carries zero
-signal} about which input the policy is bound to (equal to the fourth decimal in two independent
-model pairs), and the usage/form dissociation: the data's correlation structure decides
-\emph{whether} a signal is used, while the conditioning architecture decides \emph{what form}
-its use takes under extrapolation.
+VLAs---and add the usage/form dissociation: the data's correlation structure decides
+\emph{whether} a signal is used, while the conditioning pathway decides \emph{what form} its
+use takes under extrapolation.
 
 \textbf{Privileged supervision and interventional evaluation.}
 Privileged-teacher distillation~\cite{chen2020lbc,privilegedaction} assumes access to a signal

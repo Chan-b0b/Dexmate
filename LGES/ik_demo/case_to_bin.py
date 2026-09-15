@@ -67,14 +67,31 @@ def _pick_source_case(bot, mover: SuctionMover, layers: int):
     """Detect + pick the top case of the box in front. Returns the pick's
     source center (x, y, z_EE, yaw_rad) once the case is on the cup, else None.
 
-    The detection/pre-check/prompt loop is chassis_sequence.run_item's source
-    flow: a miss or an out-of-reach pose hands the operator the keyboard
-    (`f/b/l/r`, `d` re-detects because the base frame moved, `q` gives up)
-    rather than reaching blind."""
-    from .chassis_sequence import (_arms_home, _center_from_det, _manual_strafe,
-                                   _refine_det, descent_reachable, detect)  # noqa: PLC0415
+    The centering/detection/pre-check/prompt loop is chassis_sequence.run_item's
+    source flow: the chassis first turns and drives onto the detected case
+    (_center_case), and a miss or an out-of-reach pose hands the operator the
+    keyboard (`f/b/l/r`, `d` re-detects because the base frame moved, `q` gives
+    up) rather than reaching blind."""
+    from .chassis_sequence import (_arms_home, _center_case, _center_from_det,
+                                   _manual_strafe, _refine_det,
+                                   descent_reachable)  # noqa: PLC0415
+    # Centre the chassis on the case FIRST, exactly as run_item's source pick
+    # does (turn to the case's yaw, then drive until its GRAB point sits on the
+    # centre line at the taught x). Without it the case is picked wherever the
+    # operator happened to park, and the straight-up lift out of the box walls
+    # tracks far worse from a far-forward / off-centre shoulder pose: 0914
+    # measured 38.6mm of -x cup drift lifting from x=1.00,y=+0.20 against
+    # 28.8mm from run_item's centred x=0.86,y=0.00 — all of it toward the
+    # robot, i.e. into the robot-side box wall. Strict start deadbands, since
+    # this follows a manual park and nothing corrects it afterwards.
+    y_ref = (cfg.CHASSIS_CENTER_CASE_Y_M
+             - resolve_poses((0.0, 0.0, 0.0, 0.0))["CASE_PICK"][1])
     while True:
-        det = detect(bot, layers)
+        det = _center_case(bot, layers, LABEL, "source", None, y_ref,
+                           tol_m=cfg.CHASSIS_START_CENTER_TOL_M,
+                           min_turn_deg=cfg.CHASSIS_START_MIN_TURN_DEG,
+                           max_moves=cfg.CHASSIS_START_CENTER_MAX_MOVES,
+                           x_ref=cfg.SOURCE_CASE_CENTER[0])
         if det is not None and det.found:
             det = _refine_det(bot, layers, det)     # median-of-N for the pose
             logger.info("[{}] source case @ base xy=({:.3f},{:+.3f}) yaw={:.1f}deg "

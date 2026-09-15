@@ -229,8 +229,8 @@ PICK_SEAL_RETRIES: int = 2                  # on vacuum_timeout: lift DESCENT_CR
 # LID_GRAB_OFFSET_M, tens of mm from any edge) while clearing a local defect.
 # UNVERIFIED on the robot.
 PICK_SEAL_RETRY_OFFSET_M: float = 0.005
-SEAL_PRELIFT_M: float = 0.00               # relieve contact press before suction on
-RELEASE_PRELIFT_M: float = 0.015            # lift before the blow-off release
+SEAL_PRELIFT_M: float = 0.005               # relieve contact press before suction on
+RELEASE_PRELIFT_M: float = 0.025            # lift before the blow-off release
 PLACE_Z_BUFFER_M: float = 0.10              # accept a seat within this of the taught z
 PLACE_MISSEAT_TOL_M: float = 0.005          # place contact this far ABOVE the expected
                                             # seat z = rim-landing (misseat): hold, don't
@@ -453,7 +453,7 @@ BATTERY_CORNER_AIM_BIAS_M: tuple[float, float] = (0.01, 0.01)  # (x, y) aim shif
                                              # a firmer forward-wall contact
 BATTERY_CORNER_SPEED_M_S: float = 0.03      # lateral drive speed (slot-scale,
                                              # separate from the case's)
-BATTERY_CORNER_MAX_TRAVEL_M: float = 0.04   # per-axis post-contact travel cap
+BATTERY_CORNER_MAX_TRAVEL_M: float = 0.07   # per-axis post-contact travel cap
 BATTERY_PLACE_HOVER_M: float = 0.15         # battery place hover above the expected
                                              # seat (HOVER_HEIGHT_M 0.25 elsewhere):
                                              # the battery drops vertically with no

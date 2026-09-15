@@ -16,8 +16,9 @@ matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 import numpy as np
 
-BASE = "/home/maverick/Humanoid/Dexmate/LGES/vla_training/rollouts"
-OUT = "/home/maverick/Humanoid/Dexmate/Research/Paper_writing/FiLM/paper/figs"
+_ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), "../../../.."))  # .../Dexmate
+BASE = os.path.join(_ROOT, "LGES/vla_training/rollouts")
+OUT = os.path.join(_ROOT, "Research/Paper_writing/FiLM/paper/figs")
 
 C_NAIVE = "#D55E00"   # vermillion — validated pair (dataviz six checks, light surface)
 C_COND = "#0072B2"    # blue
@@ -90,7 +91,7 @@ ax.grid(axis="y", color=GRID, lw=0.4, alpha=0.6, zorder=0)
 
 # direct labels + legend (2 series)
 ax.plot([], [], color=C_NAIVE, lw=1.2, label="naive (aborted ×)")
-ax.plot([], [], color=C_COND, lw=1.2, label="conditioned")
+ax.plot([], [], color=C_COND, lw=1.2, label="FiLM (ours)")
 ax.legend(fontsize=6.3, frameon=False, loc="upper left", handlelength=1.4,
           borderaxespad=0.2)
 

@@ -44,7 +44,8 @@ Our fix changes how force is delivered, not what is delivered. A condition vecto
 and injected through FiLM modulation~\cite{perez2018film}; the raw wrench is masked from the
 state so that the same signal does not enter twice, making \chat{} the \emph{only} pathway from
 force to action. We call this pathway \emph{grounded} because its content is computed from
-measured signals, and the policy trained behind it the \emph{conditioned policy}. By
+measured signals, and the policy trained behind it the \emph{conditioned policy} (``FiLM
+(ours)'' in tables and figures). By
 construction it receives no information the naive policy lacks, and because the pathway is
 explicit and unique, forcing \chat{} at inference directly measures its \emph{causal
 authority}---the fraction of commanded descent the condition can cancel.
@@ -58,11 +59,6 @@ presses to a randomized force target and retreats before any seal event, so the 
 the expert stops varies from episode to episode---in the data, depth, appearance, and timing no
 longer predict the stop; only the force reading does. The same interface that fixes the policy
 is the instrument that audits it (Sec.~\ref{sec:method}).
-\memo{open (08-12): demote ``The demonstrations complete the recipe'' to setting-the-stage
-wording, and drop the data co-attribution from the one-sentence summary at the end?
-Follow-up of the architecture-emphasis decision. Also optional: restore ``replicated in two
-independent model pairs'' somewhere in para.~3 --- it left the intro with the contributions
-rework.}
 
 The resulting policy is not uniformly better---it is different exactly where the task is
 decided. In a matched comparison---same data, same initialization, imitation error
@@ -78,27 +74,25 @@ pick---across three stack heights, at a median contact force of $2.5$\,N---and l
 counterfactual probes reproduce the offline crossover on the physical system
 (Sec.~\ref{sec:robot}).
 
-Our contributions:
+Our contribution is the pathway and three properties of it, each measured by intervention on
+the trained policy (Sec.~\ref{sec:method-probes}):
 \begin{itemize}
-\item \textbf{From force runaway to force regulation, with the same demonstrations.} A
-  grounded FiLM pathway---\chat{} computed from signals the policy already receives,
-  injected through FiLM, the raw wrench masked---turns the same press-retreat
-  demonstrations into a policy that brakes monotonically with force instead of reproducing a
-  saturating template: on the robot it stops under the $15$\,N abort limit in every pick
-  (median contact force $2.5$\,N) on a transition the naive policy fails uniformly
-  (Sec.~\ref{sec:method},~\ref{sec:robot}).
-\item \textbf{An instrument for causal authority.} The pathway is measurable by construction:
-  a counterfactual probe battery---condition forcing, state transplants with pathway
-  decomposition, dose-response sweeps, closed-loop press simulation, and on-robot
-  frozen-observation counterfactuals---quantifies moment-resolved causal use and transfers to
-  the real system (Sec.~\ref{sec:method-probes}).
-\item \textbf{Robustness beyond the demonstrations.} The conditioned policy's stop is bound to
-  force itself, not to force's correlates---under intervention, its response runs entirely
-  through the conditioning pathway---and this buys robustness on the two axes we test: braking
-  grows monotonically at forces beyond anything demonstrated, stopping and retreating where
-  the naive policy's template saturates and presses through, and picks succeed $3/3$ at a
-  stack height absent from the demonstrations. The failure class the recipe corrects persists
-  unchanged at $3.6$B scale (Sec.~\ref{sec:offline},~\ref{sec:robot}).
+\item \textbf{Drop-in.} \chat{} is computed from signals the policy already receives and
+  enters through an identity-initialized FiLM layer at the state token; the backbone is
+  untouched, no information is added, imitation error is unchanged, and the same pathway
+  attaches to a second backbone ($\pi_0$), where it again turns a policy that never stops into
+  one that does (Sec.~\ref{sec:method},~\ref{sec:offline-pi0}).
+\item \textbf{Retrofittable.} Added to an already-trained naive policy and continued for a
+  few thousand steps on the same demonstrations, the pathway turns a saturating force template
+  into a monotone brake; a matched ablation shows the mask and the grounding are both
+  necessary---unmasked, the pathway trains causally dead (\emph{bypass}); ungrounded, it is the
+  worst policy in the study (Sec.~\ref{sec:offline}).
+\item \textbf{Monotone beyond the demonstrations.} Because \chat{} is a calibrated monotone
+  scalar, braking grows with force past anything demonstrated, stopping and retreating where
+  the naive policy's template saturates and presses through (Sec.~\ref{sec:offline}). The
+  same holds on our robot: every conditioned pick stops under the $15$\,N abort limit (median
+  contact force $2.5$\,N), including at a stack height absent from the demonstrations, and
+  live counterfactuals reproduce the crossover (Sec.~\ref{sec:robot}).
 \end{itemize}
 
 \noindent In one sentence: \emph{a policy that stops when it feels what the demonstrations felt

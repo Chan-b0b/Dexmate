@@ -1,6 +1,16 @@
 % Bibliography — seeded from Research/condition_driven/related_work/RELATED_WORK.md + OUTLINE §10.
-% ⚠ Author lists / venues / years marked TODO must be verified (bibliography-auditor pass before
-% submission). arXiv IDs are from the related-work map and are the source of truth here.
+% 09-14: all formerly TODO-verify entries filled from arXiv abstract-page metadata (citation_* meta
+% tags; ForceVLA/CGP via Semantic Scholar). Titles/authors as listed on arXiv on 2026-09-14.
+% Venue fields for arXiv entries left as preprints (ForceVLA is listed as NeurIPS 2025 on S2 — set
+% booktitle before camera-ready if desired).
+
+% IEEEtran.bst control entry (activated by \bstctlcite in main.tex): author lists longer than
+% 6 names are truncated to "et al." to keep the references within the 8-page budget.
+@IEEEtranBSTCTL{IEEEexample:BSTcontrol,
+  CTLuse_forced_etal       = "yes",
+  CTLmax_names_forced_etal = "6",
+  CTLnames_show_etal       = "1"
+}
 
 @inproceedings{perez2018film,
   author    = {Ethan Perez and Florian Strub and Harm de Vries and Vincent Dumoulin and Aaron Courville},
@@ -42,78 +52,78 @@
 }
 
 @article{forcevla,
-  author  = {{TODO-verify authors}},
-  title   = {{ForceVLA}: Force-Aware Mixture-of-Experts for Contact-Rich Manipulation},
+  author  = {Jiawen Yu and Hairuo Liu and Qiaojun Yu and Jieji Ren and Ce Hao and Haitong Ding and Guang-Yu Huang and Guo-Fan Huang and Yan Song and Panpan Cai and Wenqiang Zhang and Cewu Lu},
+  title   = {{ForceVLA}: Enhancing {VLA} Models with a Force-aware {MoE} for Contact-rich Manipulation},
   journal = {arXiv preprint arXiv:2505.22159},
   year    = {2025}
 }
 
 @article{phaforce,
-  author  = {{Wang et al. (TODO-verify)}},
-  title   = {{PhaForce}: Phase-Scheduled Visual-Force Policy Learning with Slow Planning and Fast Correction},
+  author  = {Mingxin Wang and Zhirun Yue and Renhao Lu and Yizhe Li and Zihan Wang and Guoping Pan and Kangkang Dong and Jun Cheng and Yi Cheng and Houde Liu},
+  title   = {{PhaForce}: Phase-Scheduled Visual-Force Policy Learning with Slow Planning and Fast Correction for Contact-Rich Manipulation},
   journal = {arXiv preprint arXiv:2603.08342},
   year    = {2026}
 }
 
 @article{forceflow,
-  author  = {{TODO-verify authors}},
-  title   = {{ForceFlow} (TODO-verify full title)},
+  author  = {Shuoheng Zhang and Yifu Yuan and Hongyao Tang and Yan Zheng and Qiaojun Yu and Pengyi Li and Guowei Huang and Helong Huang and Xingyue Quan and Jianye Hao},
+  title   = {{ForceFlow}: Learning to Feel and Act via Contact-Driven Flow Matching},
   journal = {arXiv preprint arXiv:2605.11048},
   year    = {2026}
 }
 
 @article{farm,
-  author  = {{TODO-verify authors}},
-  title   = {{FARM}: Tactile-Conditioned Diffusion Policies (TODO-verify full title)},
+  author  = {Erik Helmut and Niklas Funk and Tim Schneider and Cristiana de Farias and Jan Peters},
+  title   = {Tactile-Conditioned Diffusion Policy for Force-Aware Robotic Manipulation},
   journal = {arXiv preprint arXiv:2510.13324},
   year    = {2025}
 }
 
 @article{tacforesight,
-  author  = {{TODO-verify authors}},
-  title   = {{TacForeSight}: Force-Conditioned Tactile World Models (TODO-verify full title)},
+  author  = {Yujie Zang and Yuhang Zheng and Xian Nie and Yupeng Zheng and Shuai Tian and Songen Gu and Chen Gao and Zining Wang and Shuicheng Yan and Wenchao Ding},
+  title   = {{TacForeSight}: Force-Guided Tactile World Model for Contact-Rich Manipulation},
   journal = {arXiv preprint arXiv:2606.11184},
   year    = {2026}
 }
 
 @article{filic,
-  author  = {{TODO-verify authors}},
-  title   = {{FILIC}: Dual-Loop Force-Guided Imitation Learning with Impedance Control (TODO-verify)},
+  author  = {Haizhou Ge and Yufei Jia and Zheng Li and Yue Li and Zhixing Chen and Lu Shi and Lei Han and Ruqi Huang and Guyue Zhou},
+  title   = {{FILIC}: Dual-Loop Force-Guided Imitation Learning with Impedance Torque Control for Contact-Rich Manipulation Tasks},
   journal = {arXiv preprint arXiv:2509.17053},
   year    = {2025}
 }
 
 @article{cgp,
-  author  = {{TODO-verify authors}},
-  title   = {{CGP} (TODO-verify full title)},
+  author  = {Zheng-Tong Xu and Yeping Wang and Ben Abbatematteo and Jom Preechayasomboon and Sonny Chan and Nick Colonnese and Amirhossein H. Memar},
+  title   = {Contact-Grounded Policy: Dexterous Visuotactile Policy with Generative Contact Grounding},
   journal = {arXiv preprint arXiv:2603.05687},
   year    = {2026}
 }
 
 @article{rtaffordance,
-  author  = {Soroush Nasiriany and others},
+  author  = {Soroush Nasiriany and Sean Kirmani and Tianli Ding and Laura Smith and Yuke Zhu and Danny Driess and Dorsa Sadigh and Ted Xiao},
   title   = {{RT-Affordance}: Affordances are Versatile Intermediate Representations for Robot Manipulation},
   journal = {arXiv preprint arXiv:2411.02704},
   year    = {2024}
 }
 
 @article{shortcutgeneralist,
-  author  = {{TODO-verify authors}},
-  title   = {Shortcut Learning in Generalist Robot Policies (TODO-verify full title)},
+  author  = {Youguang Xing and Xu Luo and Junlin Xie and Lianli Gao and Hengtao Shen and Jingkuan Song},
+  title   = {Shortcut Learning in Generalist Robot Policies: The Role of Dataset Diversity and Fragmentation},
   journal = {arXiv preprint arXiv:2508.06426},
   year    = {2025}
 }
 
 @article{interventionil2025,
-  author  = {{TODO-verify authors}},
-  title   = {Intervention-Based Evaluation of Imitation Policies (TODO-verify full title)},
+  author  = {Yifei Chen and Yuzhe Zhang and Giovanni D'urso and Nicholas Lawrance and Brendan Tidd},
+  title   = {Improving Generalization Ability of Robotic Imitation Learning by Resolving Causal Confusion in Observations},
   journal = {arXiv preprint arXiv:2507.22380},
   year    = {2025}
 }
 
 @article{interventionil2023,
-  author  = {{TODO-verify authors}},
-  title   = {Interventional Imitation Learning (TODO-verify full title)},
+  author  = {Samuel Pfrommer and Yatong Bai and Hyunin Lee and Somayeh Sojoudi},
+  title   = {Initial State Interventions for Deconfounded Imitation Learning},
   journal = {arXiv preprint arXiv:2307.15980},
   year    = {2023}
 }
@@ -133,34 +143,31 @@
 }
 
 @article{privilegedaction,
-  author  = {{TODO-verify authors}},
+  author  = {Xiaofeng Mao and Yucheng Xu and Zhaole Sun and Elle Miller and Daniel Layeghi and Michael Mistry},
   title   = {Learning Long-Horizon Robot Manipulation Skills via Privileged Action},
   journal = {arXiv preprint arXiv:2502.15442},
   year    = {2025}
 }
 
 @article{smolvla,
-  author  = {Mustafa Shukor and others},
+  author  = {Mustafa Shukor and Dana Aubakirova and Francesco Capuano and Pepijn Kooijmans and Steven Palma and Adil Zouitine and Michel Aractingi and Caroline Pascal and Martino Russi and Andres Marafioti and Simon Alibert and Matthieu Cord and Thomas Wolf and Remi Cadene},
   title   = {{SmolVLA}: A Vision-Language-Action Model for Affordable and Efficient Robotics},
   journal = {arXiv preprint arXiv:2506.01844},
-  year    = {2025},
-  note    = {TODO-verify arXiv ID}
+  year    = {2025}
 }
 
 @article{pi05,
-  author  = {Kevin Black and others},
+  author  = {{Physical Intelligence} and Kevin Black and Noah Brown and James Darpinian and Karan Dhabalia and Danny Driess and Adnan Esmail and Michael Equi and Chelsea Finn and others},
   title   = {$\pi_{0.5}$: A Vision-Language-Action Model with Open-World Generalization},
   journal = {arXiv preprint arXiv:2504.16054},
-  year    = {2025},
-  note    = {TODO-verify arXiv ID and author list}
+  year    = {2025}
 }
 
 @article{pi0,
-  author  = {Kevin Black and others},
+  author  = {Kevin Black and Noah Brown and Danny Driess and Adnan Esmail and Michael Equi and Chelsea Finn and Niccolo Fusai and Lachy Groom and Karol Hausman and Brian Ichter and others},
   title   = {$\pi_0$: A Vision-Language-Action Flow Model for General Robot Control},
   journal = {arXiv preprint arXiv:2410.24164},
-  year    = {2024},
-  note    = {TODO-verify arXiv ID and author list}
+  year    = {2024}
 }
 
 % ===== 08-11 추가: §II reviewer-proofing 인용 (저자 arXiv API 검증 완료, reference/ANALYSIS.md) =====

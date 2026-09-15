@@ -52,7 +52,7 @@ DFMAG_IDX = 15                 # d|F|/dt (N/frame) — only in *_dF datasets (st
 CHANNELS = ("contact", "fz", "fmag", "seal", "dfmag")  # available condition channels (canonical order)
 _CFG = {"variant": "v0", "mask_force": True, "cond": ("contact", "seal"),
         "inject": "suffix"}  # mutated by apply()
-INJECTS = ("suffix", "output", "prefix")  # where FiLM modulates
+INJECTS = ("suffix", "output", "prefix", "layers")  # where FiLM modulates
 
 
 def load_wrench_stats(dataset_root):
@@ -194,6 +194,11 @@ def apply(variant: str, wrench_mean: torch.Tensor, wrench_std: torch.Tensor,
       'prefix' : the STATE token in the prefix (state_proj output, VLM-space ~960-d) — conditions
                  the OBSERVATION representation where ee_z + the wrench live, rather than the
                  action tokens. Uses a film sized to the prefix dim (state_proj.out_features).
+      'layers' : EVERY expert layer's MLP-branch output (lm_expert.layers[i].mlp), one zero-init
+                 ContactFiLM per layer — adaLN-Zero-style per-layer gating, the architecture-
+                 generic injection (any VLA has an action-decoder layer stack). layer.mlp is
+                 called as a MODULE in smolvlm_with_expert's hand-rolled loop, so forward hooks
+                 fire in both the training and the cached-inference (denoise) paths.
     mask_force=False keeps the conditioned dims in the action path (FiLM added ON TOP of the
     existing signal) — an ablation to isolate the effect of adding FiLM before committing to
     the bottleneck. When True, the conditioned dims (wrench for 'contact', seal for 'seal')
@@ -232,7 +237,12 @@ def apply(variant: str, wrench_mean: torch.Tensor, wrench_std: torch.Tensor,
         hidden = (self.state_proj.out_features if inject == "prefix"
                   else self.vlm_with_expert.expert_hidden_size)
         self._film_cond = cond
-        self.contact_film = ContactFiLM(hidden, cond_dim=len(cond))
+        if inject == "layers":   # one film per expert layer (adaLN-Zero style)
+            self.contact_film = nn.ModuleList(
+                [ContactFiLM(hidden, cond_dim=len(cond))
+                 for _ in self.vlm_with_expert.lm_expert.layers])
+        else:
+            self.contact_film = ContactFiLM(hidden, cond_dim=len(cond))
         if "contact" in cond or "fz" in cond or "fmag" in cond:  # all read the raw wrench
             self.register_buffer("_wrench_mean", wrench_mean.clone())
             self.register_buffer("_wrench_std", wrench_std.clone())
@@ -276,6 +286,18 @@ def apply(variant: str, wrench_mean: torch.Tensor, wrench_std: torch.Tensor,
                     return owner.contact_film(out[:, None, :], c)[:, 0, :]
                 return owner.contact_film(out, c)
             self.state_proj.register_forward_hook(_state_film_hook)
+
+        if inject == "layers":   # per-layer gating on each expert layer's MLP branch
+            def _mk_mlp_hook(idx):
+                def _mlp_film_hook(_module, _inp, out):
+                    c = owner._cur_contact
+                    if c is None:
+                        return out
+                    return owner.contact_film[idx](out, c)
+                return _mlp_film_hook
+
+            for i, layer in enumerate(self.vlm_with_expert.lm_expert.layers):
+                layer.mlp.register_forward_hook(_mk_mlp_hook(i))
 
     def new_embed_suffix(self, noisy_actions, timestep):
         embs, pad_masks, att_masks = orig_embed_suffix(self, noisy_actions, timestep)

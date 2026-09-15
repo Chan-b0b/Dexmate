@@ -63,7 +63,7 @@ STAND_PRE_LIFT_M: float = 0.15         # joint-space leg lands this far above th
 # SPEED_SCALE_RIGHT for as long as the job runs (stand_place restores the
 # session value afterwards, so the other chassis_sequence tasks keep theirs).
 # It is what --speed defaults to.
-STAND_SPEED_SCALE: float = 0.5
+STAND_SPEED_SCALE: float = 0.9
 # The rest of the speeds live next to the leg they control, because each one
 # only makes sense with that leg's geometry in front of it:
 #   STAND_HANDOVER_SPEED_M_S   just below — joint leg -> pre-lift column handover
@@ -80,8 +80,40 @@ STAND_SPEED_SCALE: float = 0.5
 # measured 0911 this needs 47-52% of joint vmax, while the descent cruise 0.35
 # needs 100% and is refused. 0.0 restores the old full stop.
 STAND_HANDOVER_SPEED_M_S: float = 0.15
-STAND_APPROACH_SPEED_M_S: float = 0.04 # entry speed (descent creep)
+STAND_APPROACH_SPEED_M_S: float = 0.08 # entry speed (descent creep)
+# Rounded corner between the straight-down descent and that entry (arm.
+# move_ee_corner), so the two are ONE stream and the arm does not stop where
+# they meet. 0 = the old pair: descend, full stop, settle + tare, then enter.
+# The radius only has to be small — the arc stays ABOVE pinch height and BEHIND
+# the pinch point, i.e. inside the free corner between two paths that were
+# already safe, so 20mm still leaves 60mm of straight entry for the force guard.
+# The arm cannot take the corner at descent speed, so the descent bleeds down to
+# the entry speed over STAND_CORNER_DECEL_M first; that band has to FIT the
+# descent (~130mm here) or the cruise disappears and the move ends up slower
+# than the version it replaces (measured: the shared 120mm band cost 0.6s).
+STAND_CORNER_RADIUS_M: float = 0.02
+STAND_CORNER_DECEL_M: float = 0.05
+# Arc length from the start of the descent over which the wrench baseline is
+# sampled IN-STREAM, replacing the stationary tare that the full stop used to
+# allow. Valid because the orientation is held and the speed is constant there,
+# so the load the sensor sees is what it would read standing still (same idea as
+# the suction descent's rolling reference). Ends well before the decel band so
+# every sample comes from the steady stretch.
+STAND_CORNER_TARE_FROM_M: float = 0.02
+# The bump guard arms only after this much travel ALONG the entry direction,
+# so the descent and the first mm of the arc are not policed by a threshold
+# picked for the horizontal entry (the descent had no guard at all before).
+STAND_CORNER_GUARD_FROM_M: float = 0.001
+STAND_CORNER_TARE_TO_M: float = 0.075
+STAND_CORNER_TARE_MIN_N: int = 8        # one sample per control tick (100 Hz), so the
+                                        # 55mm window at descent speed yields ~15, not
+                                        # the 50 the stationary tare read at 200 Hz
 STAND_CONTACT_N: float = 5.0           # entry / touchdown guard on the tared wrist wrench
+# IK waypoints along the in-air turn. FEASIBILITY GATE ONLY since 0914 — they
+# are solved and checked (a failure fails the plan) but NOT flown: run_object
+# turns the cylinder on the way from STAND_TURN_XY to STAND_BIN_PLACE_XY, in
+# one move_joints. What they still say is that the orientation flip is solvable
+# in that part of the workspace at all.
 STAND_ROTATE_STEPS: int = 6            # IK waypoints along the in-air turn
 # Joint-speed scale for the in-air turn ONLY (None = the run's --speed). 0906:
 # the first-placed cylinder always landed ~1 cm toward the robot, less at
@@ -110,6 +142,15 @@ STAND_BIN_TARGET_BASE_XY: tuple[float, float] = (0.925, -0.125)
 # now (up to four later), so it goes to the centre; 0.05 was the two-object
 # left / right layout.
 STAND_PLACE_Y_OFFSET_M: float = 0.0
+# Straight BASE-y trim on the lay-down point, applied in run_object AFTER the
+# camera answer and the slot offset — so it moves where the cylinder is
+# actually set down, whatever the bin reads as and whichever way the row is
+# spun. Negative = the robot's right. Tune it in 1cm steps (0914, the user's
+# call; -0.01 to start). The slot offsets (--slots) are NOT this: they are
+# measured along the row, which is turned to the bin's yaw, so they move with
+# the bin. This is a fixed base-frame nudge, the same idea as the box pick's
+# BOX_GRASP_Y_OFFSET_M. The descent column is checked at the trimmed point.
+STAND_PLACE_Y_TRIM_M: float = -0.01
 # Aim this far BELOW the computed resting height; the 5 N touchdown guard stops
 # the descent where the object actually meets the floor. 0906 16:29: at 5 mm
 # the guard never fired on either placement, so the cylinder was released in
@@ -213,6 +254,59 @@ STAND_BIN_DET_OFFSET_XY: tuple[float, float] = (0.0, 0.0)
 # Where the bin is asked to sit in base_link before placing: the spot every
 # 0906 place ran at, and the fallback when the bin has not been seen yet.
 STAND_BIN_PLACE_XY: tuple[float, float] = STAND_BIN_TARGET_BASE_XY   # (0.925, -0.125), user's call 0906
+# Where the in-air TURN runs (stand_place.run_object): the carry ends here, the
+# cylinder is turned from upright to lying here, and only THEN does the arm
+# slide to the measured lay-down point. One fixed spot, so the turn is the same
+# motion and the same IK branch every cycle.
+#
+# 0914, the user's call. Before this the turn ran at the cycle's own slot point
+# (place centre + the slot offset), which the slots move by 15cm across a
+# four-cylinder run and the learned centre moves again on top of that — so the
+# turn was a slightly different motion every time, and run_object's claim that
+# "everything up to the hover pose is identical every cycle" was not true.
+# Nothing is lost by moving it: the slide that used to absorb only the camera
+# correction now absorbs the slot offset too (<= 7.5cm more), and the descent
+# column is checked at the REAL place point before that slide (it used to be
+# pre-checked here, at the planned point, which is no longer where the arm
+# descends).
+# ...and it is NOT the place centre any more: 0914, the user's call, it sits
+# STAND_TURN_Y_OFF_M to the RIGHT of it. Swept offline at 2.5cm steps, with the
+# single move that both turns and travels, and the held cylinder's lowest point
+# measured against the bin rim:
+#     y -0.125 (= the place centre)  +59mm   turn 1.95s
+#     y -0.175                       +65mm         2.00s
+#     y -0.200                       +69mm         2.03s
+#     y -0.2625                      +73mm         2.12s   <- safe limit
+#     y -0.275                       -88mm         2.37s   <- CLIFF
+# Going right buys clearance, up to a point: at -0.275 the IK crosses to
+# another branch and the turn throws the cylinder down to (0.717,-0.596), 88mm
+# UNDER the rim. So -0.2625 is the floor; -0.05 keeps 9cm of margin from it.
+# Moving this also lengthens the slide to the lay-down (10mm -> 40mm here) and
+# changes q_carry, so the carry path was re-swept over the pick window too.
+STAND_TURN_Y_OFF_M: float = -0.05
+STAND_TURN_XY: tuple[float, float] = (STAND_BIN_PLACE_XY[0],
+                                      STAND_BIN_PLACE_XY[1] + STAND_TURN_Y_OFF_M)
+# Fixing the POSITION is not enough on its own: move_ee re-solves IK from the
+# arm's live config, so the posture it lands in follows wherever the cylinder
+# was picked (measured 0914: up to 55 deg from the planned one, which then made
+# the first turn waypoint demand a 31-60 deg jump instead of the planned 23.5).
+# run_object therefore flies plan.q_carry, the PLANNED joints, rather than
+# asking for the pose again.
+#
+# Two alternatives were measured and dropped, both on 0914:
+#   * an intermediate fixed pose at (0.955,-0.175): +0.6s, and it does not fix
+#     the posture unless the planned joints are flown anyway.
+#   * routing through the task home (the pose the arm returns to after a
+#     place, which looks natural empty-handed): +0.9s, a full stop at the
+#     junction (0-4 of 7 joints keep direction there, so the reversing ones
+#     must cross zero), and it is the UNSAFE one — home sits right and low
+#     (y -0.407, EE z 1.006), so carrying a cylinder there from the far side
+#     sags 175mm under transport height across the bin. Swept over 25 pick
+#     spots: 9 of them dip the held cylinder's base under the bin rim, 8 of
+#     those within 15cm of the place centre. Flying straight to q_carry dips
+#     under the rim at 0 of 25 (worst clearance +2mm, and that one 18cm clear
+#     of the place centre). Command-side only, as always — the desk and the
+#     bin are not in the collision model, only the arm against itself.
 # ...but it does not have to be exactly that spot. Offline scan 0911: with the
 # place x at STAND_BIN_PLACE_XY[0], a slot solves for y in this range. Any bin
 # centre whose WHOLE slot row fits inside it (minus the margin) is a legal place
@@ -270,6 +364,13 @@ STAND_PLACE_MARGIN_M: float = 0.05
 # margin at the far edge. It used to be 20 cm wide out of that 66 cm, which is
 # what made the base shuttle for cylinders the arm could simply have reached.
 STAND_CYL_PICK_WINDOW: tuple[tuple[float, float], tuple[float, float]] = ((0.87, 1.10), (-0.50, 0.05))
+# Nothing in view at all (0914 15:53 cycle 3: "[detect] no cylinder in view",
+# and the run stopped). Before giving up, strafe this far RIGHT once and look
+# again — right, i.e. NEGATIVE base y, at the user's call: the cycles walk the
+# base left toward the bin, so what is left to pick tends to sit behind it on
+# the right. Still nothing after that and the chassis goes to the operator
+# (stand_place._search_cylinder) instead of ending the run.
+STAND_CYL_SEARCH_RIGHT_M: float = 0.20
 # A cylinder outside the window is brought to the NEAREST spot inside it with
 # this much to spare — not to the middle. The window is 55 cm wide now, so
 # centring one that sits 2 cm outside would drive the base a third of a metre.

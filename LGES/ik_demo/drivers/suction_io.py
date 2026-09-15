@@ -95,10 +95,19 @@ def blow_off() -> None:
 
 
 def release() -> None:
-    """Release a held object: suction off, then a short blow pulse."""
+    """Release a held object: suction off, then a short blow pulse.
+
+    The sleep IS the detach time: nothing calls blow_off(), and the caller
+    lifts the moment this returns (suction.place -> move_ee_vertical). Cutting
+    it to 0.7 on 0914 started lifting parts that were still stuck to the cup —
+    killing the vacuum does not free the part on its own, the residual vacuum
+    in the bellows and hose has to be blown out first. Being tuned by hand
+    (0914), unverified: if it still drags a part, the honest fix is to wait for
+    DI0 to drop (VacuumMonitor reads it, and it "stays T after suction OFF
+    until cup releases") instead of guessing a duration."""
     suction_off()
     blow_on()
-    time.sleep(0.7)
+    time.sleep(2.0)
     # logger.info("[Suction] released")
 
 

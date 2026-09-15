@@ -76,7 +76,7 @@ GRASP_ORIENTATION_RPY: tuple[float, float, float] = (np.pi, 0.0, 0.0)
 #
 # Values are conservative starting points — TUNE on the robot.
 # ---------------------------------------------------------------------------
-SPEED_SCALE_LEFT: float = 1.0        # multiplier on every cap below, left (suction) arm
+SPEED_SCALE_LEFT: float = 1.2        # multiplier on every cap below, left (suction) arm
 SPEED_SCALE_RIGHT: float = 0.6      # multiplier on every cap below, right (gripper) arm
 # (0.7 = normal; lowered for first slow handoff test)
 

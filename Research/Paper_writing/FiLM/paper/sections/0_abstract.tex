@@ -1,23 +1,22 @@
-% Abstract (~200 words). REWRITE 08-11: prescription-led, canonical numbers
-% (RESULTS_LINEUP: 9/9 자가정지, interaction-window median 2.5 N, best-only).
-% 배터리 셀 모티베이션 포함 (08-11 사용자 결정). π0.5 스케일 문장은 pi0 재실험 대기 (\todo).
-Vision-language-action (VLA) policies increasingly receive physical condition signals---wrist
-wrench, contact, vacuum-seal state---yet whether a trained policy \emph{causally uses} them is
-unmeasured, and standard validation cannot tell: we show that a policy that uses force and one
-that routes around it can train to validation losses equal in the fourth decimal place. On a
-real-robot suction case-picking task where the cases carry battery cells---a $15$\,N
-contact-force limit, and a critical transition (stop descending on contact) observable only
-through force---a naively fine-tuned VLA receiving the full wrench presses through contact in
-every trial and never stops on its own. We present a recipe that makes the policy use force
-where it matters: a condition vector \chat{} computed from signals the policy already receives,
-injected through FiLM with the raw wrench masked---a grounded pathway that
-adds routing, not information---trained on press-retreat demonstrations that press to a varied
-force target and retreat before the seal. Forcing \chat{} at inference measures its causal authority, and a controlled
-ablation shows each ingredient is necessary: unmasked, the pathway trains causally dead
-(\emph{bypass}); ungrounded, the policy is the worst in the study. The naive policy's force
-response is a template that fades beyond the demonstrated range; the conditioned policy's grows
-monotonically, stopping and retreating at forces beyond its training data. On the robot, every
-conditioned pick stops on its own---median contact force $2.5$\,N across three stack
-heights---where the naive policy is externally aborted in every attempt, and live
-counterfactual probes reproduce the offline crossover on the physical system.
-\todo{scale sentence ($\pi_{0.5}$/pi0) pending the offline re-run}
+% Abstract (~230 words). REWRITE 09-14 (사용자 결정): 구조(pathway) 위주 — 세 성질 drop-in /
+% retrofittable / monotone-beyond-demos. π0.5 미언급 (사용자). 수치 출처 RESULTS_LINEUP + EVIDENCE §3.5, PI0 doc.
+Vision-language-action (VLA) policies increasingly receive wrist wrench and contact signals in
+their state, yet a behavior-cloned policy given the full wrench can still fail to bind its
+behavior to it. On a real-robot suction case-picking task where the cases carry battery
+cells---a $15$\,N contact-force limit, and a stop-on-contact transition observable only through
+force---a naively fine-tuned VLA presses through contact in every trial and never stops on its
+own. We present a conditioning pathway that changes how force is delivered, not what is
+delivered: a condition vector \chat{} (contact, force magnitude, seal) computed from signals the
+policy already receives, injected by FiLM at the state token, with the raw wrench masked. The
+pathway has three properties. It is \emph{drop-in}: no backbone change, no new information, no
+cost in imitation error, and it attaches to a second backbone ($\pi_0$). It is
+\emph{retrofittable}: added to an already-trained naive policy, a few thousand steps of
+continued training suffice. And it \emph{extrapolates in the right direction}: because \chat{} is a
+calibrated monotone scalar, the policy brakes harder the harder it is pressed---stopping and
+retreating at forces beyond the demonstrations, where the naive policy's response fades---and
+picks succeed at a stack height absent from training. A matched ablation shows both
+ingredients are necessary: unmasked, the pathway trains causally dead (\emph{bypass});
+ungrounded, it is the worst policy in the study. We also ran it on our robot: every
+conditioned pick stops on its own (median contact force $2.5$\,N) where the naive policy is
+externally aborted in every attempt, and on-robot counterfactual probes reproduce the offline
+crossover.
