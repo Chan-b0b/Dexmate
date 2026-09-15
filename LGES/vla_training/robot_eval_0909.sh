@@ -65,11 +65,25 @@ CAL_ENV=(FILM_COND=contact,fz,seal FILM_MASK_FORCE=1
 CKPT_ROOT=${CKPT_ROOT:-$DIR/outputs}
 ck() { echo "$CKPT_ROOT/$1_0909/checkpoints/best"; }
 
-# --force-limit 12, not the 0729 round's 15: §6 derives the force spec from the
-# demonstrations' settled press (14.09N p95) x1.5 = 21N as the damage threshold, and the
-# six arms that stop on-policy all peak at 8-17N. 12 aborts before the spec, leaving
-# headroom on the first runs. Raise deliberately, never as a reflex.
-COMMON=(--go --force-limit 12 --n-action-steps 5)
+# --force-limit is CONTACT ABOVE BASELINE, not raw |F|: run_policy.py computes
+# contact = |wrench[:3]| - baseline_f with baseline_f re-measured at each episode's
+# hover, and aborts on contact > limit. So it must NOT be sized to cover 0909's 10.51N
+# hover, and it CANNOT be compared directly against §6's 21N spec -- that spec is in raw
+# dataset |F| (settled press p95 14.09N x1.5), which is only ~10.5N above baseline.
+#
+# Sized against the demonstrations in the same above-baseline units:
+#   settled press   14.09 - 10.51 =  3.6 N   <- what a normal pick sustains
+#   transient p95   23.59 - 10.51 = 13.1 N   <- what a normal pick transiently hits
+# A limit below ~13N would therefore abort on demonstration-like behaviour. 20N is both
+# ~1.5x that transient and this project's own hardware-calibrated constant for this task
+# (ik_demo/config/suction.py: FORCE_HARD_LIMIT_N = 20.0, "pick abort (empty cup)"), so it
+# is the value with the most evidence behind it. Set explicitly rather than relying on the
+# default, so a change to that constant cannot silently move the experiment's safety gate.
+#
+# Deliberately NOT sized from press-sim's peak |F| column (§5): that comes from a
+# penetration-driven force model whose units are simulator-internal, and §9.4 records that
+# its behaviour is policy-dependent through the action scale.
+COMMON=(--go --force-limit 20 --n-action-steps 5)
 
 case "$TARGET" in
   baseline)   # STEP 0 — passive, no motion. Compare hover |F| against 0909's 10.51N.
