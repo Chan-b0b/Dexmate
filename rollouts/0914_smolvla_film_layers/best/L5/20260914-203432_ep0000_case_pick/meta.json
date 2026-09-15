@@ -1,0 +1,44 @@
+{
+  "phase": "case_pick",
+  "instruction": "pick up the case with the suction cup",
+  "action_space": "ee_delta+suction",
+  "ee_rotation": "quat_wxyz, base_link",
+  "source": "run_policy.py rollout",
+  "checkpoint": "/home/dexmate/ckpt_0909/smolvla_film_layers_0909/checkpoints/best",
+  "frames": 205,
+  "success": false,
+  "peak_force_n": 14.03,
+  "peak_force_frame": 139,
+  "peak_contact_n": 4.0,
+  "layers_remaining": 5,
+  "detected_center_xyzyaw": [
+    0.8722790018717448,
+    -0.03694068908691406,
+    0.8240000000000001,
+    -0.058204450888117786
+  ],
+  "top_face_z": 0.669,
+  "detect_conf": 0.9543800950050354,
+  "baseline_force_n": 10.03,
+  "film_baseline": {
+    "fmag_med_n": 10.08,
+    "fz_med_n": 5.88,
+    "drift_fmag_n": 5.49,
+    "drift_fz_n": 3.92,
+    "wrench_med": [
+      8.18,
+      0.486,
+      5.884,
+      0.266,
+      -0.028,
+      0.025
+    ],
+    "applied": {
+      "contact_F0": 16.75,
+      "fz_off": 12.1
+    },
+    "anomalies": [
+      "drift beyond 1.5N \u2014 check payload/suction/contact"
+    ]
+  }
+}

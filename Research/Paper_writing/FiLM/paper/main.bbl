@@ -22,47 +22,49 @@
 \BIBdecl
 
 \bibitem{forcevla}
-{TODO-verify authors}, ``{ForceVLA}: Force-aware mixture-of-experts for
-  contact-rich manipulation,'' \emph{arXiv preprint arXiv:2505.22159}, 2025.
+J.~Yu \emph{et~al.}, ``{ForceVLA}: Enhancing {VLA} models with a force-aware
+  {MoE} for contact-rich manipulation,'' \emph{arXiv preprint
+  arXiv:2505.22159}, 2025.
 
 \bibitem{phaforce}
-{Wang et al. (TODO-verify)}, ``{PhaForce}: Phase-scheduled visual-force policy
-  learning with slow planning and fast correction,'' \emph{arXiv preprint
-  arXiv:2603.08342}, 2026.
+M.~Wang \emph{et~al.}, ``{PhaForce}: Phase-scheduled visual-force policy
+  learning with slow planning and fast correction for contact-rich
+  manipulation,'' \emph{arXiv preprint arXiv:2603.08342}, 2026.
 
 \bibitem{forceflow}
-{TODO-verify authors}, ``{ForceFlow} (todo-verify full title),'' \emph{arXiv
-  preprint arXiv:2605.11048}, 2026.
+S.~Zhang \emph{et~al.}, ``{ForceFlow}: Learning to feel and act via
+  contact-driven flow matching,'' \emph{arXiv preprint arXiv:2605.11048}, 2026.
 
 \bibitem{filic}
-------, ``{FILIC}: Dual-loop force-guided imitation learning with impedance
-  control (todo-verify),'' \emph{arXiv preprint arXiv:2509.17053}, 2025.
+H.~Ge \emph{et~al.}, ``{FILIC}: Dual-loop force-guided imitation learning with
+  impedance torque control for contact-rich manipulation tasks,'' \emph{arXiv
+  preprint arXiv:2509.17053}, 2025.
 
 \bibitem{dehaan2019causal}
 P.~de~Haan, D.~Jayaraman, and S.~Levine, ``Causal confusion in imitation
   learning,'' in \emph{NeurIPS}, 2019, arXiv:1905.11979.
 
 \bibitem{geirhos2020shortcut}
-R.~Geirhos, J.-H. Jacobsen, C.~Michaelis, R.~Zemel, W.~Brendel, M.~Bethge, and
-  F.~A. Wichmann, ``Shortcut learning in deep neural networks,'' \emph{Nature
-  Machine Intelligence}, vol.~2, pp. 665--673, 2020.
+R.~Geirhos \emph{et~al.}, ``Shortcut learning in deep neural networks,''
+  \emph{Nature Machine Intelligence}, vol.~2, pp. 665--673, 2020.
 
 \bibitem{perez2018film}
 E.~Perez, F.~Strub, H.~de~Vries, V.~Dumoulin, and A.~Courville, ``{FiLM}:
   Visual reasoning with a general conditioning layer,'' in \emph{AAAI}, 2018.
 
 \bibitem{tavla}
-Z.~Zhang, H.~Xu, Z.~Yang, C.~Yue, Z.~Lin, H.~ang Gao, Z.~Wang, and H.~Zhao,
-  ``{TA-VLA}: Elucidating the design space of torque-aware
-  vision-language-action models,'' in \emph{CoRL}, 2025, arXiv:2509.07962.
+Z.~Zhang \emph{et~al.}, ``{TA-VLA}: Elucidating the design space of
+  torque-aware vision-language-action models,'' in \emph{CoRL}, 2025,
+  arXiv:2509.07962.
 
 \bibitem{farm}
-{TODO-verify authors}, ``{FARM}: Tactile-conditioned diffusion policies
-  (todo-verify full title),'' \emph{arXiv preprint arXiv:2510.13324}, 2025.
+E.~Helmut, N.~Funk, T.~Schneider, C.~de~Farias, and J.~Peters,
+  ``Tactile-conditioned diffusion policy for force-aware robotic
+  manipulation,'' \emph{arXiv preprint arXiv:2510.13324}, 2025.
 
 \bibitem{tacforesight}
-------, ``{TacForeSight}: Force-conditioned tactile world models (todo-verify
-  full title),'' \emph{arXiv preprint arXiv:2606.11184}, 2026.
+Y.~Zang \emph{et~al.}, ``{TacForeSight}: Force-guided tactile world model for
+  contact-rich manipulation,'' \emph{arXiv preprint arXiv:2606.11184}, 2026.
 
 \bibitem{tactilevla}
 J.~Huang, S.~Wang, F.~Lin, Y.~Hu, C.~Wen, and Y.~Gao, ``{Tactile-VLA}:
@@ -84,16 +86,19 @@ K.~Hermann, H.~Mobahi, T.~Fel, and M.~C. Mozer, ``On the foundations of
   shortcut learning,'' \emph{arXiv preprint arXiv:2310.16228}, 2023.
 
 \bibitem{shortcutgeneralist}
-{TODO-verify authors}, ``Shortcut learning in generalist robot policies
-  (todo-verify full title),'' \emph{arXiv preprint arXiv:2508.06426}, 2025.
+Y.~Xing, X.~Luo, J.~Xie, L.~Gao, H.~Shen, and J.~Song, ``Shortcut learning in
+  generalist robot policies: The role of dataset diversity and fragmentation,''
+  \emph{arXiv preprint arXiv:2508.06426}, 2025.
 
 \bibitem{interventionil2025}
-------, ``Intervention-based evaluation of imitation policies (todo-verify full
-  title),'' \emph{arXiv preprint arXiv:2507.22380}, 2025.
+Y.~Chen, Y.~Zhang, G.~D'urso, N.~Lawrance, and B.~Tidd, ``Improving
+  generalization ability of robotic imitation learning by resolving causal
+  confusion in observations,'' \emph{arXiv preprint arXiv:2507.22380}, 2025.
 
 \bibitem{interventionil2023}
-------, ``Interventional imitation learning (todo-verify full title),''
-  \emph{arXiv preprint arXiv:2307.15980}, 2023.
+S.~Pfrommer, Y.~Bai, H.~Lee, and S.~Sojoudi, ``Initial state interventions for
+  deconfounded imitation learning,'' \emph{arXiv preprint arXiv:2307.15980},
+  2023.
 
 \bibitem{fuse}
 J.~Jones, O.~Mees, C.~Sferrazza, K.~Stachowicz, P.~Abbeel, and S.~Levine,
@@ -101,18 +106,18 @@ J.~Jones, O.~Mees, C.~Sferrazza, K.~Stachowicz, P.~Abbeel, and S.~Levine,
   sensors via language grounding,'' in \emph{ICRA}, 2025, arXiv:2501.04693.
 
 \bibitem{fmvla}
-R.~Li, Q.~Li, R.~Ma, Y.~Deng, L.~Luo, Z.~Du, J.~Xiang, H.~Liang, R.~Wang,
-  J.~Yang, and B.~Guo, ``{FM-VLA}: Force-based memory for
-  vision-language-action models in contact-rich manipulation,'' \emph{arXiv
-  preprint arXiv:2607.18231}, 2026.
+R.~Li \emph{et~al.}, ``{FM-VLA}: Force-based memory for vision-language-action
+  models in contact-rich manipulation,'' \emph{arXiv preprint
+  arXiv:2607.18231}, 2026.
 
 \bibitem{chen2020lbc}
 D.~Chen, B.~Zhou, V.~Koltun, and P.~Kr{\"a}henb{\"u}hl, ``Learning by
   cheating,'' in \emph{CoRL}, 2019.
 
 \bibitem{privilegedaction}
-{TODO-verify authors}, ``Learning long-horizon robot manipulation skills via
-  privileged action,'' \emph{arXiv preprint arXiv:2502.15442}, 2025.
+X.~Mao, Y.~Xu, Z.~Sun, E.~Miller, D.~Layeghi, and M.~Mistry, ``Learning
+  long-horizon robot manipulation skills via privileged action,'' \emph{arXiv
+  preprint arXiv:2502.15442}, 2025.
 
 \bibitem{forcesight}
 J.~A. Collins, C.~Houff, Y.~L. Tan, and C.~C. Kemp, ``{ForceSight}: Text-guided
@@ -122,17 +127,11 @@ J.~A. Collins, C.~Houff, Y.~L. Tan, and C.~C. Kemp, ``{ForceSight}: Text-guided
 \bibitem{smolvla}
 M.~Shukor \emph{et~al.}, ``{SmolVLA}: A vision-language-action model for
   affordable and efficient robotics,'' \emph{arXiv preprint arXiv:2506.01844},
-  2025, tODO-verify arXiv ID.
+  2025.
 
 \bibitem{pi0}
 K.~Black \emph{et~al.}, ``$\pi_0$: A vision-language-action flow model for
-  general robot control,'' \emph{arXiv preprint arXiv:2410.24164}, 2024,
-  tODO-verify arXiv ID and author list.
-
-\bibitem{pi05}
-------, ``$\pi_{0.5}$: A vision-language-action model with open-world
-  generalization,'' \emph{arXiv preprint arXiv:2504.16054}, 2025, tODO-verify
-  arXiv ID and author list.
+  general robot control,'' \emph{arXiv preprint arXiv:2410.24164}, 2024.
 
 \bibitem{ross2011dagger}
 S.~Ross, G.~J. Gordon, and J.~A. Bagnell, ``A reduction of imitation learning

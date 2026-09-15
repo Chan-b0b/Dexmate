@@ -3,9 +3,10 @@
 
 Rebuilt (2026-07) on LGES/ik_demo (hardened pink IK, drivers.suction_io) and the
 BEV case detection, replacing the case_battery_demo plumbing. Matches the data
-collected by collect_case_pick.py: episodes start at the view-park pose with the
-case detected; the workspace box derives from the detection instead of taught
-poses, and --goto-start is gone (home -> view park IS the in-distribution start).
+collected by collect_case_pick.py: episodes start at the HOME pose with the
+chassis centered on the case (both measured off 0909's takes — see run()); the
+workspace box derives from the detection instead of taught poses, and
+--goto-start is gone (home IS the in-distribution start).
 
 Scope: case_pick, left arm, suction. Three modes:
 
@@ -18,7 +19,9 @@ Scope: case_pick, left arm, suction. Three modes:
   --dry-run              live, needs the robot. Loops at ~15 Hz: reads live
                          observation, runs the policy, prints predicted action
                          + safety-clamped target + IK feasibility. Commands
-                         NOTHING.
+                         NOTHING to the arm — but it DOES home the arms and
+                         drive the chassis to center the case at each run start,
+                         so the scene it observes is the one --go would see.
 
   --go                   live. Same loop but COMMANDS the left arm (IK ->
                          set_joint_pos) and suction, fully guarded (per-step
@@ -38,6 +41,7 @@ Run with the vla_venv python (imports lerobot AND the ik/detection stack):
 
 import argparse
 import json
+import os
 import re
 import select
 import sys
@@ -250,8 +254,13 @@ def _peek_film_structure(model_dir: str):
     was actually trained with, straight from its own saved tensors: `cond`
     fixes which buffers exist (_contact_F0/_fz_tau/_seal_mean only get
     registered for channels in cond -- see film_contact.apply's new_init), and
-    `inject` fixes contact_film's hidden width (state_proj.out_features=960 for
-    'prefix' vs vlm_with_expert.expert_hidden_size=720 for 'suffix'/'output').
+    `inject` fixes contact_film's LAYOUT and hidden width: 'layers' builds an
+    nn.ModuleList (one film per expert layer -> INDEXED keys
+    contact_film.<i>.*), while the single-film injections are flat
+    (contact_film.*) and separate on width alone (state_proj.out_features=960
+    for 'prefix' vs vlm_with_expert.expert_hidden_size=720 for
+    'suffix'/'output'). The indexed check must come FIRST: a 'layers' film is
+    also 720 wide, so the width rule alone would call it 'suffix'.
     Unlike FILM_COND/FILM_INJECT env vars (which silently mismatch if the
     operator guesses wrong), this can't drift from what's actually in the
     checkpoint. `mask_force` has NO shape footprint at all -- pure runtime
@@ -268,10 +277,51 @@ def _peek_film_structure(model_dir: str):
         cond = tuple(ch for ch, buf in (("contact", "_contact_F0"), ("fz", "_fz_tau"),
                                          ("seal", "_seal_mean"), ("dfmag", "_dfmag_tau"))
                      if any(k.endswith(buf) for k in keys))
-        hidden = f.get_slice("model.contact_film.scale.2.weight").get_shape()[0]
-    inject = "prefix" if hidden == 960 else "suffix"
+        indexed = "model.contact_film.0.scale.2.weight" in keys
+        hidden = f.get_slice("model.contact_film.0.scale.2.weight" if indexed
+                             else "model.contact_film.scale.2.weight").get_shape()[0]
+    inject = "layers" if indexed else "prefix" if hidden == 960 else "suffix"
     mask_force_default = "mask1" in Path(model_dir).name.lower()
     return cond, inject, mask_force_default, hidden
+
+
+def _peek_film_structure_groot(model_dir: str):
+    """GR00T's structural FiLM settings from its own saved tensors. Three things
+    differ from _peek_film_structure (smolvla), so this cannot share that code:
+
+      - film_contact_groot registers contact_film on the POLICY, not on .model, so
+        the keys have NO 'model.' prefix (contact_film.0.* / contact_film.*).
+      - the injections are ('state', 'layers'); there is no prefix/suffix pair.
+      - width does NOT separate them: the DiT ff branch and the state token are both
+        1536 wide, so the INDEXED keys are the only discriminator.
+
+    `cond` is not recoverable here the way the smolvla peek reads it off the calib
+    buffer names: groot's calib buffers are persistent=False, so they are absent from
+    the file (only _film_min/_film_max are saved). What IS in the file is the film's
+    first Linear, whose in_features is cond_dim -- so we return that and let the caller
+    validate len(FILM_COND) against it structurally.
+
+    Returns (cond_dim, inject, mask_force_default, n_films, film_out)."""
+    from safetensors import safe_open
+    if Path(model_dir).is_dir():
+        st_path = Path(model_dir) / "model.safetensors"
+    else:
+        from huggingface_hub import hf_hub_download
+        st_path = hf_hub_download(repo_id=model_dir, filename="model.safetensors")
+    with safe_open(st_path, framework="pt") as f:
+        keys = set(f.keys())
+        indexed = "contact_film.0.scale.0.weight" in keys
+        first = "contact_film.0.scale.0.weight" if indexed else "contact_film.scale.0.weight"
+        if first not in keys:
+            raise SystemExit(
+                f"{model_dir} has contact_film tensors but not {first!r} -- this is not a "
+                f"film_contact_groot checkpoint layout.")
+        cond_dim = f.get_slice(first).get_shape()[1]
+        film_out = f.get_slice(first.replace("scale.0", "scale.2")).get_shape()[0]
+        n_films = len([k for k in keys if k.endswith("scale.0.weight")])
+    inject = "layers" if indexed else "state"
+    mask_force_default = "mask1" in Path(model_dir).name.lower()
+    return cond_dim, inject, mask_force_default, n_films, film_out
 
 
 def _has_film_weights(model_dir: str) -> bool:
@@ -290,6 +340,42 @@ def _has_film_weights(model_dir: str) -> bool:
         return any("contact_film" in k for k in f.keys())
 
 
+def _verify_film_loaded(model_dir: str, policy) -> None:
+    """Fail loudly if the checkpoint's contact_film.* tensors did not ALL land in the
+    built model.
+
+    from_pretrained loads non-strictly, so a LAYOUT mismatch only WARNS ('Missing
+    key(s)' / 'Unexpected key(s)') and then runs with every film at its zero-init --
+    i.e. exactly as if there were no FiLM at all, which looks like a working naive
+    policy instead of an error. Shape mismatches already raise inside
+    load_state_dict; the key sets are the only thing that can slip through.
+
+    How it happens: film_contact.apply() fixes `inject` STRUCTURALLY on its first
+    call per process, so loading a 'layers' checkpoint and then a flat 'prefix' one
+    in the same process builds 16 films for a checkpoint that has 1 (or vice versa).
+    run_policy loads a single policy per process and is safe; probes that compare
+    two arms must fork."""
+    from safetensors import safe_open
+    if Path(model_dir).is_dir():
+        st_path = Path(model_dir) / "model.safetensors"
+    else:
+        from huggingface_hub import hf_hub_download
+        st_path = hf_hub_download(repo_id=model_dir, filename="model.safetensors")
+    with safe_open(st_path, framework="pt") as f:
+        ckpt_keys = {k for k in f.keys() if "contact_film" in k}
+    live_keys = {k for k in policy.state_dict() if "contact_film" in k}
+    missing, extra = ckpt_keys - live_keys, live_keys - ckpt_keys
+    if missing or extra:
+        raise SystemExit(
+            f"FiLM weights did NOT load: {len(missing)} of {len(ckpt_keys)} checkpoint "
+            f"tensors have no home in the model, and the model has {len(extra)} film "
+            f"tensors the checkpoint never filled (they are still zero-init, so the "
+            f"policy would run as if it had no FiLM).\n"
+            f"  checkpoint: {sorted(ckpt_keys)[:2]} ...\n"
+            f"  model:      {sorted(live_keys)[:2]} ...\n"
+            f"This is an inject-layout mismatch -- see _verify_film_loaded's docstring.")
+
+
 def load_policy(checkpoint: Path, film: bool = False):
     from lerobot.configs.parser import load_plugin
     from lerobot.configs.policies import PreTrainedConfig
@@ -303,7 +389,7 @@ def load_policy(checkpoint: Path, film: bool = False):
     nested = Path(checkpoint) / "pretrained_model"
     model_dir = str(nested) if nested.exists() else str(checkpoint)
     policy_type = _peek_policy_type(model_dir)
-    if policy_type != "smolvla":
+    if policy_type not in PreTrainedConfig.get_known_choices():  # builtin types need no plugin
         # VLA_DIR (on sys.path since module import, for convert_to_lerobot etc.)
         # contains a same-named "smolvla_meanflow/" subdirectory (the plugin's
         # project root, no top-level __init__.py) which PathFinder resolves as a
@@ -315,11 +401,19 @@ def load_policy(checkpoint: Path, film: bool = False):
             load_plugin(policy_type)  # registers third-party policy types, e.g. smolvla_meanflow
         finally:
             sys.path[:] = saved_path
+    if policy_type == "groot":
+        # GR00T needs the same four transformers-5.x shims training used (train_groot's
+        # module-level patches): sdpa fallback for the Eagle backbone's pinned
+        # flash_attention_2 (no FA2 wheel for this torch/cp312), CPU Beta under the
+        # meta-device build, tied-keys, and processor kwargs. Imported ONLY for groot --
+        # they patch transformers globally, so the smolvla path must not see them.
+        import train_groot  # noqa: F401
     cfg = PreTrainedConfig.from_pretrained(model_dir)
 
-    if film and cfg.type != "smolvla":
-        raise SystemExit(f"--film is only for smolvla checkpoints, got type={cfg.type}")
-    has_film_weights = cfg.type == "smolvla" and _has_film_weights(model_dir)
+    FILM_TYPES = ("smolvla", "groot")   # ports with a film_contact_* deploy patch
+    if film and cfg.type not in FILM_TYPES:
+        raise SystemExit(f"--film supports {FILM_TYPES}, got type={cfg.type}")
+    has_film_weights = cfg.type in FILM_TYPES and _has_film_weights(model_dir)
     if has_film_weights and not film:
         raise SystemExit(f"{model_dir} has FiLM weights (contact_film.*) but --film was not passed "
                           f"-- add --film, or it silently loads as plain smolvla and drops them.")
@@ -337,14 +431,35 @@ def load_policy(checkpoint: Path, film: bool = False):
         # repo-name convention can tell us, so double-check it if in doubt.
         import os
         import film_contact
-        det_cond, det_inject, det_mask_default, det_hidden = _peek_film_structure(model_dir)
-        cond = (tuple(c.strip() for c in os.environ["FILM_COND"].split(",") if c.strip())
-                if "FILM_COND" in os.environ else det_cond)
+        if cfg.type == "groot":
+            det_cond_dim, det_inject, det_mask_default, det_n, det_out = \
+                _peek_film_structure_groot(model_dir)
+            # The cond NAMES are not in a groot checkpoint (calib buffers are
+            # persistent=False), so FILM_COND is required here rather than optional --
+            # and its LENGTH is checked against the film's first Linear, which is.
+            if "FILM_COND" not in os.environ:
+                raise SystemExit(
+                    f"--film on a groot checkpoint needs FILM_COND: this film takes "
+                    f"{det_cond_dim} channels but their names are not saved (groot's calib "
+                    f"buffers are persistent=False). For the 0909 round: "
+                    f"FILM_COND=contact,fz,seal")
+            cond = tuple(c.strip() for c in os.environ["FILM_COND"].split(",") if c.strip())
+            if len(cond) != det_cond_dim:
+                raise SystemExit(
+                    f"FILM_COND={cond} is {len(cond)} channel(s) but {model_dir}'s "
+                    f"contact_film Linear takes {det_cond_dim} -- it would not load. Set "
+                    f"FILM_COND to the {det_cond_dim} channels training used.")
+            det_detail = f"cond_dim={det_cond_dim} n_films={det_n} film_out={det_out}"
+        else:
+            det_cond, det_inject, det_mask_default, det_hidden = _peek_film_structure(model_dir)
+            cond = (tuple(c.strip() for c in os.environ["FILM_COND"].split(",") if c.strip())
+                    if "FILM_COND" in os.environ else det_cond)
+            det_detail = f"contact_film hidden={det_hidden}"
         inject = os.environ.get("FILM_INJECT", det_inject)
         mask_force = (os.environ["FILM_MASK_FORCE"] not in ("0", "false", "False")
                       if "FILM_MASK_FORCE" in os.environ else det_mask_default)
         print(f"[run_policy] FiLM structure from checkpoint tensors: cond={cond} "
-              f"inject={inject} (contact_film hidden={det_hidden}) | mask_force={mask_force} "
+              f"inject={inject} ({det_detail}) | mask_force={mask_force} "
               f"({'FILM_MASK_FORCE env' if 'FILM_MASK_FORCE' in os.environ else '\"_mask1\" in repo name'} "
               f"-- NOT verifiable from weights, override with FILM_MASK_FORCE=0/1 if wrong)")
         f0 = float(os.environ.get("FILM_F0", "6"))
@@ -371,19 +486,32 @@ def load_policy(checkpoint: Path, film: bool = False):
             raise FileNotFoundError(
                 f"FiLM stats (meta/stats.json) not found for FILM_DATASET={name!r}; "
                 "tried: " + ", ".join(str(c) for c in cands))
-        wm, ws = film_contact.load_wrench_stats(ds)
-        sm, ss = film_contact.load_seal_stats(ds)
-        dm, dsd = film_contact.load_dfmag_stats(ds)
-        film_contact.apply("v2", wm, ws, seal_mean=sm, seal_std=ss, cond=cond,
-                           contact_F0=f0, contact_tau=tau, fz_tau=fz_tau,
-                           mask_force=mask_force, inject=inject,
-                           dfmag_mean=dm, dfmag_std=dsd, dfmag_tau=dfmag_tau, fz_off=fz_off,
-                           fmag_off=fmag_off, fmag_tau=fmag_tau)
+        if cfg.type == "groot":
+            # GR00T min-max normalizes observation.state inside groot_pack_inputs_v3, so
+            # c-hat un-normalizes with this dataset's min/max instead of the mean/std +
+            # seal stats the smolvla port uses. Same channel formulas either way.
+            import film_contact_groot as fcg
+            mn, mx = fcg.load_state_minmax(ds)
+            fcg.apply("v2", mn, mx, cond=cond,
+                      contact_F0=f0, contact_tau=tau, fz_tau=fz_tau, fz_off=fz_off,
+                      fmag_off=fmag_off, fmag_tau=fmag_tau, dfmag_tau=dfmag_tau,
+                      mask_force=mask_force, inject=inject)
+        else:
+            wm, ws = film_contact.load_wrench_stats(ds)
+            sm, ss = film_contact.load_seal_stats(ds)
+            dm, dsd = film_contact.load_dfmag_stats(ds)
+            film_contact.apply("v2", wm, ws, seal_mean=sm, seal_std=ss, cond=cond,
+                               contact_F0=f0, contact_tau=tau, fz_tau=fz_tau,
+                               mask_force=mask_force, inject=inject,
+                               dfmag_mean=dm, dfmag_std=dsd, dfmag_tau=dfmag_tau, fz_off=fz_off,
+                               fmag_off=fmag_off, fmag_tau=fmag_tau)
         print(f"[run_policy] FiLM ENABLED (cond={cond} inject={inject} mask_force={mask_force} "
               f"F0={f0:g} tau={tau:g} fz_tau={fz_tau:g} fz_off={fz_off:g} "
               f"fmag={fmag_off:g}/{fmag_tau:g} dfmag_tau={dfmag_tau:g} stats={ds})")
 
     policy = get_policy_class(cfg.type).from_pretrained(model_dir, config=cfg)
+    if film:
+        _verify_film_loaded(model_dir, policy)
     policy.eval()
     pre, post = make_pre_post_processors(
         policy_cfg=policy.config,
@@ -420,11 +548,17 @@ def _film_diagnostics(policy) -> dict | None:
     film = getattr(model, "contact_film", None)
     if c is None or film is None:
         return None
+    # inject='layers' makes contact_film an nn.ModuleList (one film per expert layer);
+    # every other injection is a single film. Treat both as a list and CONCATENATE the
+    # per-layer gain vectors, so the stats below keep their meaning ("how hard is FiLM
+    # pushing right now") with one schema. n_films records what was pooled -- without it
+    # a 16-layer rms is not comparable to a single film's.
+    films = list(film) if isinstance(film, torch.nn.ModuleList) else [film]
     p = next(film.parameters())
     c_eval = c.detach().to(device=p.device, dtype=p.dtype)
     with torch.inference_mode():
-        gamma = film.scale(c_eval)[0].float().cpu().numpy()
-        beta = film.shift(c_eval)[0].float().cpu().numpy()
+        gamma = np.concatenate([f.scale(c_eval)[0].float().cpu().numpy() for f in films])
+        beta = np.concatenate([f.shift(c_eval)[0].float().cpu().numpy() for f in films])
 
     def stats(v):
         return {
@@ -438,6 +572,7 @@ def _film_diagnostics(policy) -> dict | None:
     return {
         "cond_names": list(getattr(model, "_film_cond", ())),
         "c_hat": [float(v) for v in c[0].detach().float().cpu().tolist()],
+        "n_films": len(films),
         "gamma": stats(gamma),
         "beta": stats(beta),
     }
@@ -588,8 +723,20 @@ def _baseline_force(mover, n: int = 5) -> float:
 # offsets are anchored to that session's F/T bias, which drifts day-to-day AND
 # intra-day (7/30 rollout logs: +0.4N morning -> +1.1N afternoon vs these
 # anchors) — with the recal taus (1 / 0.7) that is most of a c-hat unit.
-FILM_BASELINE_ANCHOR_FMAG = 4.59   # |F| (N)
-FILM_BASELINE_ANCHOR_FZ = 1.96     # fz (N)
+#
+# ROUND-SPECIFIC. These are the 0729 session's numbers, and the correction below
+# is only as good as them: it reads the live drift as (measured - anchor), so an
+# anchor from the wrong collection mis-reads the drift by the gap between the two
+# sessions' F/T bias. 0909 REMOUNTED the sensor -- its pre-touch medians are
+# 10.51 / 7.54 (doc 2, 9.2b), 5.9 / 5.6 N above these. Running a 0909 FiLM arm
+# against the 0729 anchors pushed contact_F0 11.26 -> 16.75, above every force the
+# run can reach (--force-limit 12 aborts near 22 N absolute, train settled press
+# is 14 N), and the contact channel sat at exactly 0.000 for all 205 frames of
+# rollouts/0914_smolvla_film_layers/.../20260914-203432. Override per round:
+#   FILM_BASELINE_ANCHOR_FMAG=10.51 FILM_BASELINE_ANCHOR_FZ=7.54   # 0909
+# Defaults keep the 0729 targets byte-identical.
+FILM_BASELINE_ANCHOR_FMAG = float(os.environ.get("FILM_BASELINE_ANCHOR_FMAG", 4.59))  # |F| (N)
+FILM_BASELINE_ANCHOR_FZ = float(os.environ.get("FILM_BASELINE_ANCHOR_FZ", 1.96))      # fz (N)
 FILM_BASELINE_WARN_N = 1.5
 
 
@@ -637,13 +784,16 @@ def _film_auto_baseline(mover, policy, entry_sealed: bool,
         val = model._film_train_offsets[b] + drift[b]
         getattr(model, b).fill_(val)
         applied[b.lstrip("_")] = round(val, 2)
-    print(f"[film-baseline] |F| {fmag_med:.2f}N ({d_fmag:+.2f} vs train) "
-          f"fz {fz_med:.2f}N ({d_fz:+.2f}) -> {applied} (n={len(f)})")
+    print(f"[film-baseline] |F| {fmag_med:.2f}N ({d_fmag:+.2f} vs anchor "
+          f"{FILM_BASELINE_ANCHOR_FMAG:g}) fz {fz_med:.2f}N ({d_fz:+.2f} vs "
+          f"{FILM_BASELINE_ANCHOR_FZ:g}) -> {applied} (n={len(f)})")
     for a in anomalies:
         print(f"[film-baseline] WARNING: {a}; correction applied anyway")
     return {"fmag_med_n": round(fmag_med, 2), "fz_med_n": round(fz_med, 2),
             "drift_fmag_n": round(d_fmag, 2), "drift_fz_n": round(d_fz, 2),
             "wrench_med": [round(float(v), 3) for v in wrench_med],
+            "anchor_fmag_n": FILM_BASELINE_ANCHOR_FMAG,
+            "anchor_fz_n": FILM_BASELINE_ANCHOR_FZ,
             "applied": applied, "anomalies": anomalies}
 
 
@@ -923,22 +1073,28 @@ def run_live(checkpoint: Path, tasks: list[str], *, commit: bool,
     commit=False -> DRY-RUN (prints, commands nothing).
     commit=True  -> COMMANDS the left arm + suction, fully guarded.
 
-    Each run: home both arms -> view park (the collection episodes' start pose)
-    -> BEV-detect the case (workspace box + logged IVs; the policy itself is
-    vision-driven and does not consume the detection) -> policy loop until the
-    task's done-signal (pick = seal + lift back to hover), a safety abort, or
-    the tick cap.
+    Each run reproduces a collection episode's setup: home both arms (HOME is
+    the pose 109 of 0909's 110 recorded episodes start from) -> center the
+    CHASSIS on the case the way collect_case_pick._cycle does before it starts
+    recording (yaw/y/x within CENTER_TOL_M of the same refs), which also yields
+    the detection for the workspace box + logged IVs (the policy itself is
+    vision-driven and does not consume it) -> policy loop until the task's
+    done-signal (pick = seal + lift back to hover), a safety abort, or the tick
+    cap. NOTE: the chassis moves in DRY-RUN too, so a dry run observes the same
+    scene a --go run would.
     """
     mode = "GO — COMMANDS THE LEFT ARM" if commit else "DRY-RUN — policy commands nothing"
     print(f"{mode}. sequence: {' -> '.join(tasks)}\ncheckpoint: {checkpoint}")
     from dexcontrol.robot import Robot
     from dexcontrol.core.config import get_robot_config
     from LGES.ik_demo import config as ikcfg
+    from LGES.ik_demo.config import resolve_poses
     from LGES.ik_demo.suction import SuctionMover
     from LGES.ik_demo.drivers import suction_io
     from LGES.ik_demo.go_home import both_arms_home
-    from LGES.ik_demo.chassis_sequence import (detect, _center_from_det, _view_park,
+    from LGES.ik_demo.chassis_sequence import (_center_case, _center_from_det,
                                                set_head_pitch)
+    from collect_case_pick import CENTER_TOL_M
 
     ob = ObsBuilder()
     policy, pre, post = load_policy(checkpoint, film=film)
@@ -1001,15 +1157,39 @@ def run_live(checkpoint: Path, tasks: list[str], *, commit: bool,
             if run_num > 1:
                 print(f"\n{'='*20} run {run_num} {'='*20}")
 
-            # Start exactly like a collection episode: home -> view park.
+            # Start exactly like a collection episode: at HOME, not the view
+            # park. collect_case_pick._cycle ends a successful pick with
+            # move_joints(_home_seed) and the NEXT episode's recording starts
+            # from there -- the view park is only the session's first cycle and
+            # the failure recovery. Measured over 0909's 110 takes: 109 first
+            # frames are the home EE pose (0.934, 0.389, 1.104) +/-7mm, exactly
+            # ONE is the park (0.99, 0.40, 1.05). Parking here put every rollout
+            # 56mm forward and 54mm low against the pose the policy always
+            # starts from. both_arms_home already leaves the arm at
+            # HOME_JOINTS_LEFT, and it clears the head-camera view on its own
+            # (ARM_VIEW_PARK_JOINTS *is* HOME_JOINTS_LEFT), so detection below
+            # is unaffected.
             if home:
                 both_arms_home(bot, left=mover)
-            _view_park(mover, "policy")
 
-            # Detect the case: dynamic workspace box + the logged IVs (center /
-            # top_face_z / layers) for by-height analysis. The policy does NOT
-            # consume this — it must find the case visually.
-            det = detect(bot, layers)
+            # Center the CHASSIS on the case before the rollout, exactly like a
+            # collection episode (collect_case_pick._cycle does this before
+            # rec.begin): yaw -> 0, case y -> y_ref, case x ->
+            # SOURCE_CASE_CENTER[0], each within CENTER_TOL_M. Every 0909 take
+            # was recorded inside that window (measured over the 110 takes: case
+            # x 0.864..0.938, y -0.090..-0.010, yaw +/-7 deg), so a rollout on an
+            # off-center case is a scene the policy never saw. _center_case's
+            # x_ref does in one call what _cycle ran as a separate forward/back
+            # loop — same refs, same 40mm deadband.
+            #
+            # It returns the LAST detection, which also feeds the dynamic
+            # workspace box and the logged IVs (center / top_face_z / layers)
+            # for by-height analysis. The policy does NOT consume this — it must
+            # find the case visually.
+            y_ref = (ikcfg.CHASSIS_CENTER_CASE_Y_M
+                     - resolve_poses((0.0, 0.0, 0.0, 0.0))["CASE_PICK"][1])
+            det = _center_case(bot, layers, "policy", "source", None, y_ref,
+                               tol_m=CENTER_TOL_M, x_ref=ikcfg.SOURCE_CASE_CENTER[0])
             det_extra = {"layers_remaining": layers}
             box = None
             if det is not None and det.found:

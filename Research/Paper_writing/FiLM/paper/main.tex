@@ -16,18 +16,24 @@
 \pgfplotsset{compat=1.17}
 \usepgfplotslibrary{groupplots}
 \usepackage[hidelinks]{hyperref}
-
-% --- draft macros (strip before submission) ---
-\newcommand{\todo}[1]{\textcolor{red}{[TODO: #1]}}
-\newcommand{\decide}[1]{\textcolor{blue}{[DECISION: #1]}}
-\newcommand{\memo}[1]{\textcolor{teal}{[MEMO: #1]}}
+% Local builds with tectonic (XeTeX): IEEEtran selects Times (ptm), which XeTeX has no
+% TU-encoded shapes for; substitute the metric-compatible TeX Gyre Termes so pagination
+% matches the pdfLaTeX/Overleaf build. No effect under pdfLaTeX.
+\usepackage{iftex}
+\ifXeTeX
+  \usepackage{fontspec}
+  \setmainfont{texgyretermes}[Extension=.otf, UprightFont=*-regular, BoldFont=*-bold,
+    ItalicFont=*-italic, BoldItalicFont=*-bolditalic]
+\fi
 % --- notation ---
 \newcommand{\chat}{\ensuremath{\hat{c}}}
 \newcommand{\Fmag}{\ensuremath{\lVert F\rVert}}
 
 \begin{document}
+\bstctlcite{IEEEexample:BSTcontrol}
 
-\title{Access Is Not Use: Auditing Causal Bypass of Force\\in Behavior-Cloned Vision-Language-Action Policies}
+% 09-14 (사용자): 구조 위주 재프레이밍 — 워킹 타이틀. 구 "Access Is Not Use" 는 NOTES.md 참조.
+\title{Grounded Force Conditioning for Behavior-Cloned VLA Policies:\\A Drop-In, Retrofittable FiLM Pathway That Brakes Beyond the Demonstrations}
 
 % Double-anonymous: no author block content until camera-ready.
 \author{\IEEEauthorblockN{Anonymous Authors}\\

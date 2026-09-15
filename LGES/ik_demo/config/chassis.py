@@ -178,7 +178,7 @@ DIVERT_EXTRA_RIGHT_M: float = 0.1
 # BAT_SRC_2, second -> right slot BAT_SRC_1), then the chassis strafes back
 # right to the source. Both legs are open-loop (no ChassisNav learning).
 #확인
-DIVERT_CASE_STRAFE_LEFT_M: float = 0.55   # tune on site
+DIVERT_CASE_STRAFE_LEFT_M: float = 0.5   # tune on site
 DIVERT_CASE_LAYERS: int = 1              # BEV warp plane: divert case stack height
 # Chassis command timing compensation (move_chassis, DISTANCE-based legs only;
 # the legacy speed*time legs keep their empirically tuned values untouched).
@@ -291,8 +291,18 @@ TARGET_DEFAULT_CASE_CENTER: tuple[float, float, float, float] = (
 # align strafe, plus this bias — the bbox-center projection reads the bin ~47mm
 # FORWARD of its true center (front wall + plane mismatch; measured on-robot
 # 2026-08-06, hand-centered cup vs detection). Detect fail -> the default pose.
-SEED_BIN_CENTER_OFFSET: tuple[float, float] = (-0.12, 0.0)
-# UNUSED since 0914: the bin place (task 2, one case -> bin) corner-seats like
+# This is THE x/y knob for every case-into-bin place: the LAYER LOOP's seed
+# place (menu 1), _place_case_in_bin (menu 4, --case-bin) and the standalone
+# case_to_bin script all read it, so tuning here keeps them identical (and
+# live_detect_bev draws the aim from it too). Both paths then apply the same
+# CASE_CORNER_AIM_BIAS_M off the datum corner and place(corner_seat="case"),
+# and neither applies PLACE_X_PLANE_TRIM_M — verified 0914, they are aim-wise
+# identical. (The menu numbers used to be 3 and 2 here; --lid and --box were
+# inserted ahead of them and the numbering shifted.)
+# 0914: x -0.12 -> -0.09, i.e. the case lands 30mm FURTHER FORWARD (operator
+# call, on-robot). UNVERIFIED at this value.
+SEED_BIN_CENTER_OFFSET: tuple[float, float] = (-0.03, 0.0)
+# UNUSED since 0914: the bin place (menu 4, one case -> bin) corner-seats like
 # every other case place, so it aims at SEED_BIN_CENTER_OFFSET + the corner bias
 # and the walls finish the job. Kept for the measurements below, which is what a
 # plain no-corner-drive aim would need again.
@@ -308,6 +318,18 @@ SEED_BIN_CENTER_OFFSET: tuple[float, float] = (-0.12, 0.0)
 # compare the "[...] bin center (x,y) -> place (x,y)" log line with where the
 # case sat; SEED_BIN_CENTER_OFFSET is NOT touched by that tuning.
 BIN_PLACE_CENTER_OFFSET: tuple[float, float] = (0.0, 0.0)
+# Lower bound on the DETECTED bin y for a case place into the bin
+# (_place_case_in_bin, task 2). The bin place has no y alignment of its own —
+# the chassis is positioned externally — so the only thing that used to object
+# to a badly-parked bin was the IK reach pre-check, and that passes far past
+# the useful window: 0914 14:11 placed from a bin detected at y=-0.159, i.e.
+# the case's seat point 109mm right of the centre line and the whole descent
+# flown across the body. Below this the chassis strafes RIGHT to bring the bin
+# back up to it and re-detects (up to CHASSIS_ADJUST_MAX_ATTEMPTS rounds).
+# -0.05 is the case's own centering ref: a case CENTER at this y puts its
+# grab/seat point (the +0.05 case-frame offset) on the robot centre line, so
+# the floor says "the seat point may be left of centre, never right of it".
+BIN_PLACE_MIN_Y_M: float = -0.05
 # Seed bin search: a failed detection walks these chassis strafes
 # (+left/-right, m) between re-detects — alternating outward from the start —
 # before handing the operator the keyboard. There is NO blind default-pose

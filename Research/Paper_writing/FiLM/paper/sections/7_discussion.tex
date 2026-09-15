@@ -14,22 +14,22 @@ anticipatory: approach slowly, press deliberately, retreat. The press-retreat de
 teach exactly this behavior prior, and the probes confirm the resulting division of labor: the
 successful policy's contact-moment authority is small ($7\%$) while its full-condition authority
 is large ($76\%$)---success comes from an anticipatory behavior prior plus post-hoc state
-gating, not from a reflex. The instrument's value here is not that it found a large number, but
-that it correctly \emph{predicted which mechanism could not work}.
+gating, not from a reflex.
 
 % 08-13 사용자 결정: "Grounding is not free" 문단 삭제 (π0 state-site 이식 결과는 미보고 —
 % EVIDENCE §3.9 아카이브). §IV 각주의 Sec.VII 참조 문장도 함께 제거됨.
-\textbf{Operational asymmetry.}
-The computed condition creates knobs the baseline lacks. Force-torque baselines drift
+\textbf{A computed condition is an operational knob.}
+Because \chat{} is computed rather than learned, the pathway creates knobs the naive policy lacks. Force-torque baselines drift
 (${\sim}1$\,N within a day, pose-sensitive); the conditioned policy re-anchors its offsets at a
 hover pose each run---a deployment-time correction with no retraining---while the baseline's
-force statistics are frozen in its normalization. The same interface is what makes the policy
-auditable (P1/P5 probes) and intervenable at deployment.
+force statistics are frozen in its normalization.
 
 \textbf{Limitations.}
 Single task, single platform, small robot-$n$: the robot results are a case study, and the
 statistical claims live in the offline battery ($n{=}6$ held-out episodes $\times$ dense frames,
-six policies across three architectures). The press simulation depends on a linear force model;
+seven policies across two backbones). The retrofitted instance and the $\pi_0$ instance were
+not deployed in closed loop, and the press-retreat demonstrations are a precondition we do not
+ablate here: the data decides \emph{whether} force is used, the pathway decides the \emph{form}. The press simulation depends on a linear force model;
 we mitigate with the seal-granted control and the live probes, which bracket the simulated
 mechanism from both sides. Contact-moment (reactive) authority plateaus low in every
 configuration we trained---in development phases, oversampling transition frames also failed to

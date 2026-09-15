@@ -1,0 +1,23 @@
+{
+  "phase": "case_pick",
+  "instruction": "pick up the case with the suction cup",
+  "action_space": "ee_delta+suction",
+  "ee_rotation": "quat_wxyz, base_link",
+  "source": "run_policy.py rollout",
+  "checkpoint": "/home/dexmate/ckpt_0909/groot_naive_0909/checkpoints/best",
+  "frames": 161,
+  "success": false,
+  "peak_force_n": 15.76,
+  "peak_force_frame": 7,
+  "peak_contact_n": 6.02,
+  "layers_remaining": 5,
+  "detected_center_xyzyaw": [
+    0.8788834126790366,
+    -0.04226893107096352,
+    0.8240000000000001,
+    -0.05330716395957107
+  ],
+  "top_face_z": 0.669,
+  "detect_conf": 0.9519796967506409,
+  "baseline_force_n": 9.74
+}

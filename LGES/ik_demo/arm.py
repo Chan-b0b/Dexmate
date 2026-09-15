@@ -833,12 +833,22 @@ class ArmMover:
     # Trajectory generation + streaming
     # ------------------------------------------------------------------
     def plan_joint_traj(self, q_start: np.ndarray, q_goal: np.ndarray,
-                        v_goal: "np.ndarray | None" = None) -> Trajectory:
+                        v_goal: "np.ndarray | None" = None,
+                        vel_scale: "float | None" = None) -> Trajectory:
         """Jerk-limited joint-space trajectory (Ruckig) under the arm's limits.
 
         ``v_goal``: joint velocity to ARRIVE with, default rest. Lets a leg hand
         straight over to a streamed Cartesian leg instead of stopping first —
-        see move_ee_vertical's ``v_in`` and joint_vel_for_ee_vel."""
+        see move_ee_vertical's ``v_in`` and joint_vel_for_ee_vel.
+
+        ``vel_scale``: TIME-scale this trajectory only (default: the arm's
+        SPEED_SCALE alone, see _setup_ruckig). 0.5 means the move takes twice as
+        long: the caps go down as (s, s^2, s^3) for (velocity, accel, jerk),
+        which is what makes the whole profile stretch uniformly. Scaling all
+        three by s alone does NOT — a short hop is jerk-limited, so s=0.5 there
+        buys only 1.35x the duration. See lid_place_stance, which takes the stow
+        spread down for the lid the arm is carrying."""
+        s = 1.0 if vel_scale is None else float(vel_scale)
         inp = InputParameter(_ARM_DOF)
         inp.current_position = list(map(float, q_start))
         inp.current_velocity = [0.0] * _ARM_DOF
@@ -847,22 +857,26 @@ class ArmMover:
         inp.target_velocity = ([0.0] * _ARM_DOF if v_goal is None
                                else list(map(float, v_goal)))
         inp.target_acceleration = [0.0] * _ARM_DOF
-        inp.max_velocity = list(map(float, self._ruckig_vmax))
-        inp.max_acceleration = list(map(float, self._ruckig_amax))
-        inp.max_jerk = list(map(float, self._ruckig_jmax))
+        inp.max_velocity = list(map(float, self._ruckig_vmax * s))
+        inp.max_acceleration = list(map(float, self._ruckig_amax * s * s))
+        inp.max_jerk = list(map(float, self._ruckig_jmax * s * s * s))
         traj = Trajectory(_ARM_DOF)
         self._otg.calculate(inp, traj)
         return traj
 
-    def move_joints(self, q_goal: np.ndarray, v_goal: "np.ndarray | None" = None) -> None:
+    def move_joints(self, q_goal: np.ndarray, v_goal: "np.ndarray | None" = None,
+                    vel_scale: "float | None" = None) -> None:
         """Stream a Ruckig joint-space trajectory to q_goal at CONTROL_HZ.
-        ``v_goal``: arrive with this joint velocity instead of at rest."""
+        ``v_goal``: arrive with this joint velocity instead of at rest.
+        ``vel_scale``: slow THIS move down (see plan_joint_traj)."""
         q_start = self._start_q()
-        traj = self.plan_joint_traj(q_start, np.asarray(q_goal, dtype=float), v_goal)
+        traj = self.plan_joint_traj(q_start, np.asarray(q_goal, dtype=float), v_goal,
+                                    vel_scale)
         dt = 1.0 / float(cfg.CONTROL_HZ)
-        logger.info("[arm] move_joints: {:.2f}s, {} steps{}", traj.duration,
+        logger.info("[arm] move_joints: {:.2f}s, {} steps{}{}", traj.duration,
                     max(1, int(np.ceil(traj.duration / dt))),
-                    "" if v_goal is None else " (arriving in motion)")
+                    "" if v_goal is None else " (arriving in motion)",
+                    "" if vel_scale is None else " at {:.2f}x speed".format(vel_scale))
         self._stream_traj(traj, dt)
 
     def _stream_traj(self, traj: Trajectory, dt: float, tick_cb=None,
@@ -1123,6 +1137,151 @@ class ArmMover:
             if stop_fn is not None and stop_fn():
                 self._send(prev_q, np.zeros(_ARM_DOF))
                 logger.info("[arm] move_ee_line stopped by the caller at {}",
+                            np.round(p_now, 4))
+                return prev_q
+            elapsed += dt
+            pace.wait()
+            now = time.perf_counter()
+            tick_acc += now - t_tick; tick_n += 1; trace_t += now - t_tick
+            t_tick = now
+            if trace_s and trace_t >= trace_s:
+                self._track_trace(trace_tag, p_now, prev_q,
+                                  tick_acc / tick_n * 1000.0)
+                trace_t, tick_acc, tick_n = 0.0, 0.0, 0
+        self._send(prev_q, np.zeros(_ARM_DOF))
+        return prev_q
+
+    def move_ee_corner(self, p_corner, p_goal, rpy, radius: float,
+                       speed_fast: float, speed_slow: float,
+                       v_in: float = 0.0, decel_m: "float | None" = None,
+                       stop_fn=None, tick_cb=None,
+                       trace_tag: str = "corner") -> "np.ndarray | None":
+        """Two straight EE legs joined by a ROUNDED corner, flown as ONE
+        per-tick stream: current pose -> ``p_corner`` -> ``p_goal``, with the
+        turn cut by an arc of ``radius``. Orientation held every tick, like
+        move_ee_line / move_ee_vertical.
+
+        Why this exists: a velocity handover (move_ee's ``v_out`` into
+        move_ee_vertical's ``v_in``) only composes when the two legs point the
+        SAME way. The cylinder pick's descent-then-enter pair turns 90 deg, so
+        carrying the descent's downward speed into the entry would drive the
+        tool below pinch height. The legs therefore used to be flown separately
+        and the arm came to a full stop at the corner. Here the whole L is one
+        stream and one speed profile, so the velocity DIRECTION rotates through
+        the arc while the speed stays continuous.
+
+        Speed: ramps in from ``v_in``, cruises at ``speed_fast`` down the first
+        leg, decelerates to ``speed_slow`` by the arc over ``decel_m``, then
+        holds ``speed_slow`` through the arc and the second leg, easing into
+        ``p_goal``. ``radius`` 0 is not handled here — the caller flies the
+        plain two-leg path instead.
+
+        ``decel_m`` defaults to the shared DESCENT_DECEL_BAND_M (120mm), which
+        is wider than a short first leg: on the cylinder pick's 130mm descent it
+        left no room to cruise and made the whole approach 0.6s SLOWER than the
+        old stop-at-the-corner pair. Pass a band that fits the leg.
+
+        ``tick_cb(s, p)``: per-tick hook, arc-length travelled and the
+        commanded point. The cylinder pick samples its wrench baseline through
+        it on the steady part of the first leg: with the orientation held and
+        the speed constant there, the load the sensor sees is the same as it
+        would be at a standstill, which is what the old stationary tare had to
+        stop the arm to get. Same idea as the suction descent's in-stream
+        reference (suction.py, WRENCH_REF_WARMUP_S).
+        ``stop_fn``: polled once per tick AFTER the tick's command; True halts
+        the stream in place. Returns the last commanded joints, or None if a
+        tick's IK falls beyond REACH_TOL_M (halts in place, logged)."""
+        dt = 1.0 / float(cfg.CONTROL_HZ)
+        prev_q = self._start_q()
+        p_start = np.asarray(self.fk(prev_q)[0], dtype=float)
+        p_corner = np.asarray(p_corner, dtype=float)
+        p_goal = np.asarray(p_goal, dtype=float)
+        R = float(radius)
+        d1, n1 = p_corner - p_start, float(np.linalg.norm(p_corner - p_start))
+        d2, n2 = p_goal - p_corner, float(np.linalg.norm(p_goal - p_corner))
+        if n1 < 1e-6 or n2 < 1e-6:
+            logger.warning("[arm] move_ee_corner: degenerate legs ({:.1f}/{:.1f}mm)"
+                           " — nothing to fly", n1 * 1000, n2 * 1000)
+            return None
+        d1, d2 = d1 / n1, d2 / n2
+        cos_t = float(np.clip(np.dot(d1, d2), -1.0, 1.0))
+        theta = float(np.arccos(cos_t))                     # turn angle
+        half = theta / 2.0
+        # tangent set-back along each leg, and the arc centre on the bisector
+        t_back = R / max(np.tan(half), 1e-6)
+        if t_back > min(n1, n2) - 1e-6:
+            logger.warning("[arm] move_ee_corner: radius {:.0f}mm needs {:.0f}mm of "
+                           "each leg but they are {:.0f}/{:.0f}mm — flying the sharp "
+                           "corner", R * 1000, t_back * 1000, n1 * 1000, n2 * 1000)
+            return None
+        T1, T2 = p_corner - d1 * t_back, p_corner + d2 * t_back
+        bis = d2 - d1
+        bis = bis / max(float(np.linalg.norm(bis)), 1e-9)
+        C = p_corner + bis * (R / max(np.sin(half), 1e-6))
+        u = (T1 - C) / R                                    # arc start radius vector
+        L1, La, L2 = n1 - t_back, R * theta, n2 - t_back
+        total = L1 + La + L2
+
+        def point_at(s: float) -> np.ndarray:
+            if s <= L1:
+                return p_start + d1 * s
+            if s <= L1 + La:
+                phi = (s - L1) / R
+                return C + R * (np.cos(phi) * u + np.sin(phi) * d1)
+            return T2 + d2 * (s - L1 - La)
+
+        band = max(float(cfg.DESCENT_DECEL_BAND_M if decel_m is None
+                         else decel_m), 1e-6)
+        ramp = max(float(cfg.DESCENT_RAMP_S), 1e-6)
+        out_band = max(speed_slow * ramp, 1e-6)
+        logger.info("[arm] move_ee_corner: {} -> corner {} -> {} ({:.0f}+{:.0f}+{:.0f}mm, "
+                    "r={:.0f}mm turn {:.0f}deg, {:.3f}->{:.3f} m/s{})",
+                    np.round(p_start, 4), np.round(p_corner, 4), np.round(p_goal, 4),
+                    L1 * 1000, La * 1000, L2 * 1000, R * 1000, np.rad2deg(theta),
+                    speed_fast, speed_slow,
+                    "" if v_in <= 0 else f", entering at {float(v_in):.3f} m/s")
+        s, elapsed = 0.0, 0.0
+        p_now = p_start
+        trace_s = float(cfg.DESCENT_TRACE_S)
+        trace_t, tick_acc, tick_n, t_tick = 0.0, 0.0, 0, time.perf_counter()
+        pace = TickPacer(dt)
+        while total - s > 5e-4:
+            to_arc = L1 - s
+            if to_arc <= 0.0:
+                base = speed_slow
+            elif to_arc >= band:
+                base = speed_fast
+            else:
+                f = to_arc / band
+                f = f * f * (3.0 - 2.0 * f)                 # smoothstep down to slow
+                base = speed_slow + (speed_fast - speed_slow) * f
+            r = min(1.0, elapsed / ramp)
+            ss = r * r * (3.0 - 2.0 * r)
+            v_start = min(max(0.0, float(v_in)), base)
+            base = v_start + (base - v_start) * ss
+            left = total - s
+            if left < out_band:                             # ease into the goal
+                g = left / out_band
+                base = min(base, speed_slow * max(g * g * (3.0 - 2.0 * g), 0.05))
+            s_next = min(total, s + base * dt)
+            p_next = point_at(s_next)
+            sol, p_sched = self.solve_step(prev_q, p_now, p_next, rpy, dt)
+            if sol.pos_err_m > cfg.REACH_TOL_M:
+                self._send(prev_q, np.zeros(_ARM_DOF))
+                logger.warning("[arm] corner move stalled {:.1f}mm short at {} — "
+                               "halting", sol.pos_err_m * 1000, np.round(p_now, 4))
+                return None
+            self._send(sol.q, (sol.q - prev_q) / dt)
+            # solve_step may shorten the step under the joint cap; re-project the
+            # travelled arc length onto the schedule so the profile stays honest
+            p_sched = np.asarray(p_sched, dtype=float)
+            s = s + float(np.linalg.norm(p_sched - p_now))
+            p_now, prev_q = p_sched, sol.q
+            if tick_cb is not None:
+                tick_cb(s, p_now)
+            if stop_fn is not None and stop_fn():
+                self._send(prev_q, np.zeros(_ARM_DOF))
+                logger.info("[arm] move_ee_corner stopped by the caller at {}",
                             np.round(p_now, 4))
                 return prev_q
             elapsed += dt

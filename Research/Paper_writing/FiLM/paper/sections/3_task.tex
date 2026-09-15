@@ -1,4 +1,4 @@
-% §III Task and the Failure (~0.75 page, Fig. 2). 0729-pure per Q2: no June depletion sweep /
+% §III Task and the Failure (~0.75 page). 09-14: fig:setup 참조 제거 — 셋업 사진/헤드캠 프레임 로컬 부재. 0729-pure per Q2: no June depletion sweep /
 % gate-oracle in body. Failure = naive 0/3 overpress (canonical: EVIDENCE §3 08-11 블록). The
 % policy is phenomenologically described here; mechanism diagnosis deferred to §V (probes).
 % 08-11 수정: 용어 naive policy로 통일; abort는 external-layer/censored 서술 (§I과 정합);
@@ -7,10 +7,31 @@
 \section{Task, Setting, and the Failure}
 \label{sec:task}
 
+\begin{figure}[t]
+\centering
+% 09-14: 사용자 제공 사진 (images/Robot_env.jpeg, Battery_box.jpeg) + TikZ 픽토그램 (Battery_stack 대체).
+\begin{minipage}[b]{0.29\linewidth}\centering
+\includegraphics[width=\linewidth]{figs/setup_robot}\\[-0.2em]{\scriptsize (a)}
+\end{minipage}\hfill
+\begin{minipage}[b]{0.42\linewidth}\centering
+\input{figs/setup_pictogram}\\[0.15em]{\scriptsize (b)}
+\end{minipage}\hfill
+\begin{minipage}[b]{0.25\linewidth}\centering
+\includegraphics[width=\linewidth]{figs/setup_headcam}\\[-0.2em]{\scriptsize (c)}
+\end{minipage}
+\caption{Setting. (a)~The dual-arm mobile manipulator picking a battery-cell case from a
+tray with a suction cup. (b)~The stack height varies across episodes, so the contact plane
+moves by centimeters, while the head camera keeps the same pose; a few millimeters of
+over-travel take contact force past the $15$\,N limit. (c)~The head-camera view of a tray:
+from this range the remaining stack height is visually near-indistinguishable across layers,
+so the stop-on-contact transition must be carried by force, not vision.}
+\label{fig:setup}
+\end{figure}
+
 \textbf{Task and platform.}
 We study suction case picking on a Dexmate Vega-1p, a dual-arm mobile manipulator: the arm
 descends onto a stack of rigid cases, must stop when the suction cup meets the top case, hold
-until vacuum seal is confirmed, and lift (Fig.~\ref{fig:setup}). The cases carry battery
+until vacuum seal is confirmed, and lift (Fig.~\ref{fig:setup}a). The cases carry battery
 cells, which tolerate little compression---over-pressing risks the product, not just the
 pick---so deployment enforces a $15$\,N contact-force limit. The margin is tight in both
 directions: too little press and the seal fails; a few millimeters too much and contact force
@@ -23,8 +44,7 @@ observations).
 The policy observes a single head-mounted camera (RGB and colorized depth; no wrist camera) and a
 15-D state: end-effector position and quaternion, suction command, vacuum-seal bit, and the 6-D
 wrist wrench. The setting is a deliberately clean diagnostic: at head-camera range, case-stack
-heights differing by millimeters---the entire success margin---are visually near-indistinguishable
-(Fig.~\ref{fig:setup}, right), while the wrench and seal bit signal the contact transition
+heights differing by millimeters---the entire success margin---are visually near-indistinguishable (Fig.~\ref{fig:setup}b,c), while the wrench and seal bit signal the contact transition
 directly. Every condition the task depends on is \emph{in the state the policy receives}; the
 question is whether the policy binds its behavior to it.
 
@@ -41,8 +61,8 @@ rationale we develop in Sec.~\ref{sec:discussion}; here it matters that the naiv
 all conditioned variants are trained on exactly these episodes.
 
 \textbf{The failure.}
-Deployed on the robot, the naive policy---a SmolVLA~\cite{smolvla} fine-tuned on these
-demonstrations, with the full wrench and seal bit in its state---fails every evaluation trial
+Deployed on the robot, the naive policy---a VLA fine-tuned on these demonstrations, with the
+full wrench and seal bit in its state (backbone in Sec.~\ref{sec:offline})---fails every evaluation trial
 the same way: it descends, makes contact, and keeps pressing---never initiating a stop of its
 own---until the external safety layer aborts the run ($15.4$--$18.7$\,N measured at abort).
 The transition that the demonstrations exhibit in every single episode, driven by the one signal

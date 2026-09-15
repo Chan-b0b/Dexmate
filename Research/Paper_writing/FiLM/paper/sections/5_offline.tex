@@ -1,5 +1,5 @@
 % §V Experiments — offline battery. REWRITE 08-11 (RESULTS_LINEUP.md A1–A3, 보고 정책).
-% 08-11 결정: best-only 보고 (균일 규칙, 서두 선언); 용어 naive policy; π0.5 HOLD (\todo).
+% 08-11 결정: best-only 보고 (균일 규칙, 서두 선언); 용어 naive policy. 09-14: fig:doseresponse = figs/dose_response.tex (pgfplots, 스크립트 생성).
 % 08-12 압축 (사용자): bypass 소절 + Table I 삭제 (유지).
 % 08-12 재구성 (사용자): ① 결과 제시 probe 순서 P1→P4 (P5는 §VI-B) ② 표/서사 분리 —
 %   §V-A = naive vs conditioned 2행 표 (tab:probes), §V-B = ablation 컨트롤 2행 표
@@ -12,78 +12,85 @@
 \section{Experiments}
 \label{sec:offline}
 
+\begin{table*}[!t]
+\caption{Offline battery. Upper rows: the naive policy vs.\ the conditioned policy (FiLM,
+ours). Lower rows: ablation controls with the same initialization and data and one
+ingredient removed. Entries are the change in commanded descent caused by the intervention;
+percentages are relative to the policy's own descent on the evaluated frames (\% own; none for
+P1, whose frames differ). Press sim = the seal-never press simulation. The naive policy has no
+\chat{} to force (---).}
+\label{tab:probes}
+\centering\setlength{\tabcolsep}{4.5pt}
+\begin{tabular}{llrrrr}
+\toprule
+Policy & Force access & \multicolumn{1}{c}{\makecell{Forcing (P1)\\{\scriptsize mm/frame}}} & \multicolumn{1}{c}{\makecell{Transplant (P2)\\{\scriptsize mm/frame (\% own)}}} & \multicolumn{1}{c}{\makecell{Dose-response (P3), $8\rightarrow12$\,N\\{\scriptsize mm/frame (\% own)}}} & \multicolumn{1}{c}{\makecell{Press sim (P4)\\{\scriptsize max depth (mm)}}} \\
+\midrule
+naive VLA   & raw wrench               & ---                     & $+1.63$ (105\%)            & $+1.41\rightarrow+1.12$ (36$\rightarrow$28\%) $\downarrow$ & 14.9 \\
+FiLM (ours) & masked, grounded \chat{} & $\mathbf{+0.9}$         & $+1.57$ (\phantom{1}94\%)  & $+1.20\rightarrow\mathbf{+4.40}$ (31$\rightarrow$\textbf{115\%}) $\uparrow$ & \textbf{9.8} \\
+\midrule
+FiLM, wrench kept            & raw + dead \chat{}  & $\phantom{+}0.0$ & $+1.68$ (111\%)           & $+1.57\rightarrow+1.12$ (42$\rightarrow$30\%) $\downarrow$ & 11.9 \\
+FiLM, mask, shuffled \chat{} & ungrounded pathway  & $-0.2$           & $-0.06$ (\phantom{10}0\%) & $-0.06\rightarrow-0.11$ ($\approx$0\%) $\phantom{\downarrow}$ & \textbf{57.2} \\
+\bottomrule
+\end{tabular}
+\end{table*}
+
+The backbone throughout is SmolVLA~\cite{smolvla}, a compact open VLA chosen so that a matched
+ablation---four policies from one initialization---and the continued-training runs are
+affordable; Sec.~\ref{sec:offline-pi0} repeats the central result on the $3$B-class $\pi_0$.
 The offline experiments compare four policies that start from the \emph{same} trained naive
 checkpoint and continue training on the \emph{same} demonstrations: the naive policy itself,
-the full recipe (the conditioned policy), and two controls that each remove a single
-ingredient---the mask or the grounding (Sec.~\ref{sec:offline-quintuple}). Imitation error on
+the full recipe (the conditioned policy), and two controls that each remove one ingredient:
+one keeps the raw wrench in the state alongside \chat{} (no mask), the other keeps the mask but
+trains on \chat{} values shuffled across the batch, so \chat{} no longer tracks the measured
+force (no grounding) (Sec.~\ref{sec:offline-quintuple}). Imitation error on
 held-out episodes is indistinguishable across all four ($0.84$--$0.96$\,mm per step): on the
 data manifold, these are the same policy. Every reported model is its validation-loss-selected
-(\emph{best}) checkpoint---one uniform selection rule for all policies---and the robot deploys
-the same checkpoints.
+(\emph{best}) checkpoint---one uniform selection rule for all policies. This is the retrofit
+setting of Sec.~\ref{sec:method-mask}: continued training ran for $20$k steps, validation loss
+selects the conditioned policy's checkpoint at $2{,}500$ steps, and the monotone form reported
+below persists to the final checkpoint ($+0.97\rightarrow+3.44$\,mm at $8\rightarrow12$\,N).
 
 \subsection{The two policies under intervention}
 \label{sec:offline-main}
 
-We walk the probe battery in order: P1--P4 against the naive and conditioned policies here
-(Table~\ref{tab:probes}, Fig.~\ref{fig:doseresponse}), the ablation controls in
-Sec.~\ref{sec:offline-quintuple}, and the closed-loop picks and the live probe P5 on the robot
-(Sec.~\ref{sec:robot}--\ref{sec:robot-live}).
+Table~\ref{tab:probes} (upper rows) and Fig.~\ref{fig:doseresponse} give P1--P4 for the naive
+and conditioned policies; the controls follow in Sec.~\ref{sec:offline-quintuple}.
 
 \begin{figure}[t]
 \centering
-% \includegraphics[width=\linewidth]{figs/dose_response}
-\todo{dose-response figure: cancellation vs.\ forced dose (8/10/12\,N) for the four ablation
-policies --- assets: vla/probes/0729\_state\_*\_ramp*.txt}
-\caption{Dose-response under forced wrench magnitude (P3). The naive policy's response fades
-past the demonstrated range; the unmasked variant lies on top of it (all response through the
-raw route); the ungrounded pathway is flat at zero; only the grounded pathway grows with
-dose, crossing full cancellation into commanded retreat at $12$\,N.}
+\input{figs/dose_response}
+% generated by scripts/make_dose_response_pgf.py from vla/probes/0729_state_*_ramp{8,10,12}.txt
+\caption{Dose-response under forced wrench magnitude (P3): cancellation of each policy's
+own commanded descent as the transplanted first-contact wrench is rescaled to
+$8/10/12$\,N. The naive policy's response fades past the demonstrated range; the unmasked
+variant lies on top of it (all response through the raw route); the ungrounded pathway is
+flat at zero; only the grounded pathway grows with dose, crossing full cancellation into
+commanded retreat at $12$\,N.}
 \label{fig:doseresponse}
 \end{figure}
-
-\begin{table*}[t]
-\caption{The naive and conditioned policies under the offline battery. All responses in
-mm/frame of commanded descent; \emph{own} = the policy's mean commanded descent on the
-evaluated frames, the denominator of the percentage. Forcing (P1) = every \chat{} channel
-forced to saturation, on committed-descent frames; the naive policy has no \chat{} to force
-(---). Transplant (P2) = response to a transplanted first-contact state. Dose-response (P3) =
-response at forced 8\,N$\rightarrow$12\,N. Press sim (P4) = maximum penetration in the
-seal-never press simulation.}
-\label{tab:probes}
-\centering
-\begin{tabular}{llcccc}
-\toprule
-Policy & Force access & Forcing (P1) & Transplant (P2) & Dose-response (P3) & Press sim (P4) \\
-\midrule
-naive VLA          & raw wrench       & --- & \makecell{$+1.63$ (105\%)\\{\scriptsize own $-1.55$}} & \makecell{$+1.41\rightarrow+1.12$ (36$\rightarrow$28\%) $\downarrow$\\{\scriptsize own $-3.94$}} & max 14.9\,mm \\
-\addlinespace
-conditioned policy & grounded pathway & \makecell{$\mathbf{+0.9}$\\{\scriptsize own $-7.8$}} & \makecell{$+1.57$ (94\%)\\{\scriptsize own $-1.67$}} & \makecell{$+1.20\rightarrow\mathbf{+4.40}$ (31$\rightarrow$\textbf{115\%}) $\uparrow$\\{\scriptsize own $-3.84$}} & \textbf{max 9.8\,mm} \\
-\bottomrule
-\end{tabular}
-\end{table*}
 
 \textbf{(P1) Condition forcing.} Forcing every channel of \chat{} to saturation moves the
 conditioned policy's committed descent by $+0.9$\,mm per frame. Restricting the forcing to a
 calibrated contact-onset pattern shows the limit of what any policy adopts: even the
 best-conditioned policy moves by only $7\%$---the 1--2-frame contact \emph{transient} is
-weakly adopted across the board, a point Sec.~\ref{sec:discussion} returns to.
+weakly adopted across the board.
 
 \textbf{(P2) State transplant: both policies on one scale.}
 \label{sec:offline-posthoc}
 Transplanting a measured first-contact state into pre-contact descent frames moves the naive
 policy by $+1.63$\,mm---$105\%$ of its descent command. The naive policy is not force-blind:
 its raw route responds strongly to force-bearing state. In the conditioned policy the same
-transplant lands entirely on $d_{\mathrm{FiLM}}$ ($+1.57$\,mm, $94\%$; the masked raw route
-contributes nothing)---the mask working as designed. \emph{What} is transplanted matters as
-much as whether: a \emph{sealed} state moves both models far more than the contact state does
-(on-robot: $147\%$ vs.\ $67\%$ for the naive policy; Sec.~\ref{sec:robot-live}). Together with
+transplant acts entirely through \chat{} ($+1.57$\,mm, $94\%$): changing the wrench entries of
+the state while holding \chat{} fixed moves the action by $0.00$\,mm---the mask leaves no
+leak. \emph{Which} state is transplanted matters as
+much as whether one is: a \emph{sealed} state (seal bit on, press wrench) brakes both policies
+far more than a first-contact wrench does---in the on-robot probes of Sec.~\ref{sec:robot-live},
+$147\%$ vs.\ $67\%$ of own descent for the naive policy and $58\%$ vs.\ $32\%$ for the
+conditioned one. Together with
 the weak contact-onset forcing above, the pattern is that stable, persistent conditions (seal,
 sustained press) are adopted essentially for free, while a transient that is redundant with
-depth-like cues in ordinary demonstrations is not. The operational corollary is developed in
-Sec.~\ref{sec:discussion}: on stiff contact, even substantial condition authority cannot
-succeed by \emph{reactive} gating at the contact moment---the viable mechanism is an
-anticipatory behavior prior plus post-hoc state gating, which is exactly what the probes
-measure as adopted.
+depth-like cues in ordinary demonstrations is not; Sec.~\ref{sec:discussion} draws the
+consequence for what mechanism can stop a stiff press.
 
 \textbf{(P3) Dose-response: raw access binds a template, the grounded pathway binds a brake.}
 The naive policy responds to transplanted force---at the demonstrated magnitude. As the dose
@@ -95,6 +102,10 @@ The monotone extrapolation is not learned from data (no demonstration presses at
 forces); it is inherited from the channel's design as a calibrated monotone scalar. The forms
 are not artifacts of checkpoint selection: no naive checkpoint we examined exceeds $65\%$
 cancellation at any dose, while the grounded brake remains monotone to the end of training.
+That the naive policy responds \emph{more} at the demonstrated dose does not help it: over-press
+is the regime in which force rises past the template, so its brake weakens exactly as it becomes
+necessary, and its strongest response---to the sealed state (Sec.~\ref{sec:robot-live})---is
+bound to a signal that never arrives in an over-press.
 
 \textbf{(P4) Press simulation: consequences.} Closing the loop under the seal-never press
 turns the response forms into outcomes. Every conditioned episode settles by $9.8$\,mm of
@@ -111,24 +122,8 @@ policy's is bound to \emph{force}.
 \subsection{Ablating the recipe: the mask and the grounding}
 \label{sec:offline-quintuple}
 
-The two controls run the same battery (Table~\ref{tab:ablation}); each isolates one
+The two controls run the same battery (Table~\ref{tab:probes}, lower rows); each isolates one
 ingredient.
-
-\begin{table*}[t]
-\caption{Ablation controls: same initialization, same data, one ingredient removed. Columns
-as in Table~\ref{tab:probes}.}
-\label{tab:ablation}
-\centering
-\begin{tabular}{llcccc}
-\toprule
-Policy & Force access & Forcing (P1) & Transplant (P2) & Dose-response (P3) & Press sim (P4) \\
-\midrule
-FiLM, wrench kept        & raw + dead \chat{}  & \makecell{$0.0$\\{\scriptsize own $-7.7$}} & \makecell{$+1.68$\\{\scriptsize own $-1.52$}} & \makecell{$+1.57\rightarrow+1.12$\\{\scriptsize own $-3.77$}} & max 11.9\,mm \\
-\addlinespace
-FiLM, mask, shuffled \chat{} & ungrounded pathway & \makecell{$-0.2$\\{\scriptsize own $-8.2$}} & \makecell{$-0.06$ (0\%)\\{\scriptsize own $-1.35$}} & \makecell{$-0.06\rightarrow-0.11$ ($\approx$0)\\{\scriptsize own $-1.35$}} & \textbf{max 57.2\,mm} \\
-\bottomrule
-\end{tabular}
-\end{table*}
 
 \textbf{Remove the mask, and force reroutes: bypass.} The unmasked control keeps the raw
 wrench in the state alongside \chat{}, and behaves as the naive policy everywhere: its
@@ -142,10 +137,6 @@ unmasked variant's validation loss matches the conditioned policy's to the fourt
 ($0.14750$ vs.\ $0.14762$). An independently trained pair under the earlier calibration
 reproduces the result: $7\%$ condition-forcing authority with the wrench kept versus $76\%$
 with it masked, again at near-identical loss.
-\memo{PARKED (08-12): de-emphasize the loss axis. Remaining loss artifacts: the fourth-decimal
-phrasing here and in the abstract, ``unchanged validation loss'' in Sec.~I para.~4, and
-``indistinguishable in loss'' in the closing one-sentence summary. Candidate replacement:
-held-out imitation error ($0.85$ vs.\ $0.87$\,mm/step for this pair).}
 
 \textbf{Remove the grounding, and the pathway is worse than raw access.} The shuffled control
 has the same added parameters, the same continued training, the same pathway---and zero
@@ -155,17 +146,20 @@ budget, $19$--$23$\,N past the force limit, up to $57$\,mm deep. Grounding, not 
 is the active ingredient: the mask removed the raw route, and the noise-trained \chat{}
 replaced it with nothing.
 
-\subsection{Scale does not change the class}
-\label{sec:offline-pi05}
+\subsection{The pathway attaches to a second backbone}
+\label{sec:offline-pi0}
+% 09-14 (사용자): π0 0729 film-state 결과 복원, π0.5 미언급. 출처 EXPERIMENTS_PI0_FILM_0729.md +
+% probes/0729_sim_pi0{naive,filmstate,filmaction}_best_off1_fzdelta.txt, 0729_eval_pi0*, 0729_state_pi0filmstate_best_pc_fc.
 
-Fine-tuning $\pi_0$~\cite{pi0} and $\pi_{0.5}$~\cite{pi05} ($3$B-class, ${\sim}8\times$
-SmolVLA) on the same demonstrations reproduces the failure at scale, in two forms.
-$\pi_{0.5}$ shows the template signature outright: a strong on-manifold transplant response
-($65\%$) whose dose-response saturates shallowly ($17\%\rightarrow25\%$). $\pi_0$'s response
-rises with dose ($20\%\rightarrow80\%$) yet stays below full cancellation---and below what
-stopping a stiff press requires. Both collapse in the seal-never press: no episode settles,
-all still descending when the step budget ends, at max penetrations of $48$ and $19.6$\,mm
-(versus $14.9$ for the naive SmolVLA, and $9.8$, settled, for the conditioned policy), at
-comparable imitation error ($0.89$--$1.03$\,mm per step). Neither parameter count nor
-architecture converts raw force access into force-bound braking; what changes the class is
-the conditioning pathway, not scale.
+The same pathway---same channels, same calibration, same mask---attaches to
+$\pi_0$~\cite{pi0} ($3$B-class, ${\sim}8\times$ the parameter count) at its dense state token, with the
+backbone otherwise unchanged. Fine-tuned naively on the same demonstrations, $\pi_0$
+reproduces the naive failure: in the seal-never press no episode settles (mean penetration
+$17.0$\,mm, max $19.6$). With the pathway attached, five of six settle (mean $7.2$\,mm) at equal
+imitation error ($0.93$ vs.\ $1.03$\,mm per step), and the transplant response again runs
+entirely through the FiLM route (masked raw route $+0.00$\,mm). Attaching the same pathway at
+the \emph{action} token instead stops no episode ($22.9$\,mm mean): the injection site is part
+of the recipe, not a detail.\footnote{This $\pi_0$ instance carries the saturating contact
+channel but not the unsaturated $\chat_{\mathrm{fmag}}$, so its response is threshold-like
+rather than dose-monotone, and one episode runs to $18.3$\,mm. Offline only; $\pi_0$ was not
+deployed on the robot.}

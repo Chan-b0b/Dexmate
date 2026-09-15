@@ -1,4 +1,70 @@
-# 초안 상태 노트 (v0 스켈레톤+전섹션 드래프트, 2026-08-06)
+# 초안 상태 노트
+
+## 2026-09-15 — 읽기 교정 패스 (사용자 지적 → 합의 수정) + 빌드 TeX Live 전환
+- 빌드: 로컬 TeX Live 2023 설치됨 (사용자). latexmk 없음 → `pdflatex; bibtex main; pdflatex; pdflatex`.
+  tectonic/XeTeX 가드는 남겨두었지만 이제 pdfLaTeX 경로가 기준. **8쪽, 경고 0.**
+- 수정 6건: ① §IV-B "(initialized to identity)" 괄호 삭제, 항등 초기화는 retrofit 문장에 한 번(붙인 순간
+  = 학습된 정책) ② SmolVLA 이름은 §V 서두 설정 문장 한 곳만 (작은 공개 모델 선택 이유 + π0 재확인), §III 실패
+  문장에서 제거 ③ fig:setup 캡션 "is carried by" → "must be carried by" ④ §IV-B "preliminary experiments"
+  각주 삭제 → §V-C π0 state/action 비교로 대체 ⑤ §IV-C 프로브 P1–P5 문단 전부 질문 문장으로 시작
+  ⑥ 쪽수 복구: table* 2개를 §V 첫머리로 이동([!t]), §II loss 4째자리 절 삭제, §V-A 안내문·P1/P2 꼬리·§VII
+  되풀이 문장 2개 삭제.
+
+- 추가 합의 (09-15 오후): ⑦ P5 첫 문장 풀어쓰기 ⑧ §V 서두 두 대조군을 조작 그대로 서술(no mask / shuffled ĉ)
+  ⑨ 2,500 스텝은 §V에서만 20k 맥락과 함께(마지막 ckpt에도 단조 형태 유지 +0.97→+3.44), 초록·기여는 "a few
+  thousand steps" ⑩ 제안 모델 표·범례 이름 = **"FiLM (ours)"** (산문은 "the conditioned policy" 유지, §I 정의에
+  괄호로 연결) — Table I 행, dose/live/traces 범례 전부 교체 ⑪ **그래프 전부 TeX**: 힘 궤적 그림도
+  `scripts/make_force_traces_pgf.py` → `figs/robot_force_traces.tex` (pgfplots). 남은 이미지 = 사진 2장 +
+  architecture.pdf(블록도). 구 matplotlib PDF/PNG는 figs/에 남아 있으나 미참조.
+- 사용자 의문 "no mask가 더 못한다는 게 말이 되나" → 데이터는 "naive와 같다(새 정보를 안 씀)"이며 "더 못하다"가
+  아님을 확인, 삭제 안 함. §V-B에 "정보가 더 많은데도 naive보다 나아지지 않음" 한 문장 추가 제안(미결).
+
+## 2026-09-14 (저녁) — 구조 위주 재프레이밍 (사용자 결정, ICRA 9/15 마감 유지)
+사용자 방향: **FiLM 경로(구조) 자체의 장점 위주** — ① drop-in(백본 무변경·정보 추가 0·모방오차 비용 0,
+π0에도 붙음) ② retrofittable(학습된 naive에 붙여 2,500 스텝) ③ 못 본 값에 옳은 방향(12N 정지+후퇴, L3).
+"같은 시연, 다른 기제"는 §V-A P3 해석 문장으로 내려감. 결과는 **오프라인 위주**로 서술하되 로봇 결과는
+**수치·분량 전부 유지**(§V-D 폐루프 / §V-E 라이브) — 뉘앙스만 "오프라인에 더해 우리 실로봇에서도 해봤다"
+(사용자: 실험을 덜 한 것처럼 보이면 안 됨). 0816 미수록, π0.5 전면 미언급, fromnaive 로봇 재실험 안 함.
+- 워킹 타이틀: "Grounded Force Conditioning for Behavior-Cloned VLA Policies: A Drop-In, Retrofittable FiLM
+  Pathway That Brakes Beyond the Demonstrations" (구 "Access Is Not Use…"는 main.tex 주석에 보존).
+- 바뀐 곳: abstract 전면 / §I 기여 3개 = 세 성질 / §IV 제목 "The Conditioning Pathway" + retrofit 문장 +
+  프로브 소절 "Evaluation:" / §V 서두 retrofit(2,500 스텝) / **§V-C = π0 복원** (naive 0/6 17.0mm vs
+  film-state 5/6 7.2mm, action-token 0/6 22.9mm, err 0.93 vs 1.03, dRaw 0; 각주: fmag 채널 없음·오프라인만)
+  / §V-D·E 로봇 서두 "Beyond the offline battery, we also ran…" + 인스턴스 공시 본문화, "Isn't the naive
+  better" 논증은 §V-A P3 끝으로 이동(로봇 절엔 포인터 1줄) / §VII 운영 노브 문장·한계 갱신 / §VIII 재작성.
+- 08-13 "action-injection 각주-only" 결정은 π0 복원으로 해제 — §V-C에 본문 1회.
+- fig:doseresponse에서 π0/π0.5 점선 제거 (SmolVLA 4정책만).
+- 빌드: 8쪽, 경고 0. 참고문헌이 8쪽 하단 끝까지 채움 (여유 없음 — 추가 시 감축 필요).
+- **fig:setup 제작 (09-14 밤, 사용자 사진 제공 `paper/images/`)**: (a) `figs/setup_robot.jpg` (Robot_env.jpeg 크롭)
+  (b) `figs/setup_pictogram.tex` TikZ 픽토그램 — 두 높이 스택 + 고정 헤드캠 + 접촉면 cm 차 + F<15N
+  (Battery_stack.jpeg는 사용자 의견대로 사진 대신 그림; 원본은 images/에 보존) (c) `figs/setup_headcam.jpg`
+  (Battery_box.jpeg 크롭, "층이 바뀌어도 시각 정보는 거의 안 변함"). §III 참조 2건 복원. 여전히 8쪽, 경고 0.
+- **남은 구멍 (정직 공시로 처리)**: retrofit 인스턴스·π0 인스턴스 로봇 폐루프 없음; press-retreat 데모
+  대조 없음(“쓸지는 데이터, 형태는 구조”); 과제·플랫폼 단일; Fig.1 티저 미제작(본문 ref 없음).
+
+## 2026-09-14 (오후) — 마무리 패스 (0909/0816 라운드 미수록, 0729 증거로 확정)
+사용자 결정: 0909 실험 결과는 논문에 쓰지 않음 → 기존 0729 증거만으로 마무리.
+- **로컬 빌드 가능**: tectonic(XeTeX) 0.17 aarch64 바이너리로 컴파일 → **8쪽, undefined ref/overfull 0**.
+  main.tex에 `\ifXeTeX` 가드로 TeX Gyre Termes(Times 메트릭 호환) 지정 — pdfLaTeX/Overleaf 경로 무영향.
+  빌드: `tectonic main.tex` (paper/ 에서). Overleaf도 그대로 동작.
+- **\todo 3건 해소**: ① Abstract 스케일 문장 = §V-C 기존 π0/π0.5 수치로 작성 ② §IV P2 전이 차원 확정
+  (probe_state_authority.py: `--swap firstcontact/fcscale`는 wrench 6차원(state 9:15)만 교체, seal 비트
+  불변) ③ fig:doseresponse 제작 — `scripts/make_dose_response_pgf.py` → `figs/dose_response.tex`
+  (probes/0729_state_*_ramp*.txt ALL-frames 행, 표와 동일 수치; π0/π0.5 naive 회색 점선 포함).
+- **\memo 3건 제거** (intro 문구 강등 / §IV mask-정보량 문장 부활 / loss 축 디강조): 본문은 현행 유지.
+  loss 축 표현(abstract "fourth decimal", §I "unchanged validation loss", §V "fourth decimal", 마무리 문장
+  "indistinguishable in loss")은 그대로 — 바꾸려면 §V-B 문단의 imitation error 0.85 vs 0.87 mm/step로 대체.
+- **fig:setup 참조 2건 삭제 (§III)**: 셋업 사진·헤드캠 프레임이 로컬에 없음 (datasets_local은 meta만,
+  rollouts는 states.jsonl만). 서버(B300) 0729 데이터셋 영상에서 L1/L5 프레임을 뽑으면 복원 가능 — 단
+  현재 8쪽 꽉 참이라 넣으려면 감축 필요.
+- **draft 매크로(\todo/\decide/\memo) 정의 제거** — 본문에 남은 사용 0.
+- **refs.bib**: TODO-verify 13건 전부 arXiv abs 페이지 메타태그(ForceVLA/CGP는 Semantic Scholar)로 채움
+  (제목·저자, 2026-09-14 기준). IEEEtranBSTCTL(저자 6명 초과 → 1st et al.) 추가해 참고문헌이 8쪽 안에 끝남.
+  ForceVLA는 S2 기준 NeurIPS 2025 — camera-ready 때 booktitle 결정.
+- **main.pdf 갱신**: 09-14 tectonic 빌드 결과 (8쪽). main.aux/.bbl 등 구 중간파일은 08-27 것 그대로.
+- 미제작 유지: Fig.1 티저(본문 \ref 없음), fig:setup.
+
+## 이전 노트 (2026-08-06 v0 스켈레톤+전섹션 드래프트)
 
 빌드: 로컬 LaTeX 없음 → **Overleaf에 `paper/` 통째 업로드** (main.tex 루트). `\todo{}`(빨강)·
 `\decide{}`(파랑) 매크로가 본문에 렌더링됨 — 제출 전 전부 해소 후 매크로 제거.

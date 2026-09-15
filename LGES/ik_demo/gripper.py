@@ -43,7 +43,7 @@ class BoxPose:
 @dataclass
 class BoxPickResult:
     success: bool
-    reason: str                    # grasped | no_object | contact | not_detected
+    reason: str                    # grasped | no_object | contact | no_seat | not_detected
                                    # | unreachable | descent_failed | lift_failed | dry_run
                                    # | gripper_fault (the close was refused: the
                                    # gripper dropped off the RS485 bus)
@@ -63,18 +63,26 @@ class GripperMover(ArmMover):
         self._wrench = getattr(self._arm, "wrench_sensor", None) if robot is not None else None
         self._force_baseline: np.ndarray | None = None
 
-    def tare_wrench(self) -> bool:
+    def tare_wrench(self, raw=None, need: "int | None" = None) -> bool:
         """Average BOX_TARE_SAMPLES wrench readings with the arm at rest and keep
-        the force part as the zero. False (guard off) without a sensor / data."""
+        the force part as the zero. False (guard off) without a sensor / data.
+
+        ``raw``: use these force triples instead of reading at rest — for a
+        caller that sampled them in-stream (stand_place's rounded-corner
+        approach, which has no standstill to read at). ``need`` overrides the
+        minimum count, since an in-stream window collects one sample per control
+        tick rather than one per 5ms and so gathers fewer of them."""
         if self._wrench is None:
             return False
-        raw = []
-        for _ in range(int(cfg.BOX_TARE_SAMPLES)):
-            w = self._wrench.get_wrench_state()
-            if w is not None and np.all(np.isfinite(w)):
-                raw.append(np.asarray(w, dtype=float).ravel()[:3])
-            time.sleep(0.005)
-        if len(raw) < max(3, int(cfg.BOX_TARE_SAMPLES) // 2):
+        if raw is None:
+            raw = []
+            for _ in range(int(cfg.BOX_TARE_SAMPLES)):
+                w = self._wrench.get_wrench_state()
+                if w is not None and np.all(np.isfinite(w)):
+                    raw.append(np.asarray(w, dtype=float).ravel()[:3])
+                time.sleep(0.005)
+        if len(raw) < (max(3, int(cfg.BOX_TARE_SAMPLES) // 2) if need is None
+                       else int(need)):
             logger.warning("[gripper] wrench tare got {} readings — contact guard OFF", len(raw))
             self._force_baseline = None
             return False
@@ -151,10 +159,11 @@ class GripperMover(ArmMover):
     def pick_box(self, box: BoxPose, dry: bool = False, mode: str = "carry") -> BoxPickResult:
         """Straight-down box pick — the right-arm mirror of the suction pick.
 
-        hover (BOX_HOVER_HEIGHT_M above the grasp) -> vertical descent to the
-        grasp height (fingertips BOX_GRASP_DEPTH_M below the box top), fast
-        down to BOX_DESCENT_CREEP_FROM_M above it and at CREEP from there ->
-        close -> vertical lift back to the hover. The EE yaw is the finger-closing
+        hover (BOX_HOVER_HEIGHT_M above the grasp) -> vertical descent, fast
+        down to BOX_DESCENT_CREEP_FROM_M above the planned grasp height and at
+        CREEP from there -> close where the PALM SEATS on the rim
+        (BOX_SEAT_FORCE_N), which is up to BOX_SEAT_MAX_DEEPER_M below that
+        planned height -> vertical lift back to the hover. The EE yaw is the finger-closing
         direction (BOX_GRASP_YAW_OFFSET_RAD), normalised into [0, pi) — ONE
         wrist angle, no 180 deg alternative (see ``plan_box``). It is flown
         only if its hover AND whole descent column solve (reach, joint band,
@@ -172,8 +181,12 @@ class GripperMover(ArmMover):
                       OPEN, then retreat empty to the hover
           "release"   hold BOX_GRIP_HOLD_S, OPEN, retreat empty (landing check)
         An empty grasp always re-opens and retreats. Ends at the hover; the
-        caller homes from there. The descent has a wrench contact guard
-        (BOX_CONTACT_FORCE_N) tared at the hover, live on both legs.
+        caller homes from there. The wrench is tared at the hover and guards
+        both legs: BOX_CONTACT_FORCE_N on the fast one (nothing can be touched
+        up there, so a contact aborts) and BOX_SEAT_FORCE_N on the creep one
+        (that contact IS the grip height, unless it comes in more than
+        BOX_SEAT_ABORT_ABOVE_M above the planned height, which aborts too).
+        Without a wrench the descent stops at the planned height instead.
         """
         if mode not in ("carry", "lift_test", "release"):
             raise ValueError(f"pick_box mode must be carry/lift_test/release, got {mode!r}")
@@ -213,42 +226,82 @@ class GripperMover(ArmMover):
             logger.error("[gripper] gripper not ready at the hover — NOT descending")
             return BoxPickResult(False, "gripper_fault", rpy[2])
         guard = self.tare_wrench()          # at rest, gripper open: zero for the descent
-        contact: list[float] = []            # [z, force] when the guard fires
+        contact: list[float] = []            # [z, force] when a guard fires
 
-        def _stop() -> bool:
-            f = self.vertical_force()
-            if f is not None and f > float(cfg.BOX_CONTACT_FORCE_N):
-                contact[:] = [float(self.fk(self._q_cmd)[0][2]), f]
-                return True
-            return False
+        def _guard(limit_n: float):
+            """stop_fn halting the stream the first tick the vertical force
+            passes ``limit_n``, recording [EE z, force]."""
+            def _stop() -> bool:
+                f = self.vertical_force()
+                if f is not None and f > float(limit_n):
+                    contact[:] = [float(self.fk(self._q_cmd)[0][2]), f]
+                    return True
+                return False
+            return _stop
 
-        # Two legs (0914, the user's call): fast while nothing can be touched,
-        # then CREEP the last cfg.BOX_DESCENT_CREEP_FROM_M with the guard live,
-        # so a contact is met gently and located to ~1mm instead of ~4mm. The
+        # Where the fingers CLOSE. Without a wrench that is the planned grasp
+        # height and nothing else (the old behaviour). With one, the descent
+        # goes PAST it and the palm landing on the rim stops it — see
+        # cfg.BOX_SEAT_FORCE_N for why and for the measurement behind 2.5N.
+        z_grip = z_grasp
+        # Two legs: fast while nothing can be touched, then CREEP the last
+        # cfg.BOX_DESCENT_CREEP_FROM_M, because that is where the force reading
+        # decides the grip — a contact met at cruise is both violent and badly
+        # located (3.5mm of overshoot per tick against 0.8mm at creep). The
         # creep leg passes creep_out_m = its own length, which is how
         # move_ee_vertical is told to hold creep for the WHOLE leg (its normal
         # shape only creeps the last DESCENT_CREEP_BLEND_M into the target).
         z_creep = min(z_hover, z_grasp + float(cfg.BOX_DESCENT_CREEP_FROM_M))
-        legs = []
+        z_deep = z_grasp - float(cfg.BOX_SEAT_MAX_DEEPER_M) if guard else z_grasp
+        logger.info("[gripper] descend: {:.0f}mm fast to {:+.0f}mm over the grasp height, then "
+                    "creep to {:+.0f}mm{}", (z_hover - z_creep) * 1000.0,
+                    (z_creep - z_grasp) * 1000.0, (z_deep - z_grasp) * 1000.0,
+                    f" looking for the palm to seat on the rim ({cfg.BOX_SEAT_FORCE_N:.1f}N; "
+                    f"{cfg.BOX_CONTACT_FORCE_N:.0f}N on the fast leg)" if guard
+                    else " (NO force guard — stopping at the planned grasp height)")
+        # Fast leg. Up here the fingers are provably clear of the box, so
+        # anything met is an obstruction, not the seat: keep the old 7N.
         if z_hover - z_creep > 1e-4:
-            legs.append((z_creep, 0.0))                  # fast, ordinary profile
-        legs.append((z_grasp, z_creep - z_grasp))        # creep the whole way
-        logger.info("[gripper] descend {:.0f}mm straight down: {:.0f}mm fast, then {:.0f}mm at "
-                    "creep{}", (z_hover - z_grasp) * 1000.0, (z_hover - z_creep) * 1000.0,
-                    (z_creep - z_grasp) * 1000.0,
-                    f" (contact guard {cfg.BOX_CONTACT_FORCE_N:.0f}N)" if guard else " (NO force guard)")
-        for z_to, creep_all in legs:
-            q = self.move_ee_vertical(z_to, rpy, stop_fn=_stop if guard else None,
-                                      creep_out_m=creep_all)
-            if q is None:
+            if self.move_ee_vertical(z_creep, rpy,
+                                     stop_fn=_guard(cfg.BOX_CONTACT_FORCE_N) if guard else None) is None:
                 logger.error("[gripper] descent stalled — halted above the box, NOT gripping")
                 return BoxPickResult(False, "descent_failed", rpy[2])
             if contact:
-                logger.warning("[gripper] CONTACT {:.1f}N at EE z={:.4f} ({:+.0f}mm above the "
-                               "grasp height) — not closing, lifting back to the hover",
+                logger.warning("[gripper] CONTACT {:.1f}N at EE z={:.4f}, {:+.0f}mm above the "
+                               "grasp height and still on the FAST leg — an obstruction, not "
+                               "the rim; not closing, lifting back to the hover",
                                contact[1], contact[0], (contact[0] - z_grasp) * 1000.0)
                 self.move_ee_vertical(z_hover, rpy)
                 return BoxPickResult(False, "contact", rpy[2])
+        # Creep leg, guarded at the seat force all the way to z_deep.
+        if self.move_ee_vertical(z_deep, rpy, creep_out_m=z_creep - z_deep,
+                                 stop_fn=_guard(cfg.BOX_SEAT_FORCE_N) if guard else None) is None:
+            logger.error("[gripper] descent stalled — halted above the box, NOT gripping")
+            return BoxPickResult(False, "descent_failed", rpy[2])
+        if guard:
+            if not contact:
+                logger.error("[gripper] no seat: crept {:.0f}mm PAST the planned grasp height "
+                             "without the palm touching anything ({:.1f}N never reached). The "
+                             "rim is lower than detected or the fingers are not on the wall — "
+                             "not closing, lifting back to the hover",
+                             float(cfg.BOX_SEAT_MAX_DEEPER_M) * 1000.0, cfg.BOX_SEAT_FORCE_N)
+                self.move_ee_vertical(z_hover, rpy)
+                return BoxPickResult(False, "no_seat", rpy[2])
+            if contact[0] > z_grasp + float(cfg.BOX_SEAT_ABORT_ABOVE_M):
+                logger.warning("[gripper] CONTACT {:.1f}N at EE z={:.4f}, {:+.0f}mm above the "
+                               "grasp height — too high to be the rim (limit {:.0f}mm), so an "
+                               "obstruction; not closing, lifting back to the hover",
+                               contact[1], contact[0], (contact[0] - z_grasp) * 1000.0,
+                               float(cfg.BOX_SEAT_ABORT_ABOVE_M) * 1000.0)
+                self.move_ee_vertical(z_hover, rpy)
+                return BoxPickResult(False, "contact", rpy[2])
+            z_grip = contact[0]
+            logger.info("[gripper] palm SEATED on the rim: {:.1f}N at EE z={:.4f}, {:+.0f}mm vs "
+                        "the planned grasp height — closing here, so the fingers take {:.0f}mm "
+                        "of wall instead of the planned {:.0f}mm", contact[1], z_grip,
+                        (z_grip - z_grasp) * 1000.0,
+                        (float(cfg.BOX_GRASP_DEPTH_M) + (z_grasp - z_grip)) * 1000.0,
+                        float(cfg.BOX_GRASP_DEPTH_M) * 1000.0)
         closed = self.gripper.close()           # blocks until the Robotiq reports done
         grasped = self.gripper.is_object_grasped()
         logger.info("[gripper] close -> {}", "GRASPED" if grasped else "no object")
@@ -264,7 +317,7 @@ class GripperMover(ArmMover):
             self.move_ee_vertical(z_hover, rpy)
             return BoxPickResult(False, "gripper_fault", rpy[2])
         if grasped and mode == "lift_test":
-            z_up = z_grasp + float(cfg.BOX_LIFT_TEST_M)
+            z_up = z_grip + float(cfg.BOX_LIFT_TEST_M)
             logger.info("[gripper] lift test: +{:.0f}mm with the box, hold {:.1f}s, set back down",
                         float(cfg.BOX_LIFT_TEST_M) * 1000.0, float(cfg.BOX_GRIP_HOLD_S))
             if self.move_ee_vertical(z_up, rpy) is None:
@@ -274,11 +327,13 @@ class GripperMover(ArmMover):
             # force step, so a box that slipped low in the grip stops early
             touchdown_guard = self.tare_wrench()
             contact[:] = []
-            if self.move_ee_vertical(z_grasp, rpy, stop_fn=_stop if touchdown_guard else None) is None:
+            if self.move_ee_vertical(z_grip, rpy,
+                                     stop_fn=_guard(cfg.BOX_CONTACT_FORCE_N) if touchdown_guard
+                                     else None) is None:
                 logger.error("[gripper] set-down stalled — releasing here")
             if contact:
-                logger.info("[gripper] touchdown {:.1f}N at EE z={:.4f} ({:+.0f}mm vs the grasp "
-                            "height)", contact[1], contact[0], (contact[0] - z_grasp) * 1000.0)
+                logger.info("[gripper] touchdown {:.1f}N at EE z={:.4f} ({:+.0f}mm vs where it "
+                            "gripped)", contact[1], contact[0], (contact[0] - z_grip) * 1000.0)
             self.gripper.open()
         elif grasped and mode == "release":
             time.sleep(float(cfg.BOX_GRIP_HOLD_S))
@@ -286,7 +341,7 @@ class GripperMover(ArmMover):
             self.gripper.open()
         elif not grasped:
             self.gripper.open()
-        logger.info("[gripper] lift {:.0f}mm straight up{}", (z_hover - z_grasp) * 1000.0,
+        logger.info("[gripper] lift {:.0f}mm straight up{}", (z_hover - z_grip) * 1000.0,
                     " with the box" if grasped and mode == "carry" else "")
         if self.move_ee_vertical(z_hover, rpy) is None:
             logger.error("[gripper] lift stalled below the hover")

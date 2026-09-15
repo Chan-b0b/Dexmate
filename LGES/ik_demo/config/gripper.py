@@ -154,7 +154,7 @@ BOX_GRASP_EDGE_INSET_M: float = 0.0
 # wall midpoint is computed. Straight base-frame trim for where the fingers
 # actually land on the wall, independent of the box's own frame (the INSET
 # above moves along the box's short axis instead). 0910: +5 mm, on the robot.
-BOX_GRASP_Y_OFFSET_M: float = 0.00
+BOX_GRASP_Y_OFFSET_M: float = -0.01
 # Approach to the box hover (gripper._approach_hover). Home -> hover in ONE
 # joint move sweeps the fingertips ACROSS the box interior: at home the hand
 # points UP (tool z ~ +0.92 base z) and at the grasp it points DOWN, and that
@@ -243,6 +243,42 @@ BOX_TARE_SAMPLES: int = 50
 # Lower it (0.05 covers the 34mm rim error that made 0914's grip shallow) to
 # buy that time back.
 BOX_DESCENT_CREEP_FROM_M: float = 0.14
+# --- seat on force, not on the rim estimate (gripper.pick_box) ------------
+# The descent no longer stops at the planned grasp height. It aims
+# BOX_SEAT_MAX_DEEPER_M below it and lets the PALM — the body between the two
+# fingers, which the tilted pinch puts straight over the grabbed wall — land
+# on the rim: the wall rides up into the open jaws until it hits. That seat is
+# a GRIPPER property, so the grip depth stops inheriting the rim estimate's
+# error (0914: BOX_WALL_HEIGHT_M 140mm against a ~106mm wall put the estimate
+# 28-35mm high over four detections, and the fingers took 31mm of wall instead
+# of BOX_GRASP_DEPTH_M's 65mm).
+#
+# Measured, 0914 11:54 seat probe (ztrack_logs/seat_probe_20260914_115419.csv,
+# the whole curve; `--seat-probe` re-runs it): 45mm of free creep descent held
+# |fz| <= 0.8N with one 1.5N spike on the first tick, then contact at a
+# fingertip depth of 81.0mm (-1.3N), 82.6mm (-3.1N), 84.2mm (-5.4N) — about
+# 1.3 N/mm, a hard seat rather than crushing cardboard (the rim fold is
+# doubled). 2.5N is above the 1.5N startup spike and 3x the noise floor, and
+# it fires on that -3.1N sample, 1.6mm past first touch and ~0.8mm of
+# overshoot at creep. Do NOT go below 2N.
+BOX_SEAT_FORCE_N: float = 2.5
+# How far BELOW the planned grasp height the descent may look for the seat.
+# Covers the 28-35mm of rim-estimate error logged on 0914. Checked against the
+# floor both ways: with the estimate RIGHT this point is 100mm under a ~107mm
+# wall (inner fingertip 7mm off the box floor), and with the estimate 35mm
+# high it is 65mm under the real rim (42mm off the floor) — neither touches
+# down, and the guard would catch it if it did.
+BOX_SEAT_MAX_DEEPER_M: float = 0.035
+# ... and how far ABOVE it a contact can still be the rim. Asymmetric on
+# purpose: BOX_WALL_HEIGHT_M being too big makes the estimate too HIGH, which
+# puts the seat BELOW the planned height every time (17.6mm below, 0914 11:54).
+# Correcting that constant to the measured ~106mm would move the seat to ~1mm
+# ABOVE it, which this window still accepts. Anything higher than this is not
+# the rim — the rack upright, or the fingers on the box contents.
+# NOTE it cannot separate the seat from the 0911 rack collision (that one hit
+# 13mm above the planned height, ~12mm from where the palm can seat);
+# BOX_CENTER_REF_XY / _center_box stays the guard against the rack.
+BOX_SEAT_ABORT_ABOVE_M: float = 0.010
 # --- seat probe (gripper.probe_seat, DIAGNOSIS ONLY) ----------------------
 # The tilted wall pinch puts the PALM — the body between the two fingers —
 # straight over the grabbed wall, so as the hand comes down the rim rides up

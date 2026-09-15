@@ -2,6 +2,7 @@
 \providecommand\hyper@newdestlabel[2]{}
 \providecommand\HyField@AuxAddToFields[1]{}
 \providecommand\HyField@AuxAddToCoFields[2]{}
+\citation{IEEEexample:BSTcontrol}
 \citation{forcevla,phaforce,forceflow,filic}
 \citation{phaforce,forceflow}
 \citation{dehaan2019causal,geirhos2020shortcut}
@@ -33,48 +34,47 @@
 \citation{chen2020lbc,privilegedaction}
 \citation{forcesight}
 \citation{dehaan2019causal}
-\citation{smolvla}
+\@writefile{lof}{\contentsline {figure}{\numberline {1}{\ignorespaces Setting. (a)~The dual-arm mobile manipulator picking a battery-cell case from a tray with a suction cup. (b)~The stack height varies across episodes, so the contact plane moves by centimeters, while the head camera keeps the same pose; a few millimeters of over-travel take contact force past the $15$\,N limit. (c)~The head-camera view of a tray: from this range the remaining stack height is visually near-indistinguishable across layers, so the stop-on-contact transition is carried by force, not vision.}}{3}{figure.1}\protected@file@percent }
+\newlabel{fig:setup}{{1}{3}{Setting. (a)~The dual-arm mobile manipulator picking a battery-cell case from a tray with a suction cup. (b)~The stack height varies across episodes, so the contact plane moves by centimeters, while the head camera keeps the same pose; a few millimeters of over-travel take contact force past the $15$\,N limit. (c)~The head-camera view of a tray: from this range the remaining stack height is visually near-indistinguishable across layers, so the stop-on-contact transition is carried by force, not vision}{figure.1}{}}
 \@writefile{toc}{\contentsline {section}{\numberline {III}Task, Setting, and the Failure}{3}{section.3}\protected@file@percent }
 \newlabel{sec:task}{{III}{3}{Task, Setting, and the Failure}{section.3}{}}
-\@writefile{toc}{\contentsline {section}{\numberline {IV}An Instrument for Causal Authority}{3}{section.4}\protected@file@percent }
-\newlabel{sec:method}{{IV}{3}{An Instrument for Causal Authority}{section.4}{}}
-\@writefile{toc}{\contentsline {subsection}{\numberline {\mbox  {IV-A}}Computed condition vector \ensuremath  {\hat  {c}}{}}{3}{subsection.4.1}\protected@file@percent }
-\newlabel{sec:method-chat}{{\mbox  {IV-A}}{3}{Computed condition vector \chat {}}{subsection.4.1}{}}
-\newlabel{eq:chat}{{1}{3}{Computed condition vector \chat {}}{equation.4.1}{}}
+\@writefile{toc}{\contentsline {section}{\numberline {IV}The Conditioning Pathway}{3}{section.4}\protected@file@percent }
+\newlabel{sec:method}{{IV}{3}{The Conditioning Pathway}{section.4}{}}
 \citation{perez2018film}
-\@writefile{lof}{\contentsline {figure}{\numberline {1}{\ignorespaces The conditioned policy. The raw wrench does not enter the policy state; force reaches the action only as the computed condition vector \ensuremath  {\hat  {c}}{}, injected through FiLM modulation of the state token entering the VLM backbone. Because this pathway is explicit and unique, forcing \ensuremath  {\hat  {c}}{} at inference measures the causal authority of the condition.}}{4}{figure.1}\protected@file@percent }
-\newlabel{fig:arch}{{1}{4}{The conditioned policy. The raw wrench does not enter the policy state; force reaches the action only as the computed condition vector \chat {}, injected through FiLM modulation of the state token entering the VLM backbone. Because this pathway is explicit and unique, forcing \chat {} at inference measures the causal authority of the condition}{figure.1}{}}
+\@writefile{lof}{\contentsline {figure}{\numberline {2}{\ignorespaces The conditioned policy. The raw wrench does not enter the policy state; force reaches the action only as the computed condition vector \ensuremath  {\hat  {c}}{}, injected through FiLM modulation of the state token entering the VLM backbone. Because this pathway is explicit and unique, forcing \ensuremath  {\hat  {c}}{} at inference measures the causal authority of the condition.}}{4}{figure.2}\protected@file@percent }
+\newlabel{fig:arch}{{2}{4}{The conditioned policy. The raw wrench does not enter the policy state; force reaches the action only as the computed condition vector \chat {}, injected through FiLM modulation of the state token entering the VLM backbone. Because this pathway is explicit and unique, forcing \chat {} at inference measures the causal authority of the condition}{figure.2}{}}
+\@writefile{toc}{\contentsline {subsection}{\numberline {\mbox  {IV-A}}Computed condition vector \ensuremath  {\hat  {c}}{}}{4}{subsection.4.1}\protected@file@percent }
+\newlabel{sec:method-chat}{{\mbox  {IV-A}}{4}{Computed condition vector \chat {}}{subsection.4.1}{}}
+\newlabel{eq:chat}{{1}{4}{Computed condition vector \chat {}}{equation.4.1}{}}
 \@writefile{toc}{\contentsline {subsection}{\numberline {\mbox  {IV-B}}FiLM injection and the force mask}{4}{subsection.4.2}\protected@file@percent }
 \newlabel{sec:method-mask}{{\mbox  {IV-B}}{4}{FiLM injection and the force mask}{subsection.4.2}{}}
-\@writefile{toc}{\contentsline {subsection}{\numberline {\mbox  {IV-C}}Counterfactual probe battery}{4}{subsection.4.3}\protected@file@percent }
-\newlabel{sec:method-probes}{{\mbox  {IV-C}}{4}{Counterfactual probe battery}{subsection.4.3}{}}
-\@writefile{lof}{\contentsline {figure}{\numberline {2}{\ignorespaces Dose-response under forced wrench magnitude (P3). The naive policy's response fades past the demonstrated range; the unmasked variant lies on top of it (all response through the raw route); the ungrounded pathway is flat at zero; only the grounded pathway grows with dose, crossing full cancellation into commanded retreat at $12$\,N.}}{5}{figure.2}\protected@file@percent }
-\newlabel{fig:doseresponse}{{2}{5}{Dose-response under forced wrench magnitude (P3). The naive policy's response fades past the demonstrated range; the unmasked variant lies on top of it (all response through the raw route); the ungrounded pathway is flat at zero; only the grounded pathway grows with dose, crossing full cancellation into commanded retreat at $12$\,N}{figure.2}{}}
+\@writefile{toc}{\contentsline {subsection}{\numberline {\mbox  {IV-C}}Evaluation: counterfactual probe battery}{4}{subsection.4.3}\protected@file@percent }
+\newlabel{sec:method-probes}{{\mbox  {IV-C}}{4}{Evaluation: counterfactual probe battery}{subsection.4.3}{}}
+\citation{smolvla}
+\@writefile{lof}{\contentsline {figure}{\numberline {3}{\ignorespaces Dose-response under forced wrench magnitude (P3): cancellation of each policy's own commanded descent as the transplanted first-contact wrench is rescaled to $8/10/12$\,N. The naive policy's response fades past the demonstrated range; the unmasked variant lies on top of it (all response through the raw route); the ungrounded pathway is flat at zero; only the grounded pathway grows with dose, crossing full cancellation into commanded retreat at $12$\,N.}}{5}{figure.3}\protected@file@percent }
+\newlabel{fig:doseresponse}{{3}{5}{Dose-response under forced wrench magnitude (P3): cancellation of each policy's own commanded descent as the transplanted first-contact wrench is rescaled to $8/10/12$\,N. The naive policy's response fades past the demonstrated range; the unmasked variant lies on top of it (all response through the raw route); the ungrounded pathway is flat at zero; only the grounded pathway grows with dose, crossing full cancellation into commanded retreat at $12$\,N}{figure.3}{}}
 \@writefile{toc}{\contentsline {section}{\numberline {V}Experiments}{5}{section.5}\protected@file@percent }
 \newlabel{sec:offline}{{V}{5}{Experiments}{section.5}{}}
 \@writefile{toc}{\contentsline {subsection}{\numberline {\mbox  {V-A}}The two policies under intervention}{5}{subsection.5.1}\protected@file@percent }
 \newlabel{sec:offline-main}{{\mbox  {V-A}}{5}{The two policies under intervention}{subsection.5.1}{}}
 \newlabel{sec:offline-posthoc}{{\mbox  {V-A}}{5}{The two policies under intervention}{table.1}{}}
-\@writefile{toc}{\contentsline {subsection}{\numberline {\mbox  {V-B}}Ablating the recipe: the mask and the grounding}{5}{subsection.5.2}\protected@file@percent }
-\newlabel{sec:offline-quintuple}{{\mbox  {V-B}}{5}{Ablating the recipe: the mask and the grounding}{subsection.5.2}{}}
 \citation{pi0}
-\citation{pi05}
 \@writefile{lot}{\contentsline {table}{\numberline {I}{\ignorespaces The naive and conditioned policies under the offline battery. All responses in mm/frame of commanded descent; \emph  {own} = the policy's mean commanded descent on the evaluated frames, the denominator of the percentage. Forcing (P1) = every \ensuremath  {\hat  {c}}{} channel forced to saturation, on committed-descent frames; the naive policy has no \ensuremath  {\hat  {c}}{} to force (---). Transplant (P2) = response to a transplanted first-contact state. Dose-response (P3) = response at forced 8\,N$\rightarrow $12\,N. Press sim (P4) = maximum penetration in the seal-never press simulation.}}{6}{table.1}\protected@file@percent }
 \newlabel{tab:probes}{{I}{6}{The naive and conditioned policies under the offline battery. All responses in mm/frame of commanded descent; \emph {own} = the policy's mean commanded descent on the evaluated frames, the denominator of the percentage. Forcing (P1) = every \chat {} channel forced to saturation, on committed-descent frames; the naive policy has no \chat {} to force (---). Transplant (P2) = response to a transplanted first-contact state. Dose-response (P3) = response at forced 8\,N$\rightarrow $12\,N. Press sim (P4) = maximum penetration in the seal-never press simulation}{table.1}{}}
-\@writefile{lot}{\contentsline {table}{\numberline {II}{\ignorespaces Ablation controls: same initialization, same data, one ingredient removed. Columns as in Table~\ref {tab:probes}.}}{6}{table.2}\protected@file@percent }
-\newlabel{tab:ablation}{{II}{6}{Ablation controls: same initialization, same data, one ingredient removed. Columns as in Table~\ref {tab:probes}}{table.2}{}}
-\@writefile{toc}{\contentsline {subsection}{\numberline {\mbox  {V-C}}Scale does not change the class}{6}{subsection.5.3}\protected@file@percent }
-\newlabel{sec:offline-pi05}{{\mbox  {V-C}}{6}{Scale does not change the class}{subsection.5.3}{}}
-\@writefile{toc}{\contentsline {subsection}{\numberline {\mbox  {V-D}}Robot validation: closed-loop picks}{6}{subsection.5.4}\protected@file@percent }
-\newlabel{sec:robot}{{\mbox  {V-D}}{6}{Robot validation: closed-loop picks}{subsection.5.4}{}}
-\@writefile{lof}{\contentsline {figure}{\numberline {3}{\ignorespaces Contact force on the robot: one representative trial per policy, aligned at peak force ($t{=}0$), over the interaction window (before lift, where carrying the case would re-enter payload weight into the measured force). The naive attempt rises through the demonstrated range and is terminated by the external $15$\,N abort ($\times $; all three naive attempts end this way, at $15.4$--$18.7$\,N), while the conditioned pick presses to $2.5$\,N---the median of its nine picks across three stack heights, one of them absent from the demonstrations---and stops on its own.}}{6}{figure.3}\protected@file@percent }
-\newlabel{fig:forcetraces}{{3}{6}{Contact force on the robot: one representative trial per policy, aligned at peak force ($t{=}0$), over the interaction window (before lift, where carrying the case would re-enter payload weight into the measured force). The naive attempt rises through the demonstrated range and is terminated by the external $15$\,N abort ($\times $; all three naive attempts end this way, at $15.4$--$18.7$\,N), while the conditioned pick presses to $2.5$\,N---the median of its nine picks across three stack heights, one of them absent from the demonstrations---and stops on its own}{figure.3}{}}
-\@writefile{lof}{\contentsline {figure}{\numberline {4}{\ignorespaces On-robot counterfactuals (P5): identical frozen observations, wrench transplanted to a fixed normal-force dose (circles: ten-pose session; squares: three-pose session; faint dots: individual poses). (a)~The response ordering reverses between $6$ and $9$\,N---the offline crossover on the physical system. (b)~FiLM modulation magnitude rises monotonically with dose.}}{7}{figure.4}\protected@file@percent }
-\newlabel{fig:live}{{4}{7}{On-robot counterfactuals (P5): identical frozen observations, wrench transplanted to a fixed normal-force dose (circles: ten-pose session; squares: three-pose session; faint dots: individual poses). (a)~The response ordering reverses between $6$ and $9$\,N---the offline crossover on the physical system. (b)~FiLM modulation magnitude rises monotonically with dose}{figure.4}{}}
-\@writefile{toc}{\contentsline {subsection}{\numberline {\mbox  {V-E}}Robot validation: on-robot counterfactuals}{7}{subsection.5.5}\protected@file@percent }
-\newlabel{sec:robot-live}{{\mbox  {V-E}}{7}{Robot validation: on-robot counterfactuals}{subsection.5.5}{}}
-\@writefile{toc}{\contentsline {section}{\numberline {VI}Discussion and Limitations}{7}{section.6}\protected@file@percent }
-\newlabel{sec:discussion}{{VI}{7}{Discussion and Limitations}{section.6}{}}
+\@writefile{toc}{\contentsline {subsection}{\numberline {\mbox  {V-B}}Ablating the recipe: the mask and the grounding}{6}{subsection.5.2}\protected@file@percent }
+\newlabel{sec:offline-quintuple}{{\mbox  {V-B}}{6}{Ablating the recipe: the mask and the grounding}{subsection.5.2}{}}
+\@writefile{toc}{\contentsline {subsection}{\numberline {\mbox  {V-C}}The pathway attaches to a second backbone}{6}{subsection.5.3}\protected@file@percent }
+\newlabel{sec:offline-pi0}{{\mbox  {V-C}}{6}{The pathway attaches to a second backbone}{subsection.5.3}{}}
+\@writefile{toc}{\contentsline {subsection}{\numberline {\mbox  {V-D}}Real-robot experiments: closed-loop picks}{6}{subsection.5.4}\protected@file@percent }
+\newlabel{sec:robot}{{\mbox  {V-D}}{6}{Real-robot experiments: closed-loop picks}{subsection.5.4}{}}
+\@writefile{lot}{\contentsline {table}{\numberline {II}{\ignorespaces Ablation controls: same initialization, same data, one ingredient removed. Columns as in Table~\ref {tab:probes}.}}{7}{table.2}\protected@file@percent }
+\newlabel{tab:ablation}{{II}{7}{Ablation controls: same initialization, same data, one ingredient removed. Columns as in Table~\ref {tab:probes}}{table.2}{}}
+\@writefile{lof}{\contentsline {figure}{\numberline {4}{\ignorespaces Contact force on the robot: one representative trial per policy, aligned at peak force ($t{=}0$), over the interaction window (before lift, where carrying the case would re-enter payload weight into the measured force). The naive attempt rises through the demonstrated range and is terminated by the external $15$\,N abort ($\times $; all three naive attempts end this way, at $15.4$--$18.7$\,N), while the conditioned pick presses to $2.5$\,N---the median of its nine picks across three stack heights, one of them absent from the demonstrations---and stops on its own.}}{7}{figure.4}\protected@file@percent }
+\newlabel{fig:forcetraces}{{4}{7}{Contact force on the robot: one representative trial per policy, aligned at peak force ($t{=}0$), over the interaction window (before lift, where carrying the case would re-enter payload weight into the measured force). The naive attempt rises through the demonstrated range and is terminated by the external $15$\,N abort ($\times $; all three naive attempts end this way, at $15.4$--$18.7$\,N), while the conditioned pick presses to $2.5$\,N---the median of its nine picks across three stack heights, one of them absent from the demonstrations---and stops on its own}{figure.4}{}}
+\@writefile{toc}{\contentsline {subsection}{\numberline {\mbox  {V-E}}Real-robot experiments: on-robot counterfactuals}{7}{subsection.5.5}\protected@file@percent }
+\newlabel{sec:robot-live}{{\mbox  {V-E}}{7}{Real-robot experiments: on-robot counterfactuals}{subsection.5.5}{}}
+\@writefile{lof}{\contentsline {figure}{\numberline {5}{\ignorespaces On-robot counterfactuals (P5): identical frozen observations, wrench transplanted to a fixed normal-force dose (circles: ten-pose session; squares: three-pose session; faint dots: individual poses). (a)~The response ordering reverses between $6$ and $9$\,N---the offline crossover on the physical system. (b)~FiLM modulation magnitude rises monotonically with dose.}}{7}{figure.5}\protected@file@percent }
+\newlabel{fig:live}{{5}{7}{On-robot counterfactuals (P5): identical frozen observations, wrench transplanted to a fixed normal-force dose (circles: ten-pose session; squares: three-pose session; faint dots: individual poses). (a)~The response ordering reverses between $6$ and $9$\,N---the offline crossover on the physical system. (b)~FiLM modulation magnitude rises monotonically with dose}{figure.5}{}}
 \citation{ross2011dagger,chen2020lbc}
 \citation{forcevla,forceflow}
 \bibstyle{IEEEtran}
@@ -102,10 +102,11 @@
 \bibcite{privilegedaction}{21}
 \bibcite{forcesight}{22}
 \bibcite{smolvla}{23}
-\bibcite{pi0}{24}
-\bibcite{pi05}{25}
-\bibcite{ross2011dagger}{26}
+\@writefile{toc}{\contentsline {section}{\numberline {VI}Discussion and Limitations}{8}{section.6}\protected@file@percent }
+\newlabel{sec:discussion}{{VI}{8}{Discussion and Limitations}{section.6}{}}
 \@writefile{toc}{\contentsline {section}{\numberline {VII}Conclusion}{8}{section.7}\protected@file@percent }
 \newlabel{sec:conclusion}{{VII}{8}{Conclusion}{section.7}{}}
 \@writefile{toc}{\contentsline {section}{References}{8}{section*.1}\protected@file@percent }
-\gdef \@abspage@last{8}
+\bibcite{pi0}{24}
+\bibcite{ross2011dagger}{25}
+\gdef \@abspage@last{9}
