@@ -32,9 +32,11 @@ cleanup() {
 }
 trap cleanup EXIT INT TERM
 
-# 1) Head camera on the nano (idempotent; non-fatal if the nano is unreachable).
-echo "[run_all] ensuring head camera on the nano…"
+# 1) Cameras on the nano — head + right hand (idempotent; non-fatal if the
+#    nano is unreachable). CAMERAS= overrides the set, e.g. CAMERAS=head_camera.
+echo "[run_all] ensuring cameras on the nano (${CAMERAS:-head_camera right_wrist_camera})…"
 python -m case_battery_demo.dashboard.camera_launch \
+    --sensors ${CAMERAS:-head_camera right_wrist_camera} \
   || echo "[run_all] camera not confirmed — continuing (image may stay blank)."
 
 # 2) Dashboard web server (camera already handled above, so skip its launch).
