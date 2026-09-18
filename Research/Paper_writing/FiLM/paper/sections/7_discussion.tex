@@ -4,7 +4,7 @@
 \section{Discussion and Limitations}
 \label{sec:discussion}
 
-\textbf{Why the prescription must be anticipatory.}
+\textbf{Why the demonstrations must be anticipatory.}
 A first-principles calculation explains both the failure and the fix. The case stack is stiff:
 ${\sim}5$\,N/mm of penetration. Stopping below the $15$\,N limit therefore requires a full stop
 within ${\sim}2$\,mm of contact---under $330$\,ms action chunks and the demonstrated descent
@@ -20,7 +20,7 @@ gating, not from a reflex.
 % EVIDENCE §3.9 아카이브). §IV 각주의 Sec.VII 참조 문장도 함께 제거됨.
 \textbf{A computed condition is an operational knob.}
 Because \chat{} is computed rather than learned, the pathway creates knobs the naive policy lacks. Force-torque baselines drift
-(${\sim}1$\,N within a day, pose-sensitive); the conditioned policy re-anchors its offsets at a
+(${\sim}1$\,N within a day, pose-sensitive); the FiLM policy re-anchors its offsets at a
 hover pose each run---a deployment-time correction with no retraining---while the baseline's
 force statistics are frozen in its normalization.
 
@@ -29,12 +29,12 @@ Single task, single platform, small robot-$n$: the robot results are a case stud
 statistical claims live in the offline battery ($n{=}6$ held-out episodes $\times$ dense frames,
 seven policies across two backbones). The retrofitted instance and the $\pi_0$ instance were
 not deployed in closed loop, and the press-retreat demonstrations are a precondition we do not
-ablate here: the data decides \emph{whether} force is used, the pathway decides the \emph{form}. The press simulation depends on a linear force model;
+ablate here. The press simulation depends on a linear force model;
 we mitigate with the seal-granted control and the live probes, which bracket the simulated
 mechanism from both sides. Contact-moment (reactive) authority plateaus low in every
 configuration we trained---in development phases, oversampling transition frames also failed to
 move it; distilling an explicit
 descend-until-contact oracle (e.g., via DAgger~\cite{ross2011dagger,chen2020lbc}) is the natural
 next step, as is a negative-control task whose critical condition is \emph{not} observable in
-the state, and replication of the bypass audit on force-fusion architectures whose designs
-assume use~\cite{forcevla,forceflow}.
+the state, and testing whether force-fusion architectures that keep the raw signal alongside a
+dedicated route~\cite{forcevla,forceflow} also bypass it.

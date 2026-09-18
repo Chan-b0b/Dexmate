@@ -2,15 +2,14 @@
 \section{Conclusion}
 \label{sec:conclusion}
 
-On a task whose critical transition is observable only through force, a behavior-cloned VLA
-policy given the full wrench pressed through contact in every trial. We changed how force is
-delivered, not what is delivered: a condition vector computed from signals the policy already
-receives, injected by FiLM at the state token, with the raw wrench masked. The pathway is
-drop-in, attaches to an already-trained policy in a few thousand steps, carries to a second
-backbone, and---because its channels are calibrated monotone scalars---brakes harder the harder
-it is pressed, stopping and retreating beyond the demonstrated forces and succeeding at an
-undemonstrated stack height. The same interface makes the policy auditable: forcing the
-condition measures its causal authority, exposes bypass when the mask is removed, and shows
-that grounding, not capacity, is the active ingredient. Imitation pins down the trajectory; the
-pathway pins down the form in which the condition is used---and lets that form be shaped,
-measured, and corrected.
+On a picking task where force must govern when the descent ends, a behavior-cloned VLA policy
+given the full wrench did not let that signal govern its behavior, pressing on until an
+external safety limit intervened. We changed how force is delivered, not what is delivered: a
+condition vector computed from signals the policy already receives, fed to the backbone
+through a FiLM layer. The pathway is drop-in, attaches to an already-trained policy, carries to
+another backbone, and---because it applies force magnitude through affine modulation---brakes
+harder the harder it is pressed, stopping and retreating beyond the demonstrated forces and
+succeeding at an undemonstrated stack height. Because the condition is explicit, the same
+pathway can be interrogated: forcing it at inference reads out how much, and in what form, the
+policy responds to force. From the same demonstrations, backbone, and signal, how force enters
+the policy decided what the policy learned to do with it.

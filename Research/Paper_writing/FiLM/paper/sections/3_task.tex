@@ -56,9 +56,9 @@ from $[8,15]$\,N, retreats $5$--$10$\,mm from the contact plane, then hovers and
 immediately on seal. Episodes are collected at two different stack heights, so the contact
 plane itself moves across the dataset. Every episode thus demonstrates the counterfactual the task requires:
 force rises $\rightarrow$ stop $\rightarrow$ move back up, \emph{before} any seal event, at a
-force level that varies independently of depth. This is the data-side prescription whose
-rationale we develop in Sec.~\ref{sec:discussion}; here it matters that the naive policy and
-all conditioned variants are trained on exactly these episodes.
+force level that varies independently of depth. The rationale for this design is given in
+Sec.~\ref{sec:discussion}; here it matters that the naive policy and
+all FiLM variants are trained on exactly these episodes.
 
 \textbf{The failure.}
 Deployed on the robot, the naive policy---a VLA fine-tuned on these demonstrations, with the
@@ -66,10 +66,5 @@ full wrench and seal bit in its state (backbone in Sec.~\ref{sec:offline})---fai
 the same way: it descends, makes contact, and keeps pressing---never initiating a stop of its
 own---until the external safety layer aborts the run ($15.4$--$18.7$\,N measured at abort).
 The transition that the demonstrations exhibit in every single episode, driven by the one signal
-that observably announces it, is the transition the policy does not perform. The rollout says
-the policy is bad; it does not say \emph{why}. The policy might ignore force entirely; it might
-respond to force but too weakly; it might respond in a form that collapses precisely when force
-exceeds the demonstrated range. These hypotheses have opposite prescriptions (more data?
-different sensors? different architecture?), and none of them is distinguishable from training
-curves or rollouts. Distinguishing them requires intervening on the signal itself---the
-instrument we build next.
+that observably announces it, is the transition the policy does not perform. Sec.~\ref{sec:method}
+describes the pathway that changes this and the probes we use to measure the change.

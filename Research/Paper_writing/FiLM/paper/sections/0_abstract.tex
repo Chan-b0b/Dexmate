@@ -2,21 +2,22 @@
 % retrofittable / monotone-beyond-demos. π0.5 미언급 (사용자). 수치 출처 RESULTS_LINEUP + EVIDENCE §3.5, PI0 doc.
 Vision-language-action (VLA) policies increasingly receive wrist wrench and contact signals in
 their state, yet a behavior-cloned policy given the full wrench can still fail to bind its
-behavior to it. On a real-robot suction case-picking task where the cases carry battery
-cells---a $15$\,N contact-force limit, and a stop-on-contact transition observable only through
-force---a naively fine-tuned VLA presses through contact in every trial and never stops on its
-own. We present a conditioning pathway that changes how force is delivered, not what is
+behavior to it. On a real-robot suction picking task with a force-sensitive payload---a hard
+contact-force limit, so that force must govern when the descent ends---a naively fine-tuned
+VLA shows the familiar failure: the wrench in its state does not come to govern its behavior,
+and it presses on through contact until an external safety limit intervenes. We present a conditioning pathway that changes how force is delivered, not what is
 delivered: a condition vector \chat{} (contact, force magnitude, seal) computed from signals the
-policy already receives, injected by FiLM at the state token, with the raw wrench masked. The
-pathway has three properties. It is \emph{drop-in}: no backbone change, no new information, no
-cost in imitation error, and it attaches to a second backbone ($\pi_0$). It is
-\emph{retrofittable}: added to an already-trained naive policy, a few thousand steps of
-continued training suffice. And it \emph{extrapolates in the right direction}: because \chat{} is a
-calibrated monotone scalar, the policy brakes harder the harder it is pressed---stopping and
-retreating at forces beyond the demonstrations, where the naive policy's response fades---and
-picks succeed at a stack height absent from training. A matched ablation shows both
-ingredients are necessary: unmasked, the pathway trains causally dead (\emph{bypass});
-ungrounded, it is the worst policy in the study. We also ran it on our robot: every
-conditioned pick stops on its own (median contact force $2.5$\,N) where the naive policy is
-externally aborted in every attempt, and on-robot counterfactual probes reproduce the offline
+policy already receives and fed to the VLA through a FiLM layer. The pathway has three
+properties. It is \emph{drop-in}: no backbone change, no new information, no cost in imitation
+error, and, since it touches only the state input, it applies to any VLA that consumes a
+proprioceptive state. It is
+\emph{retrofittable}: attached to an already-trained naive policy and trained further on the
+same demonstrations, it rewires how that policy responds to force. And it \emph{generalizes
+beyond the demonstrations}: because force magnitude reaches the action through FiLM's affine
+modulation, the policy brakes
+harder the harder it is pressed, stopping and retreating at forces beyond the demonstrations,
+where imitation alone leaves the response unspecified; and because the stop is tied to force
+rather than to appearance, picks succeed at a stack height absent from training. We also ran it on our robot: every
+FiLM-policy pick stops on its own at low contact force, whereas the naive policy drives contact
+force past the limit in every attempt, and on-robot counterfactual probes reproduce the offline
 crossover.

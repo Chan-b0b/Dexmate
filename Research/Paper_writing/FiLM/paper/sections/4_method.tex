@@ -14,16 +14,16 @@ The pathway has two parts: a conditioning route built so that force reaches the 
 explicit, calibrated form (\ref{sec:method-chat}--\ref{sec:method-mask}), and a battery of
 counterfactual probes that measure how much that route moves the action
 (\ref{sec:method-probes}). The route is designed to be \emph{drop-in} (no backbone change, no new
-information), \emph{retrofittable} (attachable to a trained policy), and \emph{measurable}: because
-it is explicit and unique, every component makes one number well-defined---how much does the
-condition causally move the action?
+information) and \emph{retrofittable} (attachable to a trained policy); it is also
+\emph{measurable}: because it is explicit and unique, every component makes one number
+well-defined---how much does the condition causally move the action?
 
 \begin{figure}[t]
 \centering
 \includegraphics[width=\linewidth]{figs/architecture}
 % 08-12 사용자 결정: mask는 그림에 미표기 — wrench가 state에 아예 없는 것으로 묘사
 % (기능적으로 동등; mask 메커니즘은 §IV-C 본문이 설명).
-\caption{The conditioned policy. The raw wrench does not enter the policy state; force reaches
+\caption{The FiLM policy. The raw wrench does not enter the policy state; force reaches
 the action only as the computed condition vector \chat{}, injected through FiLM modulation of
 the state token entering the VLM backbone. Because this pathway is explicit and unique, forcing
 \chat{} at inference measures the causal authority of the condition.}
@@ -44,9 +44,9 @@ contact, stop; if the seal is on, lift''):
 \end{align}
 with offsets and scales calibrated to the measured force statistics of the demonstrations (e.g.,
 $F_0$ at the contact-onset magnitude).\footnote{Calibration quality matters and is itself a
-finding. The conditioned policies in this paper are separately trained instances of the same
+finding. The FiLM policies in this paper are separately trained instances of the same
 design: the robot picks (Sec.~\ref{sec:robot}) and the replication pair quoted in
-Sec.~\ref{sec:offline-quintuple} use an earlier calibration; the recipe ablation and the live
+Sec.~\ref{sec:offline-quintuple} use an earlier calibration; the ablations and the live
 counterfactuals (Sec.~\ref{sec:robot-live}) use offsets re-estimated from the measured contact
 distribution plus the unsaturated $\chat_{\mathrm{fmag}}$ channel.} Two properties are essential. \emph{Computed, not
 learned:} \chat{} is a fixed function of observed signals, so its physical meaning cannot drift
@@ -65,8 +65,8 @@ entering the VLM backbone; the injection site matters, and Sec.~\ref{sec:offline
 it against the action token.
 % 09-15: "preliminary experiments" 각주 삭제 (사용자) — 근거는 §V-C π0 state vs action 비교로 대체.
 The FiLM layer is zero-initialized so that it starts as the identity, and the backbone is
-untouched: at the moment the pathway is attached, the conditioned policy \emph{is} the
-already-trained policy, and can be fine-tuned in place from there. Every offline conditioned
+untouched: at the moment the pathway is attached, the FiLM policy \emph{is} the
+already-trained policy, and can be fine-tuned in place from there. Every offline FiLM
 policy in this paper is obtained this way, by continuing the trained naive checkpoint
 (Sec.~\ref{sec:offline}).
 The policy still receives the force information---only the structure of its delivery changes.
@@ -90,7 +90,7 @@ the intervention is ignored, $100\%$ means it fully cancels descent, ${>}100\%$ 
 action? With images and state frozen, \chat{} is forced from its observed value to a target
 pattern---either all channels saturated (\emph{full forcing}) or a calibrated contact-onset
 pattern matching measured first-contact statistics (\emph{contact-moment forcing}). Applicable
-to conditioned models only.
+to FiLM models only.
 
 \textbf{(P2) State transplant (open loop).} Does the policy respond to a \emph{real}
 contact state, and through which route? The six wrench dimensions of a measured first-contact
@@ -119,7 +119,7 @@ at a shallow depth, separating force-driven stopping from seal-event-driven stop
 \textbf{(P5) Live counterfactual probe.} Do the offline responses hold on the real robot,
 where the sensor, the contact, and the control loop are real rather than replayed or
 simulated? We freeze observations at staged poses
-along the approach and apply (P1)--(P3) interventions to \emph{two} policies---the conditioned
+along the approach and apply (P1)--(P3) interventions to \emph{two} policies---the FiLM
 policy and the naive policy---on identical frozen observations, so both receive the same
 physical counterfactual.
 

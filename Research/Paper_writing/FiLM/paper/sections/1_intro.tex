@@ -10,69 +10,60 @@
 % Terminology 08-11 (사용자): unconditioned policy = "naive policy" (defined at first mention
 % with "full wrench in its state"), replacing "baseline" PAPER-WIDE — rename §III–§VII prose
 % and table labels ("naive VLA (full wrench)") as each section is rewritten.
+% 09-15 (사용자): 구조 프레임으로 부분 재정렬 — 1단락 도입("none measures causal use" 감사 논지 삭제,
+% "how force is delivered" 질문으로), 기여 ①에 ablation 이동, ② = retrofit만, ③ 로봇 수치 5단락으로 일원화,
+% 마지막 한 문장 요약 = "경로가 결정한다". 4·5단락은 성질 ③ 해석으로 읽혀 유지.
 \section{Introduction}
 \label{sec:intro}
 
 Behavior-cloned vision-language-action (VLA) policies are rapidly acquiring physical condition
-signals. Wrist force/torque, contact events, and task-state bits now routinely appear in the
+signals. Wrist force/torque (the 6-D \emph{wrench}), contact events, and task-state bits now
+routinely appear in the
 observation vector, and a growing line of work fuses force into the policy backbone for
-contact-rich manipulation~\cite{forcevla,phaforce,forceflow,filic}. All of this work shares a
-validation recipe---add the signal, retrain, and validate by task success (occasionally
-alongside rollout force statistics~\cite{phaforce,forceflow})---and none of it measures
-whether the trained policy \emph{causally uses} the signal when it matters: whether, holding
-everything else fixed, changing the force input changes the action. Imitation learning offers no
-such guarantee. The objective asks the policy to reproduce \emph{what} the expert did, not
-\emph{why}: a clone can imitate the behavior convincingly while being driven by entirely
-different cues than the expert was. Imitation pins down the trajectory, not the
-mechanism---equally faithful clones can act from opposite causes, and the loss cannot tell
-them apart~\cite{dehaan2019causal,geirhos2020shortcut}.
+contact-rich manipulation~\cite{forcevla,phaforce,forceflow,filic}. Giving a policy the
+signal, however, does not make the policy act on it. Imitation learning asks the policy to
+reproduce \emph{what} the expert did, not \emph{why}: a clone can imitate the behavior
+convincingly while being driven by entirely different cues than the expert was, and the loss
+cannot tell such clones apart~\cite{dehaan2019causal,geirhos2020shortcut}. This paper is
+about \emph{how} the force signal is delivered to the policy---a structural choice, made where
+force enters the network, that decides whether the trained policy binds its behavior to force.
 
-The consequence is easiest to see where force is the only signal that can carry the task. We
-study real-robot suction case picking with a single head-mounted camera and no wrist camera: the
-arm must stop descending the moment the suction cup meets the case, and stack heights differing
-by a few millimeters---the entire success margin---are visually near-indistinguishable at
+The consequence is easiest to see where the task hinges on force. We
+study real-robot suction case picking with a single head-mounted camera and no wrist camera.
+The cases carry battery cells that tolerate at most $15$\,N of contact force, so the arm must
+stop descending the moment the suction cup meets the case, while stack heights differing by a
+few millimeters---the entire success margin---are visually near-indistinguishable at
 head-camera range. The wrench is in the state the policy receives, and every demonstration
 exhibits the stop. Yet a naively fine-tuned VLA---full wrench in its state, hereafter the
 \emph{naive policy}---presses through contact in every evaluation trial and never initiates a
 stop of its own: each run ends only when an external safety layer, separate from the policy,
-trips at its $15$\,N force limit---set to protect the battery cells the cases carry
-($15.4$--$18.7$\,N measured at abort)---the policy still commanding descent. The task turns on a single transition---stop when force
-rises---and it is precisely this transition that the policy fails to bind to force.
+trips at the $15$\,N limit with the policy still commanding descent. The task turns on a
+single transition---stop when force rises---and it is precisely this transition that the
+policy fails to bind to force.
 
 Our fix changes how force is delivered, not what is delivered. A condition vector \chat{}
-(contact, normal force, seal) is \emph{computed} from signals the naive policy already receives
+(contact, normal force, seal) is computed from signals the naive policy already receives
 and injected through FiLM modulation~\cite{perez2018film}; the raw wrench is masked from the
 state so that the same signal does not enter twice, making \chat{} the \emph{only} pathway from
-force to action. We call this pathway \emph{grounded} because its content is computed from
-measured signals, and the policy trained behind it the \emph{conditioned policy} (``FiLM
-(ours)'' in tables and figures). By
+force to action. We call the policy trained behind it the \emph{FiLM policy} (``FiLM (ours)''
+in tables and figures). By
 construction it receives no information the naive policy lacks, and because the pathway is
 explicit and unique, forcing \chat{} at inference directly measures its \emph{causal
 authority}---the fraction of commanded descent the condition can cancel.
 
-The mask is load-bearing. Leave the raw wrench in the state and the conditioning pathway trains
-causally dead at unchanged validation loss: training routes force through the already-functional
-raw path and starves the dedicated one. We call this \emph{bypass} and exhibit it in
-Sec.~\ref{sec:offline}; it is why a fix of this kind cannot be certified after the fact, and why
-ours holds by construction. The demonstrations complete the recipe: each press-retreat episode
-presses to a randomized force target and retreats before any seal event, so the force at which
-the expert stops varies from episode to episode---in the data, depth, appearance, and timing no
-longer predict the stop; only the force reading does. The same interface that fixes the policy
-is the instrument that audits it (Sec.~\ref{sec:method}).
-
 The resulting policy is not uniformly better---it is different exactly where the task is
 decided. In a matched comparison---same data, same initialization, imitation error
 indistinguishable---the naive policy \emph{does} respond to force at the demonstrated
-magnitudes, as strongly as the conditioned policy or more so. But its response is a
+magnitudes, as strongly as the FiLM policy or more so. But its response is a
 \emph{template}: sized to the demonstrated forces, it fades or saturates as force rises past
-them, never strengthening into a stop. The conditioned policy's response instead grows with
+them, never strengthening into a stop. The FiLM policy's response instead grows with
 force, to the point of stopping and
 backing away at forces beyond anything in the training data (Sec.~\ref{sec:offline}). The
 mechanism carries to the real closed loop: while the naive policy drives contact force past the
-$15$\,N safety limit on every attempt, the conditioned policy stops on its own in every
+$15$\,N safety limit on every attempt, the FiLM policy stops on its own in every
 pick---across three stack heights, at a median contact force of $2.5$\,N---and live
-counterfactual probes reproduce the offline crossover on the physical system
-(Sec.~\ref{sec:robot}).
+counterfactual probes reproduce on the physical system the crossover seen offline, the two
+responses trading places as force rises past the demonstrated range (Sec.~\ref{sec:robot}).
 
 Our contribution is the pathway and three properties of it, each measured by intervention on
 the trained policy (Sec.~\ref{sec:method-probes}):
@@ -80,23 +71,20 @@ the trained policy (Sec.~\ref{sec:method-probes}):
 \item \textbf{Drop-in.} \chat{} is computed from signals the policy already receives and
   enters through an identity-initialized FiLM layer at the state token; the backbone is
   untouched, no information is added, imitation error is unchanged, and the same pathway
-  attaches to a second backbone ($\pi_0$), where it again turns a policy that never stops into
-  one that does (Sec.~\ref{sec:method},~\ref{sec:offline-pi0}).
-\item \textbf{Retrofittable.} Added to an already-trained naive policy and continued for a
-  few thousand steps on the same demonstrations, the pathway turns a saturating force template
-  into a monotone brake; a matched ablation shows the mask and the grounding are both
-  necessary---unmasked, the pathway trains causally dead (\emph{bypass}); ungrounded, it is the
-  worst policy in the study (Sec.~\ref{sec:offline}).
-\item \textbf{Monotone beyond the demonstrations.} Because \chat{} is a calibrated monotone
-  scalar, braking grows with force past anything demonstrated, stopping and retreating where
-  the naive policy's template saturates and presses through (Sec.~\ref{sec:offline}). The
-  same holds on our robot: every conditioned pick stops under the $15$\,N abort limit (median
-  contact force $2.5$\,N), including at a stack height absent from the demonstrations, and
-  live counterfactuals reproduce the crossover (Sec.~\ref{sec:robot}).
+  attaches to another backbone ($\pi_0$), where it again turns a policy that does not stop in
+  the press simulation into one that does (Sec.~\ref{sec:method},~\ref{sec:offline-pi0}).
+\item \textbf{Retrofittable.} Added to an already-trained naive policy and continued on the
+  same demonstrations, the pathway turns that policy's saturating force template into a
+  monotone brake (Sec.~\ref{sec:offline}).
+\item \textbf{Generalizes beyond the demonstrations.} Because force magnitude enters through
+  FiLM's affine modulation, braking grows with force past anything demonstrated, stopping and retreating where
+  imitation alone leaves the response unspecified (Sec.~\ref{sec:offline}). The same holds on
+  our robot, including at a stack height absent from the demonstrations, and live
+  counterfactuals reproduce the crossover (Sec.~\ref{sec:robot}).
 \end{itemize}
 
-\noindent In one sentence: \emph{a policy that stops when it feels what the demonstrations felt
-and a policy that stops harder the harder it is pressed are indistinguishable in loss and
-similar at the demonstrated forces---they differ exactly where the task is decided, and only
-demonstrations in which force alone predicts the stop, behind a grounded, masked FiLM
-pathway, yield the second.}
+\noindent In one sentence: \emph{from the same demonstrations, backbone, and force signal one
+can obtain a policy that stops when it feels what the demonstrations felt, or one that stops
+harder the harder it is pressed; the two are indistinguishable in imitation error and similar
+at the demonstrated forces, and which one is obtained is decided by the pathway through which
+force enters the policy.}

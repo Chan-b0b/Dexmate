@@ -15,31 +15,25 @@ decoder~\cite{tavla}; PhaForce schedules policy phases on contact and force
 signals~\cite{phaforce}; ForceFlow~\cite{forceflow}, FARM~\cite{farm}, and
 FILIC~\cite{filic} condition diffusion or impedance-loop policies on force and tactile
 input; TacForeSight learns force-conditioned tactile prediction~\cite{tacforesight}.
-These works \emph{design for} force use and validate it with task success and retraining
-ablations, sometimes alongside rollout force statistics~\cite{phaforce,forceflow}. None of
-these measurements establishes causal use at the decision moment: an ablation compares two
-differently-trained functions, rollout statistics are observational, and success can be
-carried by correlates of force rather than force itself. The nearest analyses stop short of
-the force input: TA-VLA perturbs input tokens of its \emph{baseline} to site the adapters and
-reports correlational representation similarity~\cite{tavla}; Tactile-VLA's dose-response
-intervenes on the \emph{instruction}, not the force stream~\cite{tactilevla}; ForceFlow masks
-its trained policy's \emph{visual} input and reads out task success~\cite{forceflow}.
-We do not claim these systems bypass their force inputs---their tasks
-may contain force information that vision cannot substitute, leaving no shortcut to take.
-Our claim is narrower and falsifiable: \emph{when} the demonstrations correlate the condition
-with cheaper cues, a policy with a dedicated force pathway can train to indistinguishable loss
-while routing around that pathway (we exhibit exactly this with our unmasked control), and no
-metric in the standard validation stack detects it. We contribute the missing measurement: an
-inference-time intervention on the trained policy's force input, with the action as the readout.
+Each commits to a way of getting force into the network---new tokens, new experts, new
+adapters, a new decoder---and each is validated by task success and retraining ablations,
+sometimes alongside rollout force statistics~\cite{phaforce,forceflow}. Our pathway is the
+lightest of these choices: a computed condition modulating the state token of an otherwise
+unchanged backbone, attachable after training. We also evaluate differently: rather than
+comparing differently trained policies by success, we intervene on the force input of a
+trained policy and read the action, which exposes the \emph{form} of the response---whether
+it grows or fades with force---that success rates average over. The closest such analyses
+stop short of the force input: TA-VLA perturbs input tokens of its baseline~\cite{tavla},
+Tactile-VLA's dose-response intervenes on the instruction~\cite{tactilevla}, and ForceFlow
+masks its trained policy's visual input~\cite{forceflow}.
 
 \textbf{Intermediate condition representations.}
 Injecting a compact, task-level representation between observation and action is a recurring
 design: RT-Affordance conditions on predicted affordance plans~\cite{rtaffordance}, and FiLM
 modulation~\cite{perez2018film} is the standard mechanism for conditioning a backbone on side
-information. Our \chat{} shares the shape but differs in role: it is \emph{computed} from
-signals the policy already receives---not a learned head that could itself be bypassed---and it
-is paired with a mask that removes the raw signal, turning the representation from a convenience
-into the policy's sole, measurable route to force.
+information. Our \chat{} shares the shape but differs in role: it is computed from signals the
+policy already receives rather than learned, so it adds no information and its meaning is fixed
+before training.
 
 \textbf{Causal confusion and shortcut learning.}
 That imitators latch onto spurious correlates is well established: causal confusion in
@@ -47,22 +41,17 @@ IL~\cite{dehaan2019causal}, copycat behavior on observation histories~\cite{wen2
 and shortcut learning in deep networks broadly~\cite{geirhos2020shortcut,hermann2023foundations}.
 Recent work documents shortcuts in generalist robot policies~\cite{shortcutgeneralist} and uses
 targeted interventions to expose or correct them~\cite{interventionil2025,interventionil2023}.
-The symptoms are on record in force-conditioned policies themselves: FuSe observes fine-tuned
+The symptoms are on record in force-FiLM policies themselves: FuSe observes fine-tuned
 generalists ignoring newly added sensors~\cite{fuse}, and FM-VLA diagnoses a history-length
 shortcut in its own force stream and patches it with augmentation---verifying the fix, again,
 only by task success~\cite{fmvla}.
-We instantiate this literature where it has not been applied---force conditioning in fine-tuned
-VLAs---and add the usage/form dissociation: the data's correlation structure decides
-\emph{whether} a signal is used, while the conditioning pathway decides \emph{what form} its
-use takes under extrapolation.
 
 \textbf{Privileged supervision and interventional evaluation.}
 Privileged-teacher distillation~\cite{chen2020lbc,privilegedaction} assumes access to a signal
-worth distilling; our probes answer the prior question of whether the deployed policy uses the
-signal at all. The closest interventional precedent is ForceSight, which ablates predicted
-force \emph{goals} at its controller under matched initial conditions~\cite{forcesight}; the
+worth distilling; our probes instead ask how a deployed policy responds to the signal it already
+has. The closest interventional precedent is ForceSight, which ablates predicted force
+\emph{goals} at its controller under matched initial conditions~\cite{forcesight}; the
 intervention sits on the output side of a model that takes no force input, and reads out
-end-of-episode success rather than the action. Our press-retreat prescription is a data-side intervention in the spirit of
-decorrelation fixes for causal confusion~\cite{dehaan2019causal}, but designed from a physical
-argument (Sec.~\ref{sec:discussion}) that reactive gating is arithmetically insufficient on
-stiff contact, so the demonstrations must teach anticipatory approach and retreat.
+end-of-episode success rather than the action. Our press-retreat demonstrations are a data-side
+decorrelation in the spirit of fixes for causal confusion~\cite{dehaan2019causal}, motivated
+by a physical argument (Sec.~\ref{sec:discussion}).

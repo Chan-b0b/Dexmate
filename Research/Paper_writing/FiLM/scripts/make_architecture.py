@@ -8,9 +8,13 @@ entering the state at all; c-hat through FiLM is the only force pathway.
 import matplotlib
 matplotlib.use("Agg")
 import matplotlib.pyplot as plt
+# IEEE PaperPlaza rejects Type 3 fonts: embed text as TrueType (Type 42) instead.
+matplotlib.rcParams["pdf.fonttype"] = 42
+matplotlib.rcParams["ps.fonttype"] = 42
 from matplotlib.patches import FancyBboxPatch, FancyArrowPatch, Circle
 
-OUT = "/home/maverick/Humanoid/Dexmate/Research/Paper_writing/FiLM/paper/figs"
+import os
+OUT = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "paper", "figs")
 
 INK = "#333333"
 GRAY_EDGE = "#BBBBB8"
@@ -53,7 +57,10 @@ arrow(42, 11, 45, 11, color=BLUE)
 mod_x, mod_y = 50, 31
 arrow(50, 16, 50, 28.6, color=BLUE)          # FiLM up to the node
 ax.add_patch(Circle((mod_x, mod_y), 2.3, fc="white", ec=BLUE, lw=1.0))
-ax.text(mod_x, mod_y, "$\\times$", ha="center", va="center", fontsize=7, color=BLUE)
+# draw the x as two strokes so it is exactly centred (mathtext glyphs sit off-centre)
+_r = 1.1
+ax.plot([mod_x - _r, mod_x + _r], [mod_y - _r, mod_y + _r], color=BLUE, lw=0.9, solid_capstyle="round")
+ax.plot([mod_x - _r, mod_x + _r], [mod_y + _r, mod_y - _r], color=BLUE, lw=0.9, solid_capstyle="round")
 ax.text(54.5, 34.2, "FiLM\ninjection", fontsize=5.2, color=BLUE,
         ha="center", va="bottom", linespacing=1.1)
 
@@ -70,9 +77,6 @@ arrow(88, 32, 88, 24)                         # expert -> action
 ax.text(88, 21.5, "action chunk\n$\\Delta$pose + suction ($\\times$5)",
         ha="center", va="top", fontsize=5.2, color=INK, linespacing=1.2)
 
-# annotation: only route
-ax.text(35.5, 1.2, "the only pathway from force to action", fontsize=5.4,
-        color=BLUE, ha="center", va="bottom", style="italic")
 
 fig.subplots_adjust(left=0.01, right=0.99, top=0.99, bottom=0.01)
 fig.savefig(f"{OUT}/architecture.pdf")
