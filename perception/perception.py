@@ -161,10 +161,12 @@ def print_camera_info(camera_info):
     
     
 def get_3d_zed_point(center_point, depth):
-    fx = 366.21429443359375
-    fy = 366.21429443359375
-    cx = 497.73809814453125
-    cy = 315.53277587890625
+    # this robot's ZED X Mini SVGA camera info (1001); the old cx 497.74 / cy 315.53
+    # were 15/8 px off (see LGES/case_battery_demo/dashboard/camera_geometry.py)
+    fx = 366.04998779296875
+    fy = 366.04998779296875
+    cx = 482.7677001953125
+    cy = 307.1591796875
     u, v = center_point
     z = depth
     x = ((u-cx)/fx)*z

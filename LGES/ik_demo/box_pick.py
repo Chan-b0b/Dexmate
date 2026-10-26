@@ -99,7 +99,8 @@ def detect_box(bot, top_z: float, box_long_m: "float | None" = None,
     # tol_deg: skip the move (and its flat 5 s wait) when the head is already
     # aimed — it usually is, from whatever task ran before. _head_rgb below
     # still waits for two fresh frames, so the settle is not lost.
-    set_head_pitch(bot, angle=head_angle, tol_deg=2.0)
+    # 0.3 deg, not 2: detected xy shifts with head angle (~0.3-0.5 mm/deg in x).
+    set_head_pitch(bot, angle=head_angle, tol_deg=0.3)
     rgb = _head_rgb(bot)
     if rgb is None:
         logger.error("no head-camera frame — is the head camera enabled?")

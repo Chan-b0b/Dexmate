@@ -12,11 +12,34 @@ from __future__ import annotations
 
 import numpy as np
 
-# ZED left-camera intrinsics at the native stream resolution (from perception.py).
-ZED_FX = 366.21429443359375
-ZED_FY = 366.21429443359375
-ZED_CX = 497.73809814453125
-ZED_CY = 315.53277587890625
+# ZED left-camera intrinsics, rectified SVGA 960x600 stream. load_intrinsics()
+# replaces these with the live camera info when it can; these are the FALLBACK
+# for when the info query fails (it sometimes times out). Values = this robot's
+# camera info (ZED X Mini, read 1001). The old perception.py copy (cx 497.74,
+# cy 315.53) was 15/8 px off: a tape on the robot centre line read y +28..34 mm
+# with it and +-2 mm with these.
+ZED_FX = 366.04998779296875
+ZED_FY = 366.04998779296875
+ZED_CX = 482.7677001953125
+ZED_CY = 307.1591796875
+INTRINSICS_SOURCE = "fallback"
+
+
+def load_intrinsics(robot) -> bool:
+    """Take fx/fy/cx/cy from the head camera's info service (the calibration of
+    the camera actually fitted, at the stream's resolution). Returns False and
+    keeps the fallback constants if the info is unavailable or malformed."""
+    global ZED_FX, ZED_FY, ZED_CX, ZED_CY, INTRINSICS_SOURCE
+    try:
+        left = robot.sensors.head_camera.get_camera_info()["intrinsics"]["left"]
+        fx, fy, cx, cy = (float(left[k]) for k in ("fx", "fy", "cx", "cy"))
+    except Exception:  # noqa: BLE001 — no info / timeout / layout change: keep the fallback
+        return False
+    if not all(np.isfinite(v) and v > 0 for v in (fx, fy, cx, cy)):
+        return False
+    ZED_FX, ZED_FY, ZED_CX, ZED_CY = fx, fy, cx, cy
+    INTRINSICS_SOURCE = "camera_info"
+    return True
 
 
 def _rot_y(theta: float) -> np.ndarray:

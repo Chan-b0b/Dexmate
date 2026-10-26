@@ -259,10 +259,13 @@ class ArmMover:
         ]
         self._urdf = urdf
         self._pkg_dirs = pkg_dirs
-        full = pin.RobotWrapper.BuildFromURDF(
-            filename=urdf, package_dirs=pkg_dirs, root_joint=None
-        ).model
-        self._full_model = full
+        # Kinematic tree only (~0 s). RobotWrapper.BuildFromURDF also loaded every
+        # visual + collision mesh (~4.2 s per build) only to throw them away here.
+        # Built once: the full model does not depend on the torso stance, and the
+        # cached collision geometry (_setup_collision) is tied to it.
+        if getattr(self, "_full_model", None) is None:
+            self._full_model = pin.buildModelFromUrdf(urdf)
+        full = self._full_model
 
         # Torso angle: live if a robot is attached, else the configured stance
         # (taught poses are only reachable at the torso pose they were taught at).
@@ -392,6 +395,8 @@ class ArmMover:
 
     def _setup_collision(self) -> None:
         """Self-collision on the FULL model, filtered by the dexmate_urdf SRDF."""
+        if getattr(self, "_collision_ok_setup", False):
+            return    # meshes depend only on the URDF, not the torso: reuse (~1.1 s)
         srdf = os.path.splitext(self._urdf)[0] + ".srdf"
         self._collision_ok_setup = False
         try:
@@ -1298,14 +1303,15 @@ class ArmMover:
 
     def move_ee_vertical(self, z_target: float, rpy, stop_fn=None,
                          creep_out_m: float = 0.0,
-                         v_in: float = 0.0) -> np.ndarray | None:
+                         v_in: float = 0.0,
+                         fast: "float | None" = None) -> np.ndarray | None:
         """Straight vertical EE move to base-frame z_target, x,y,rpy held EVERY
         tick (per-tick warm IK stream) — the free-air analog of the suction
         descent legs. move_ee only constrains the endpoints; its joint-space
         trajectory arcs sideways in between, so lifts holding a part must use
-        this instead. Speed reuses the descent budget: smoothstep ramp-in from
-        rest, cruise at DESCENT_APPROACH_SPEED_M_S, blend to creep into the
-        target. Returns the last commanded joints, or None if a tick's IK falls
+        this instead. Speed: smoothstep ramp-in from rest, cruise at
+        DESCENT_APPROACH_SPEED_M_S going down / LIFT_SPEED_M_S going up, blend
+        to creep into the target. Returns the last commanded joints, or None if a tick's IK falls
         beyond REACH_TOL_M (halts in place — partial motion, logged).
 
         ``creep_out_m``: hold CREEP speed for the first this-many metres of
@@ -1322,7 +1328,8 @@ class ArmMover:
         ``stop_fn``: optional zero-arg callable polled once per tick AFTER the
         tick's command; True halts the stream in place (zero velocity at the
         last commanded joints) and returns them — a contact guard hook. The
-        caller tells a stopped leg from a finished one by its own flag / FK."""
+        caller tells a stopped leg from a finished one by its own flag / FK.
+        ``fast``: cruise override for either direction."""
         dt = 1.0 / float(cfg.CONTROL_HZ)
         prev_q = self._start_q()
         pos, _ = self.fk(prev_q)
@@ -1331,7 +1338,11 @@ class ArmMover:
         direction = 1.0 if z_target >= z else -1.0
         z_start = z
         creep_out = max(0.0, float(creep_out_m))
-        fast, creep = cfg.DESCENT_APPROACH_SPEED_M_S, cfg.DESCENT_CREEP_SPEED_M_S
+        # going UP (a lift, part usually in the cup) cruises at its own, slower
+        # LIFT_SPEED_M_S — see config (1012)
+        if fast is None:
+            fast = (cfg.LIFT_SPEED_M_S if direction > 0 else cfg.DESCENT_APPROACH_SPEED_M_S)
+        creep = cfg.DESCENT_CREEP_SPEED_M_S
         band = max(float(cfg.DESCENT_CREEP_BLEND_M), 1e-6)
         elapsed = 0.0
         trace_s = float(cfg.DESCENT_TRACE_S)

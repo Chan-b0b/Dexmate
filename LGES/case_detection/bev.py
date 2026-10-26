@@ -116,7 +116,8 @@ def build_mapper(q_torso, q_head, plane_z: float) -> BevMapper:
     fixed head/torso gives a constant transform; rebuilds when anything moves."""
     key = (tuple(np.round(np.ravel(q_torso), 4)),
            tuple(np.round(np.ravel(q_head), 4)),
-           round(float(plane_z), 4))
+           round(float(plane_z), 4),
+           (cg.ZED_FX, cg.ZED_FY, cg.ZED_CX, cg.ZED_CY))   # cg.load_intrinsics can change K
     m = _cache.get(key)
     if m is None:
         H = _plane_to_img(q_torso, q_head, plane_z) @ _canvas_to_base()  # BEV->img

@@ -35,7 +35,7 @@ from dexcontrol.utils.compat import supported_models
 
 @supported_models("vega_1", "vega_1p")
 def main(
-    target_angles_deg: tuple[float, float, float] = (30.0, 110.0, 15.0),
+    target_angles_deg: tuple[float, float, float] = (55.0, 140.0, 25.0),
     velocity_scale: float = 0.3,
     wait_time: float = 5.0,
 ) -> None:

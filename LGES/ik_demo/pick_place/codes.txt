@@ -1,0 +1,1 @@
+cd ~/LGES/Dexmate/LGES && ~/vla_venv/bin/python -m live_view

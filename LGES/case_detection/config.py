@@ -15,12 +15,14 @@ from __future__ import annotations
 
 # ----------------------------------------------------------------------------
 # Camera intrinsics — head ZED left camera.
-# Copied from perception/perception.py:get_3d_zed_point (same camera/stream).
+# This robot's ZED X Mini SVGA camera info (1001), same as the fallback in
+# case_battery_demo/dashboard/camera_geometry.py (the BEV path reads the live
+# camera info there; the old cx 497.74 / cy 315.53 were 15/8 px off).
 # ----------------------------------------------------------------------------
-FX: float = 366.21429443359375
-FY: float = 366.21429443359375
-CX: float = 497.73809814453125
-CY: float = 315.53277587890625
+FX: float = 366.04998779296875
+FY: float = 366.04998779296875
+CX: float = 482.7677001953125
+CY: float = 307.1591796875
 
 # Image size used ONLY by the synthetic self-test. Real detection reads the
 # shape from the captured depth array, so this need not match exactly.
@@ -44,7 +46,7 @@ FLOOR_Z_M: float | None = None  # <-- set to a measured value for best results
 # stack anchor: layer tops sit above it by the ik_demo layer pitch. Distinct
 # from FLOOR_Z_M above, which is a camera-frame depth for the old detector.
 # Orange ~0.5687, paper ~0.5641 — within noise, so ONE shared value is used.
-FLOOR_Z_BASE_M: float = 0.60
+FLOOR_Z_BASE_M: float = 0.67
 # Per-layer stack pitch (m), from ik_demo (measured ~0.0131, config 0.0138).
 LAYER_PITCH_M: float = 0.0138
 

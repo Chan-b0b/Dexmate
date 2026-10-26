@@ -21,7 +21,8 @@ from .robot import GRASP_ORIENTATION_RPY
 # ---------------------------------------------------------------------------
 # Base-frame Z the cup tip is raised to for collision-free sideways transport;
 # must clear the source stack and both box walls. (measured 2026-06-09)
-SAFE_TRANSPORT_Z: float = 1.1
+# 1012 raised table (floor 0.60 -> 0.67): from pick_place's place_config, where it ran on the robot; was 1.1
+SAFE_TRANSPORT_Z: float = 1.17
 # Absolute EE z the straight-up (xy-held, move_ee_vertical) lift leg ends at —
 # clear of the case walls from any layer's pick, so the held part is never
 # dragged sideways while still between them. Above it the ascent is a faster
@@ -36,7 +37,15 @@ SAFE_TRANSPORT_Z: float = 1.1
 # DESCENT_APPROACH_SPEED_M_S. 0903 measured the cost — commanded vertical
 # (ik 0.0mm) but the arm tracking 74mm off line and 22.6 deg in pitch, i.e. a
 # ~130mm cup-tip excursion while carrying the part.
-LIFT_CLEAR_EE_Z: float = 1.05
+# 1012 raised table (floor 0.60 -> 0.67): from pick_place's place_config, where it ran on the robot; was 1.05
+LIFT_CLEAR_EE_Z: float = 1.12
+# The straight per-tick vertical lift is kept only up to this EE z (a held
+# case's bottom must clear the bin rim, BOX_RIM_Z_M, with margin); above it the
+# rest of the rise to LIFT_CLEAR_EE_Z is one planned (jerk-limited) move. The
+# per-tick stream at cruise speed lags the command (pitch error -10 deg, cup
+# tip 80mm off at z=1.10, 0.85-1.10 lift traces), the planner does not.
+# >= LIFT_CLEAR_EE_Z keeps the old all-vertical lift. (pick_place, 1012)
+LIFT_VERTICAL_TO_Z: float = 1.0
 # Best-effort ascent after a lift leg fell short (the per-tick vertical stream
 # can dead-end on a diverging IK branch right at the reach boundary while the
 # column is statically reachable): the joint-space recovery move only runs when
@@ -61,7 +70,10 @@ HOVER_HEIGHT_M: float = 0.25
 # case nesting/press compression) — anchored predictions cover those.
 # Used by the detection pipeline to turn a detected top-face z into an EE target;
 # confirm/refine against sequence.py's contact_ee_z.
-SUCTION_LENGTH_M: float = 0.155
+# 2026-10-12: 0.155 -> 0.150. pick_place/depth_check on an opaque empty box
+# floor, 3 touches (10N): touch EE z minus DEPTH floor z = 0.1505 / 0.1486 /
+# 0.1474 (mean 0.1488) — i.e. now fitted to the depth surface, not the model.
+SUCTION_LENGTH_M: float = 0.150
 
 # ---------------------------------------------------------------------------
 # Target geometry (base_link, m / rad) — single source center + displacement.
@@ -89,18 +101,25 @@ SUCTION_LENGTH_M: float = 0.155
 # 4 * LAYER_PITCH_M + SUCTION_LENGTH_M = 0.810), +LAYER_PITCH_M per extra layer.
 # The previous (0.87, 0.455, 0.964) was the pre-chassis fixed-station staging
 # (case 45 cm to the left), out of reach at the current torso stance.
-SOURCE_CASE_CENTER: tuple[float, float, float, float] = (0.9, 0.0, 0.80, 0.0)  # x, y, z_ee, yaw
+# 1001 ZED intrinsics fix: detections now read ~(-20, -27) mm vs the old
+# (wrong-principal-point) BEV around this point, so every case-frame offset below
+# and this x reference were shifted by (+0.020, +0.027) to keep the PHYSICAL pick
+# points the previous tuning found (old values in the comments). Yaw also reads
+# ~1 deg lower now and is NOT compensated. Re-verify on-robot.
+# 1012 raised table (floor 0.60 -> 0.67): from pick_place's place_config, where it ran on the robot; x 0.88 was
+# unreachable with that torso (pre-check err 16-29mm), z_ee was 0.80.
+SOURCE_CASE_CENTER: tuple[float, float, float, float] = (0.72, 0.0, 0.87, 0.0)  # x, y, z_ee, yaw
 GRASP_YAW: float = 3.1415                       # cup approach yaw, relative to the case frame
 HALF_SLOT_SPACING_M: float = 0.08           # slots at (0, ±this) around the slot-pair center
 # Case-local (dx, dy, dz) offsets from the case center.
-CASE_GRAB_OFFSET: tuple[float, float, float] = (-0.03, 0.05, 0.0)   # cup grabs slightly left (+y)
+CASE_GRAB_OFFSET: tuple[float, float, float] = (-0.010, 0.077, 0.0)   # cup grabs left (+y); was (-0.03, 0.05)
 # Slot-pair CENTER vs the detected OBB center (case-local). Both battery targets
 # shift by this together — fixes the common-bias symptom (bat1 undershoots,
 # bat2 overshoots by the same amount = center biased +y). Spacing stays symmetric.
-SLOT_CENTER_OFFSET: tuple[float, float, float] = (-0.04, -0.10, 0.0)
+SLOT_CENTER_OFFSET: tuple[float, float, float] = (-0.020, -0.073, 0.0)   # was (-0.04, -0.10)
 SLOT_OFFSETS: dict[int, tuple[float, float, float]] = {
-    1: (SLOT_CENTER_OFFSET[0], -0.03 - HALF_SLOT_SPACING_M, SLOT_CENTER_OFFSET[2]),  # right slot (robot -y)
-    2: (SLOT_CENTER_OFFSET[0], -0.03 + HALF_SLOT_SPACING_M, SLOT_CENTER_OFFSET[2]),  # left slot  (robot +y)
+    1: (SLOT_CENTER_OFFSET[0], -0.003 - HALF_SLOT_SPACING_M, SLOT_CENTER_OFFSET[2]),  # right slot (robot -y); was -0.03
+    2: (SLOT_CENTER_OFFSET[0], -0.003 + HALF_SLOT_SPACING_M, SLOT_CENTER_OFFSET[2]),  # left slot  (robot +y); was -0.03
 }
 # Displacement source -> target, same for the case and both batteries (base_link).
 # In the chassis flow the target case is centered exactly like the source, so
@@ -154,12 +173,23 @@ TAUGHT_POSES: dict[str, tuple[float, ...]] = resolve_poses()
 # wrong pose estimate. Moved inside the band (1.6 deg margin; EE shift ~2 mm,
 # cup tip ~2 cm) — RE-CHECK the view-park camera clearance on the robot.
 HOME_JOINTS_LEFT: tuple[float, ...] = (-2.2555, 1.3993, 2.5, -2.1348, -0.2685, 0.9856, -1.25)
-HOME_JOINTS_RIGHT: tuple[float, ...] = (-1.0066, -0.6759, 0.2385, -2.2329, 0.8087, 1.0881, 0.0507)
+# 1015 (user): the right arm's home is now its WRIST-CAMERA VIEW pose — the
+# camera (~(0.30, -0.32, 1.21), roll -45) looks at the bin in front of the robot
+# from the front-right, above the table edge (EE (0.309, -0.380, 1.166), finger
+# tips z 1.06, rim 0.89). From bin_pose/wrist_view.py at TORSO_JOINTS: clear of
+# the left arm's carry pose + held case, the old home -> here joint path clear,
+# the left pick columns / view park / home still collision-free. Also the default
+# IK seed for the right arm (plan_box seeds from BOX_GRASP_SEED_JOINTS instead).
+# UNVERIFIED on the robot — re-check tasks 1/4/5/6 and box-lid start/end poses.
+# Was (-1.0066, -0.6759, 0.2385, -2.2329, 0.8087, 1.0881, 0.0507) (camera on the ceiling).
+HOME_JOINTS_RIGHT: tuple[float, ...] = (-2.4445, -0.0499, 1.2669, -2.3816, 0.479, 1.0697, 0.8419)
 
 # Torso joint angles (rad) the demo/teaching runs at. Taught base_link poses are
 # only reachable at this torso pose (torso moves the arm base). arm.py reads the
 # live torso when a robot is attached; this is the headless / validation value.
-TORSO_JOINTS: tuple[float, float, float] = (0.52359878, 1.91986218, 0.26179939)  # deg [30, 110, 15]
+# 1012 raised table (floor 0.60 -> 0.67): from pick_place's place_config, where it ran on the robot; was
+# (0.95993109, 2.26892803, 0.26179939) = deg [30, 110, 15].
+TORSO_JOINTS: tuple[float, float, float] = (1.2, 2.70, 0.35)  # deg [68.8, 154.7, 20.1]
 
 # Torso motion speed, as a fraction of the hardware ceiling, for every torso
 # command the demo sends (arm.pin_torso). The torso goes through the robot's

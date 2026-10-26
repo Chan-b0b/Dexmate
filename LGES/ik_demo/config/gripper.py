@@ -154,7 +154,11 @@ BOX_GRASP_EDGE_INSET_M: float = 0.0
 # wall midpoint is computed. Straight base-frame trim for where the fingers
 # actually land on the wall, independent of the box's own frame (the INSET
 # above moves along the box's short axis instead). 0910: +5 mm, on the robot.
-BOX_GRASP_Y_OFFSET_M: float = -0.01
+# 1012: -10mm (0.0172 -> 0.0072, the user's estimate) — the OUTER finger
+# folded on the close, i.e. the wall sat nearer the outer finger and the
+# coupled fingers could not centre the box, so the hand moves outward (-y; the
+# grasped wall is always the right one). Unverified on the robot.
+BOX_GRASP_Y_OFFSET_M: float = 0.0072  # 1001 intrinsics fix had it at 0.0172 (old-K bias kept physical, see geometry.py); was -0.01
 # Approach to the box hover (gripper._approach_hover). Home -> hover in ONE
 # joint move sweeps the fingertips ACROSS the box interior: at home the hand
 # points UP (tool z ~ +0.92 base z) and at the grasp it points DOWN, and that
@@ -191,12 +195,19 @@ BOX_APPROACH_SIDE_M: float = 0.0      # stand this far outside the wall before c
 # upright, not the wall; the same run then GRASPED at y=-0.285 after the
 # chassis had moved. Successful box centres that day: -0.119, -0.176, -0.210;
 # the failure sat at -0.279. This is the -0.119 one, the furthest from the rack.
-BOX_CENTER_REF_XY: tuple[float, float] = (0.911, -0.119)
+BOX_CENTER_REF_XY: tuple[float, float] = (0.8926, -0.1462)  # 1001 intrinsics fix (old-K bias kept physical, see geometry.py); was (0.911, -0.119)
 BOX_CENTER_TOL_M: float = 0.04          # |box centre - ref| accepted without moving
 BOX_CENTER_MAX_MOVES: int = 3           # correction rounds, each with a re-detect
 BOX_CENTER_MAX_MOVE_M: float = 0.30     # per-round clamp, each axis
 BOX_GRIP_HOLD_S: float = 1.0          # hold at the top of the lift test / before a release
 BOX_LIFT_TEST_M: float = 0.10         # lift-test mode: raise the gripped box this far, set it back down, release
+# Carry mode (task 4 box discard), 1012: after the lift to the hover the box
+# keeps going straight up to the highest point the arm reaches there with the
+# wrist unchanged (searched per pick), minus MARGIN so the stream does not end
+# on the reach edge. MAX caps the total lift above the grip height: the hanging
+# box is not in the collision model, and high up it swings toward the head.
+BOX_CARRY_TOP_MARGIN_M: float = 0.02
+BOX_CARRY_MAX_LIFT_M: float = 0.40
 # Box rim height (base_link z, m): the BEV detection plane and the pick's
 # top_z. Now only the FIRST GUESS and the fallback — detect_box measures the
 # box FLOOR from head-camera depth and rebuilds the rim as
@@ -206,7 +217,9 @@ BOX_LIFT_TEST_M: float = 0.10         # lift-test mode: raise the gripped box th
 # 0.600, independently established, agrees to 9 mm) and the walls tape-measure
 # 14 cm, so the rim is ~0.731. At 0.650 the fingers went 93 mm down the wall
 # instead of BOX_GRASP_DEPTH_M, ending 29 mm off the box floor.
-BOX_RIM_Z_M: float = 0.65
+# 1012 raised table (floor 0.60 -> 0.67): from pick_place's place_config, where it ran on the robot; 0.67 floor +
+# BOX_WALL_HEIGHT_M 0.135; was 0.65.
+BOX_RIM_Z_M: float = 0.805
 # Tape-measured inside wall height, box floor -> rim (m). The rim is rebuilt
 # from the MEASURED floor plus this rather than read directly, because the rim
 # itself is a thin cardboard edge and its depth window straddles the outside
@@ -231,6 +244,16 @@ BOX_FLOOR_DEPTH_MAX_DEV_M: float = 0.05
 # ~0.2 N (0903 probe), so 7 N is well clear. The pick then lifts back to the
 # hover and reports "contact" instead of closing on nothing.
 BOX_CONTACT_FORCE_N: float = 7.0
+# Robotiq force register (0..255) for the box-wall grip. 1012: half of
+# ROBOTIQ_FORCE (0x80, roughly 130N on the 2F-85) at the user's call — the full
+# setting gripped the paper box too hard. Only the box pick uses it; every
+# other close() keeps ROBOTIQ_FORCE. Raise it back if the box slips in carry.
+BOX_GRIP_FORCE: int = 0x40
+# Box discard set-down (run_box_discard): the gripper opens this far ABOVE the
+# old release point (the full carry lift back down), i.e. the box drops this
+# far onto the unload spot. 1012, the user's call. The touchdown guard still
+# stops the lowering earlier if the floor there is higher.
+BOX_DROP_ABOVE_M: float = 0.05
 BOX_TARE_SAMPLES: int = 50
 # Where the descent stops hurrying: it runs fast from the hover down to this
 # far ABOVE the planned grasp height, then CREEPs (DESCENT_CREEP_SPEED_M_S)

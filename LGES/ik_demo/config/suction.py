@@ -85,7 +85,13 @@ WRENCH_REF_WARMUP_S: float = 0.10      # force decisions stay OFF until the wind
 # x,y here would drag mx,my along for no gain (lateral torque is diagnostics
 # only) and still could not express the swap.
 WRENCH_AXIS_SIGN: tuple[float, float, float] = (1.0, 1.0, -1.0)
-DESCENT_APPROACH_SPEED_M_S: float = 0.35    # fast free-air descent (cup-tip)
+DESCENT_APPROACH_SPEED_M_S: float = 0.25    # fast free-air descent (cup-tip)
+# Cruise of the per-tick vertical LIFT (arm.move_ee_vertical going up), separate
+# from the descent's since 1012: at 0.35 the arm could not keep up going up —
+# chassis_sequence battery lifts trailed the (exactly vertical) command by
+# 44-50mm toward the body, 54-65mm in z, 7-8 deg of pitch (cup tip 62-71mm) by
+# z~0.98, while the slow creep-out stretch of a case lift tracked within 1-2mm.
+LIFT_SPEED_M_S: float = 0.15
 # Cruise for the CORNER-SEAT descent only (_descend_corner_seat) — the one place
 # descent still streamed per-tick from the hover. The arm's tracking error is
 # proportional to the commanded speed and it is NOT along the commanded column:
@@ -230,7 +236,8 @@ PICK_SEAL_RETRIES: int = 2                  # on vacuum_timeout: lift DESCENT_CR
 # UNVERIFIED on the robot.
 PICK_SEAL_RETRY_OFFSET_M: float = 0.005
 SEAL_PRELIFT_M: float = 0.005               # relieve contact press before suction on
-RELEASE_PRELIFT_M: float = 0.025            # lift before the blow-off release
+RELEASE_PRELIFT_M: float = 0.015            # lift before the blow-off release (1001: back to 15mm, was 0.025 — part dropped from too high)
+RELEASE_BLOW_WAIT_S: float = 1.0            # suction_io.release(): wait after suction off + blow on before the caller lifts (0914: 0.7 lifted parts still stuck to the cup)
 PLACE_Z_BUFFER_M: float = 0.10              # accept a seat within this of the taught z
 PLACE_MISSEAT_TOL_M: float = 0.005          # place contact this far ABOVE the expected
                                             # seat z = rim-landing (misseat): hold, don't

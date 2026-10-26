@@ -71,6 +71,7 @@ def find_bin_bev(rgb: np.ndarray, q_torso, q_head, plane_z: float,
                  weights: str | None = None,
                  cls_id: "int | None" = None,
                  true_long_m: "float | None" = None,
+                 with_dims: bool = False,
                  ) -> "tuple[float, float, float] | None":
     """Bin OBB on the metric BEV canvas -> (base X, base Y, yaw_deg), or None.
 
@@ -95,7 +96,10 @@ def find_bin_bev(rgb: np.ndarray, q_torso, q_head, plane_z: float,
     while ik_demo calls in at DIVERT_BIN_PLANE_Z_M (the bin RIM), and a plane
     off by dz drags the reported x by roughly 0.7*dz. Measure it per class with
     calib_bin_plane.py. Leave None to keep the old behaviour (center read
-    straight off the ``plane_z`` canvas)."""
+    straight off the ``plane_z`` canvas).
+
+    ``with_dims``: also return the OBB's (long, short) size in metres on the
+    ``plane_z`` canvas, as a 4th element."""
     import bev  # sibling module (flat package imports, path set above)
     mapper = bev.build_mapper(q_torso, q_head, float(plane_z))
     bev_img = mapper.warp(rgb)
@@ -123,6 +127,9 @@ def find_bin_bev(rgb: np.ndarray, q_torso, q_head, plane_z: float,
         long_meas = float(max(w, h)) / cfg.BEV_PX_PER_M
         z_face = bev.plane_from_size(long_meas, float(true_long_m), float(plane_z), C)
         X, Y = bev.reproject_plane((X, Y), float(plane_z), z_face, C)
+    if with_dims:
+        return (float(X), float(Y), float(mapper.bev_yaw_to_base(deg % 180.0)),
+                (float(max(w, h)) / cfg.BEV_PX_PER_M, float(min(w, h)) / cfg.BEV_PX_PER_M))
     return float(X), float(Y), float(mapper.bev_yaw_to_base(deg % 180.0))
 
 

@@ -11,7 +11,7 @@ re-exports every name here; nothing imports this module directly.
 
 from __future__ import annotations
 
-from .sequence import FLOOR_Z_BASE_M, LAYER_PITCH_M
+from .sequence import FLOOR_Z_BASE_M, LAYER_PITCH_M, RUN_LOG_DIR
 from .geometry import HOME_JOINTS_LEFT, SUCTION_LENGTH_M
 
 # ---------------------------------------------------------------------------
@@ -40,14 +40,24 @@ CHASSIS_STRAFE_SPEED_MS: float = 0.1   # m/s magnitude (move_sideways: + left, -
 # to the robot's max_lin_vel (~0.5). If the carried case slips on the cup at
 # higher accel (watch the placement), lower this back.
 CHASSIS_LEG_SPEED_MS: float = 0.35
+# Default speed for the MANUAL prompt's `l/r/f/b` moves (_manual_strafe) when no
+# speed is typed. Manual only — the auto window / centering moves stay at
+# CHASSIS_STRAFE_SPEED_MS. A typed speed (`r 2.0 0.15`) still overrides it, and
+# a bare `r` (no distance: fixed CHASSIS_STRAFE_TIME_S) keeps the strafe speed.
+CHASSIS_MANUAL_SPEED_MS: float = 0.3
 CHASSIS_TURN_SPEED_RADS: float = 0.2   # rad/s magnitude for in-place yaw (turn: + ccw, - cw)
 CHASSIS_STRAFE_TIME_S: float = 7.2      # seconds per leg (~distance = speed*time)
-CHASSIS_SETTLE_S: float = 0.5           # settle pause after a strafe, before detecting
+CHASSIS_SETTLE_S: float = 0.0           # settle pause after a strafe, before detecting
+# 1014: 0.5 -> 0 — wheels already still ~0.15 s after the S-ramp ends, the
+# 0.3 s streamed stop covers it; UNVERIFIED: watch _refine_det spread for sway
 # --auto-move (chassis_sequence CLI flag): chassis legs run automatically — each
 # source<->target leg is a fixed open-loop DISTANCE at CHASSIS_STRAFE_SPEED_MS
 # (overrides CHASSIS_MANUAL). Station spacing is known ~0.6-0.7 m; detection
 # recenters at each visit, so the leg only needs to land the case in view/reach.
-CHASSIS_AUTO_STRAFE_DIST_M: float = 0.6
+# source <-> the BUFFER station to the RIGHT (the code's "target" station: the
+# case stack being built), right there, left back. Was CHASSIS_AUTO_STRAFE_DIST_M
+# (renamed 1012). Learned + saved across runs as "main" in CHASSIS_LEG_STATE_FILE.
+BUFFER_STRAFE_DIST_M: float = 0.6
 # Auto-adjust on a failed reach pre-check (auto-move): turn the chassis so the
 # detected case yaw reads 0 (as before), then drive the SMALLEST forward/back +
 # strafe that puts the failing pose's descent column inside reach — offsets on
@@ -83,11 +93,18 @@ CHASSIS_START_CENTER_MAX_MOVES: int = 8       # vs CHASSIS_CENTER_MAX_MOVES 5
 # (centering/adjust strafe, minus deliberate per-item re-alignments) feeds the
 # distance of the LEG THAT JUST RAN — left (target->source) and right
 # (source->target) learn independently, so a direction-dependent open-loop
-# travel gain calibrates out. In-memory only — final values are logged at run
-# end for a manual config update. Each clamped to CHASSIS_AUTO_STRAFE_DIST_M
+# travel gain calibrates out. Saved across runs (CHASSIS_LEG_STATE_FILE below)
+# and logged at run end. Each clamped to BUFFER_STRAFE_DIST_M
 # +/- this; a persistent "clamped" log means the true station separation is
-# outside the clamp window — fix CHASSIS_AUTO_STRAFE_DIST_M instead.
+# outside the clamp window — fix BUFFER_STRAFE_DIST_M instead.
 CHASSIS_LEG_LEARN_CLAMP_M: float = 0.20
+# The same for the leg's FORWARD/BACK part (1012): the window's dx at each
+# arrival is learned too (same gain) and flown inside the next strafe as one
+# diagonal — +dx going LEFT, -dx going RIGHT, one number per leg. 1012 runs: the
+# target / divert cases sit ~7-9cm further out than the source, so every
+# arrival paid a window x move (target +9, source -7, divert +7cm). Clamped to
+# +/- this around 0.
+CHASSIS_LEG_X_LEARN_CLAMP_M: float = 0.15
 # Gain on each arrival residual fed into a learned leg distance. Below 1.0 the
 # leg AVERAGES its residuals instead of tracking the last one — at 1.0 learn()
 # is a pure integrator with unity gain, so one noisy centering measurement moves
@@ -99,6 +116,14 @@ CHASSIS_LEG_LEARN_CLAMP_M: float = 0.20
 # average it out. At 0.3 the same residuals give a 74mm spread.
 # Raise it if a leg converges too slowly; lower it if a leg chases noise.
 CHASSIS_LEG_LEARN_GAIN: float = 0.3
+# 1012: the learned leg distances PERSIST across runs: run() saves them here at
+# its end (aborted runs too) and the next run starts from them instead of the
+# config value — unless the config value they were learned against has changed
+# since (the station layout moved: start fresh). The CHASSIS_LEG_LEARN_CLAMP_M
+# window stays centred on the CONFIG value, so runs cannot walk it away.
+# None = in-run only (the old behaviour).
+CHASSIS_LEG_STATE_FILE: "str | None" = (
+    None if RUN_LOG_DIR is None else f"{RUN_LOG_DIR}/chassis_legs.json")
 # Case centering (auto-move): at EVERY station visit the chassis first turns
 # in place so the detected case yaw reads 0 deg (deadband / clamp reuse
 # CHASSIS_ADJUST_MIN/MAX_TURN_DEG), then strafes so the case center sits at
@@ -115,7 +140,7 @@ CHASSIS_CENTER_CASE_Y_M: float = 0.0
 CHASSIS_CENTER_TOL_M: float = 0.05      # |case y - target| accepted without a move
 CHASSIS_CENTER_MAX_MOVES: int = 5       # per-visit correction rounds
 # Detection plausibility gate (auto-move): the stations are only one leg
-# (~CHASSIS_AUTO_STRAFE_DIST_M) apart, so the OTHER station's stack is in the
+# (~BUFFER_STRAFE_DIST_M) apart, so the OTHER station's stack is in the
 # head-camera view and the detector returns the highest-confidence OBB
 # anywhere in frame. A detection whose case-center y is farther than this
 # from the expected ref is rejected as "not found" (observed: the first
@@ -136,7 +161,7 @@ DETECT_MEDIAN_SAMPLES: int = 3
 # is re-detected and a residual over DIVERT_BIN_TOL_M gets ONE more
 # correction. The net move is strafed back after the divert (or before the
 # fallback case place) so the normal target geometry is restored.
-DIVERT_BIN_TARGET_Y_M: float = 0.0
+DIVERT_BIN_TARGET_Y_M: float = -0.0293  # 1001 intrinsics fix (old-K bias kept physical, see geometry.py); was 0.0
 # BEV warp plane for the bin detection (base_link z). This must be the height
 # of the FACE THE LABELS TRACE, not the bin rim: case_detection/labeled_bin_bev
 # traces the bin's inner BOTTOM (class 0) on a canvas warped at top_face_z(1),
@@ -162,7 +187,8 @@ DIVERT_BIN_TARGET_Y_M: float = 0.0
 # that nadir, which is why hand-tuning a fixed x offset could never cancel it
 # at more than one bin position. Re-tune that offset on-robot from this run;
 # it is a placement bias only now.
-DIVERT_BIN_PLANE_Z_M: float = 0.6138
+# 1012 raised table (floor 0.60 -> 0.67): from pick_place's place_config, where it ran on the robot; was 0.6138
+DIVERT_BIN_PLANE_Z_M: float = 0.6838
 # The bin OBB set is 2-class (case_detection/dataset_bin/data.yaml:
 # names: [bin, bin_top]); class 0 is the bin. Unfiltered, find_bin_bev returns
 # whichever box scored highest — which can be the LID (see LID_CLS_ID).
@@ -178,7 +204,10 @@ DIVERT_EXTRA_RIGHT_M: float = 0.1
 # BAT_SRC_2, second -> right slot BAT_SRC_1), then the chassis strafes back
 # right to the source. Both legs are open-loop (no ChassisNav learning).
 #확인
-DIVERT_CASE_STRAFE_LEFT_M: float = 0.5   # tune on site
+# source <-> the TARGET station to the LEFT (the divert case / the first case's
+# seed bin), left there, right back. Was DIVERT_CASE_STRAFE_LEFT_M (renamed
+# 1012). Learned + saved across runs as "divert" in CHASSIS_LEG_STATE_FILE.
+TARGET_STRAFE_DIST_M: float = 0.5   # tune on site
 DIVERT_CASE_LAYERS: int = 1              # BEV warp plane: divert case stack height
 # Chassis command timing compensation (move_chassis, DISTANCE-based legs only;
 # the legacy speed*time legs keep their empirically tuned values untouched).
@@ -193,7 +222,17 @@ CHASSIS_CMD_DEAD_TIME_S: float = 1.0
 # The post-leg stop is STREAMED (zero velocity at ~50 Hz, steering kept) for
 # this long — a single stop command was observed to get lost, letting the
 # chassis coast ~0.7 s past the leg.
-CHASSIS_STOP_STREAM_S: float = 0.3
+# 1014: 0.3 -> 0.1 — the S-ramp already ends at ~0 m/s, so a lost stop has
+# nothing left to coast on; UNVERIFIED: watch the chassis-watch distances.
+CHASSIS_STOP_STREAM_S: float = 0.1
+# Distance legs (move_chassis._drive) ramp the wheel speed up from 0 and back
+# down to 0 instead of stepping it: S-shaped (cosine) ramps at this AVERAGE
+# acceleration (m/s^2 of wheel speed; the peak is pi/2 of it), the drive
+# lengthened by one ramp time so the commanded distance is unchanged. 0.35 m/s
+# legs ramp ~1.2 s each way, 0.1 m/s moves ~0.3 s. 0 = the old stepped drive.
+# 1012, UNVERIFIED on the robot: open-loop distances assume the wheels track
+# the ramp — watch the arrival residuals of the first runs.
+CHASSIS_ACCEL_MS2: float = 0.3
 # Pre-steer before a distance leg: command the leg's steering angles first and
 # poll chassis.steering_angle until within TOL (or TIMEOUT, then drive anyway),
 # so none of the timed drive is spent pivoting the wheels — dexcontrol's own
@@ -207,12 +246,17 @@ CHASSIS_PRESTEER_TIMEOUT_S: float = 5.0
 # works at other layers.
 # These are the STARTING stack heights only: chassis_sequence.run loops over
 # layers and steps its runtime copies (source -1, target +1) after each
-# completed layer, until the source is exhausted. Set these to the physical
-# stack heights at run start (an aborted run logs the values to resume with).
-SRC_LAYERS_REMAINING: int = 3           # source stack height at run start
+# completed layer, until the source is exhausted (an aborted run logs the
+# values to resume with). 1012: SRC counts the CASE+BATTERY LAYERS of the source
+# (the bottom case, whose batteries are the last layer, is moved on its own
+# afterwards) — the count used on the robot (pick_place, chassis_sequence), and
+# the one the BEV model planes and the battery-top gate are consistent with
+# (a layer-k battery top reads top_face_z(k + 1)). It used to be the physical
+# case count (= layers + 1), which ran one layer too few for that input.
+SRC_LAYERS_REMAINING: int = 2           # source case+battery layers at run start (was 3 cases)
 TGT_LAYERS_REMAINING: int = 1          # target stack height at run start
-# FINAL case (run() epilogue): the layer loop moves the top
-# SRC_LAYERS_REMAINING - 1 layers, so ONE case (the bottom one, no batteries)
+# FINAL case (run() epilogue): the layer loop moves the
+# SRC_LAYERS_REMAINING layers, so ONE case (the bottom one, no batteries)
 # is still in the source box. It goes through the SAME per-item cycle as every
 # case above it — normal learned leg RIGHT, target case detection, aligned
 # corner-seat place on the target stack, normal leg back LEFT — just with no
@@ -264,7 +308,14 @@ ARM_VIEW_PARK_JOINTS: tuple[float, ...] = HOME_JOINTS_LEFT
 # at the SAME GRASP_YAW, and stays wide across the achieved-yaw +/-0.24 rad
 # range. Pick reachability (CASE_PICK) is untouched — it stayed <=0.4mm err
 # across the same yaw sweep, confirming pick was never the binding constraint.
-ARM_VIEW_PARK_EE_POS: tuple[float, float, float] | None = (0.99, 0.40, 1.05)
+# 1012: the raised-table TORSO_JOINTS (1.2, 2.70, 0.35) put (0.99, 0.40, 1.05)
+# 62mm short — pick_place fell back to the joint park 6/6 times. At this torso
+# the y=0.40 window is x[0.70,0.90] at z 1.05-1.12, x[0.75,0.85] at 1.17;
+# x 0.80 sits in the middle. z = SAFE_TRANSPORT_Z so _view_park's rise is the
+# only vertical move (at 1.12, ran on the robot in pick_place, it rose to 1.17
+# and came back down). Offline: <=0.3mm from the as-lifted pose for CASE_PICK /
+# BAT_SRC_1 / BAT_SRC_2 at EE yaw 165-195. z 1.17 UNVERIFIED on the robot.
+ARM_VIEW_PARK_EE_POS: tuple[float, float, float] | None = (0.80, 0.40, 1.17)
 # Pre-flight descent reachability check (chassis_sequence): before a pick/place
 # moves at all, the FULL descent column at the target xy — from the current EE
 # height all the way down to the BOTTOM (box floor + suction length), regardless
@@ -273,6 +324,12 @@ ARM_VIEW_PARK_EE_POS: tuple[float, float, float] | None = (0.99, 0.40, 1.05)
 # streamed descent through a near-singular thrash (observed: 126.8N crash).
 DESCENT_CHECK_BOTTOM_EE_Z: float = FLOOR_Z_BASE_M + SUCTION_LENGTH_M  # box floor + suction length
 DESCENT_CHECK_STEP_M: float = 0.02          # z step of the pre-flight sweep
+# PLACES only (1013, the user's call): the column stops this far below the
+# place's expected contact instead of at the box floor. Every chassis_sequence
+# place releases PLACE_RELEASE_ABOVE_M above it and never goes lower; 1013
+# 14:58 a layer-2 slot at (0.720,-0.149) solved 0.7mm at the place height but
+# failed the floor check (10.4mm at 0.820) and blocked the place.
+PLACE_CHECK_BELOW_EXPECTED_M: float = 0.03
 # FIRST-case (seed) REFERENCE center (base_link x, y, z_EE, yaw). Not a blind
 # place target anymore — the seed always places from a bin detection: y is
 # the bin-align target, x the non-seed auto-adjust reference, z_EE the seed
@@ -285,7 +342,8 @@ DESCENT_CHECK_STEP_M: float = 0.02          # z step of the pre-flight sweep
 # — RE-VERIFY the seat contact on-robot after any FLOOR_Z_BASE_M change; the
 # formula tracks the model, descend-to-contact still refines the real one.
 TARGET_DEFAULT_CASE_CENTER: tuple[float, float, float, float] = (
-    0.9, 0.0, FLOOR_Z_BASE_M + TGT_LAYERS_REMAINING * LAYER_PITCH_M + SUCTION_LENGTH_M, 0.0,
+    # x was 0.9 — shifted with the 1001 intrinsics fix (see SOURCE_CASE_CENTER)
+    0.88, 0.0, FLOOR_Z_BASE_M + TGT_LAYERS_REMAINING * LAYER_PITCH_M + SUCTION_LENGTH_M, 0.0,
 )
 # Closed-loop seed place: the place center comes from a bin detection AFTER the
 # align strafe, plus this bias — the bbox-center projection reads the bin ~47mm
@@ -301,7 +359,7 @@ TARGET_DEFAULT_CASE_CENTER: tuple[float, float, float, float] = (
 # inserted ahead of them and the numbering shifted.)
 # 0914: x -0.12 -> -0.09, i.e. the case lands 30mm FURTHER FORWARD (operator
 # call, on-robot). UNVERIFIED at this value.
-SEED_BIN_CENTER_OFFSET: tuple[float, float] = (-0.03, 0.0)
+SEED_BIN_CENTER_OFFSET: tuple[float, float] = (-0.0115, 0.01)  # 1001 intrinsics fix (old-K bias kept physical, see geometry.py); was (-0.03, 0.0)
 # UNUSED since 0914: the bin place (menu 4, one case -> bin) corner-seats like
 # every other case place, so it aims at SEED_BIN_CENTER_OFFSET + the corner bias
 # and the walls finish the job. Kept for the measurements below, which is what a
@@ -385,7 +443,9 @@ PLACE_YAW_TRIM_RAD: float = 0.01 #낮출수록 CW
 # L4 misseat +11.5 — "a bit left" each layer); this measures that bias
 # directly instead of guessing trims. Costs one sync view-park + detection
 # per case place (the park loses its overlap with the return strafe).
-PLACE_VERIFY_DETECT: bool = True
+# 1013: OFF (user) — log-only since the 1012 vision-only place dropped the
+# trims; the return leg gets its parallel park back (~2.2 s per case place).
+PLACE_VERIFY_DETECT: bool = False
 # Misseat contact recovery (suction.place): on a rim-landing, keep the part
 # held, lift PLACE_RECOVER_LIFT_M above the failed contact, re-orient the
 # wrist yaw by the next pattern step (offsets from the commanded place yaw),
@@ -437,3 +497,70 @@ PLACE_RECOVER_YAW_MAX_RAD: float = 0.070    # |cumulative yaw offset| cap (~4 de
 PLACE_RECOVER_BLIND_XY_M: tuple[tuple[float, float], ...] = (
     (0.01, 0.0), (0.02, 0.0), (-0.01, 0.0), (-0.02, 0.0),
     (0.01, -0.01), (0.01, +0.01))
+
+
+# ---------------------------------------------------------------------------
+# 1012: case height from the BATTERY TOPS (ported from pick_place --obb-depth,
+# robot-checked there on same-spot 3->2 and 2->1 layer case pick/place)
+# ---------------------------------------------------------------------------
+# The case is transparent: the depth of its face read anywhere in a ~15mm range
+# frame to frame (a battery's top ~14mm proud of the face, the far wall's inner
+# face, nothing at all), and a plane that high pulls the BEV detection toward
+# the robot (~0.5mm of x per mm of plane). The batteries are opaque and read
+# 0.711-0.713 in every saved frame. So: inside the detected case box, only the
+# inner OBB_DEPTH_INNER_FRAC (the battery slots) is read (>= OBB_DEPTH_MIN_PX
+# valid depth pixels), its pixels go to base z, and the battery top is their
+# OBB_DEPTH_PCT percentile minus BATTERY_TOP_PCT_BIAS_M. (1012: was the highest
+# cluster holding >= 15% of the pixels — a lone battery, half the slots empty,
+# reads a sloped top that straddled that bar: 0.6918-0.7053 over 3 frames, one
+# miss. p90 over the 37 saved frames: 1 battery 3.4mm spread vs 13.5, 2
+# batteries 6.8 vs 13; it reads 2.9 +-1.2mm above the cup contact, hence the
+# bias, which keeps the constants below calibrated as they were.) The batteries seen are always the LOWER case's (an empty case
+# is picked off a battery case; a case is placed onto one), so
+#   BEV plane (xy) = battery top - BATTERY_TOP_ABOVE_FACE_M  (+1 LAYER_PITCH_M at
+#                    the source: the empty case nested on them)
+#   expected z     = battery top + SUCTION_LENGTH_M  (the empty case rests ON the
+#                    batteries: place contact == pick contact within 2mm)
+# A battery top outside +-BATTERY_TOP_GATE_M of top_face_z(level + 1) (where
+# every frame read it; level = the battery case's layer: the source count, or
+# the target count - 1 because the first layer's case goes to the seed bin while
+# the counter steps) means no battery was seen (bottom case, empty slots) ->
+# no plane, the operator is handed the keyboard. The re-detect on the measured
+# plane may only MOVE the same case, by tens of mm: a jump past
+# OBB_DEPTH_MAX_SHIFT_M is the detector picking a different box.
+OBB_DEPTH_MIN_PX: int = 300
+OBB_DEPTH_PCT: float = 90.0
+BATTERY_TOP_PCT_BIAS_M: float = 0.003       # p90 - cup contact: 2.9 +-1.2mm (11 picks)
+OBB_DEPTH_INNER_FRAC: float = 0.7
+OBB_DEPTH_MAX_SHIFT_M: float = 0.08
+BATTERY_TOP_ABOVE_FACE_M: float = 0.016     # 4 target frames: 15.6-17.1mm
+BATTERY_TOP_GATE_M: float = 0.020           # 7 frames + 6 runs: within +-5mm; 1013: 10->20 (a +11.0mm read tripped it)
+# Every battery-top read is saved (frame, joints, box, result) under
+# RUN_LOG_DIR/obb_frames/<run stamp>/ for offline replay. False = off.
+OBB_DEPTH_SAVE_FRAMES: bool = True
+# 1015, LOG ONLY (changes no motion): on every arrival at an orange bin (target,
+# seed / divert bin) save the right wrist photo + head RGB + depth + joints under
+# RUN_LOG_DIR/wrist_watch/<run stamp>/, so bin_pose/analyze_wrist_watch.py can
+# score the wrist-photo bin tracking (no-view-park study) against the head depth
+# on real runs. Needs the right arm at home (= its wrist-camera view pose).
+WRIST_WATCH_SAVE_FRAMES: bool = True
+
+# Case / battery places go STRAIGHT down onto the detection (no corner aim bias,
+# no lateral drive, no trims, no misseat recovery): per-tick from the hover at
+# the corner seat's vertical profile, stop at the first contact force. With this
+# set, the descent instead stops this far ABOVE the expected z and releases
+# there with no prelift (a contact before it = "early_contact", held for the
+# operator). None = the force-stop place. NOTE place contacts ran 8-11mm BELOW
+# the battery-top expected z in pick_place, so 0.005 releases ~13-16mm up.
+PLACE_RELEASE_ABOVE_M: "float | None" = 0.02
+PLACE_RELEASE_SETTLE_S: float = 0.0         # hold at the release height first
+
+# Manual-mode (not --auto) chassis window: the detected case centre (base x, y)
+# must land inside it before a pick / place; outside, the chassis drives the
+# case to the window CENTRE (both axes, one diagonal move), re-detects, and
+# repeats up to WINDOW_MAX_MOVES times before handing the operator the keyboard.
+# (centre, half-width) in m; None = no window on that axis. --auto keeps its own
+# centering (_center_case).
+WINDOW_X_M: "tuple[float, float] | None" = (0.72, 0.05)
+WINDOW_Y_M: "tuple[float, float] | None" = (0.0, 0.05)
+WINDOW_MAX_MOVES: int = 4

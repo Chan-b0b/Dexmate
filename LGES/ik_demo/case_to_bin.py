@@ -67,42 +67,42 @@ def _pick_source_case(bot, mover: SuctionMover, layers: int):
     """Detect + pick the top case of the box in front. Returns the pick's
     source center (x, y, z_EE, yaw_rad) once the case is on the cup, else None.
 
-    The centering/detection/pre-check/prompt loop is chassis_sequence.run_item's
-    source flow: the chassis first turns and drives onto the detected case
-    (_center_case), and a miss or an out-of-reach pose hands the operator the
+    The window/detection/pre-check/prompt loop is chassis_sequence.run_item's
+    source flow: the chassis first drives the detected case into the WINDOW
+    (_into_window, one diagonal, no turn), and a miss, a case still outside
+    after WINDOW_MAX_MOVES or an out-of-reach pose hands the operator the
     keyboard (`f/b/l/r`, `d` re-detects because the base frame moved, `q` gives
     up) rather than reaching blind."""
-    from .chassis_sequence import (_arms_home, _center_case, _center_from_det,
-                                   _manual_strafe, _refine_det,
-                                   descent_reachable)  # noqa: PLC0415
-    # Centre the chassis on the case FIRST, exactly as run_item's source pick
-    # does (turn to the case's yaw, then drive until its GRAB point sits on the
-    # centre line at the taught x). Without it the case is picked wherever the
-    # operator happened to park, and the straight-up lift out of the box walls
-    # tracks far worse from a far-forward / off-centre shoulder pose: 0914
-    # measured 38.6mm of -x cup drift lifting from x=1.00,y=+0.20 against
-    # 28.8mm from run_item's centred x=0.86,y=0.00 — all of it toward the
-    # robot, i.e. into the robot-side box wall. Strict start deadbands, since
-    # this follows a manual park and nothing corrects it afterwards.
-    y_ref = (cfg.CHASSIS_CENTER_CASE_Y_M
-             - resolve_poses((0.0, 0.0, 0.0, 0.0))["CASE_PICK"][1])
+    from .chassis_sequence import (_arms_home, _center_from_det, _into_window,
+                                   _manual_strafe, _refine_det, descent_reachable,
+                                   detect)  # noqa: PLC0415
+    # Put the case in the WINDOW FIRST, exactly as run_item's source pick does
+    # (1012: the window replaced _center_case there). Without it the case is
+    # picked wherever the operator happened to park, and the straight-up lift
+    # out of the box walls tracks far worse from a far-forward / off-centre
+    # shoulder pose: 0914 measured 38.6mm of -x cup drift lifting from
+    # x=1.00,y=+0.20 against 28.8mm from run_item's centred x=0.86,y=0.00 — all
+    # of it toward the robot, i.e. into the robot-side box wall.
+    win_moves = 0
     while True:
-        det = _center_case(bot, layers, LABEL, "source", None, y_ref,
-                           tol_m=cfg.CHASSIS_START_CENTER_TOL_M,
-                           min_turn_deg=cfg.CHASSIS_START_MIN_TURN_DEG,
-                           max_moves=cfg.CHASSIS_START_CENTER_MAX_MOVES,
-                           x_ref=cfg.SOURCE_CASE_CENTER[0])
+        det = detect(bot, layers)
         if det is not None and det.found:
             det = _refine_det(bot, layers, det)     # median-of-N for the pose
-            logger.info("[{}] source case @ base xy=({:.3f},{:+.3f}) yaw={:.1f}deg "
-                        "conf={:.2f}", LABEL, det.base_xy[0], det.base_xy[1],
-                        det.base_yaw_deg, det.conf)
-            center = _center_from_det(det)
-            pick_pose = resolve_poses(center)["CASE_PICK"]
-            if descent_reachable(mover, pick_pose):
-                break
-            logger.warning("[{}] pick pose out of reach — adjust the chassis (f/b/l/r), "
-                           "`d` to re-detect + retry, `q` to give up", LABEL)
+            win = _into_window(bot, LABEL, det.base_xy, win_moves)
+            if win == "moved":
+                win_moves += 1
+                continue
+            if win == "ok":
+                logger.info("[{}] source case @ base xy=({:.3f},{:+.3f}) yaw={:.1f}deg "
+                            "conf={:.2f}", LABEL, det.base_xy[0], det.base_xy[1],
+                            det.base_yaw_deg, det.conf)
+                center = _center_from_det(det)
+                pick_pose = resolve_poses(center)["CASE_PICK"]
+                if descent_reachable(mover, pick_pose):
+                    break
+                logger.warning("[{}] pick pose out of reach — adjust the chassis (f/b/l/r), "
+                               "`d` to re-detect + retry, `q` to give up", LABEL)
+            # "stuck": _into_window already logged the case still outside
         else:
             logger.warning("[{}] source case NOT detected — adjust the chassis (f/b/l/r), "
                            "`d` to re-detect + retry, `q` to give up", LABEL)
@@ -110,6 +110,7 @@ def _pick_source_case(bot, mover: SuctionMover, layers: int):
             logger.error("[{}] giving up at the source — arms home", LABEL)
             _arms_home(bot, mover)
             return None
+        win_moves = 0
     # z is NOT taken from the detection: descend-to-contact finds the real grab
     # height, the detected plane only says where to expect it.
     exp_z = det.top_face_z + cfg.SUCTION_LENGTH_M

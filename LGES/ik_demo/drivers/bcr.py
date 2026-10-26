@@ -107,6 +107,11 @@ class BackgroundScanner:
         self._lock = threading.Lock()
         self._stop = threading.Event()
         self._thread: threading.Thread | None = None
+        self._unlimited = False   # SPACE pause (space_pause): ignore BCR_MAX_READS
+
+    def set_unlimited(self, on: bool) -> None:
+        """Lift (or restore) the BCR_MAX_READS cap — keep reading while paused."""
+        self._unlimited = bool(on)
 
     def start(self) -> "BackgroundScanner":
         self._reads = []
@@ -117,7 +122,21 @@ class BackgroundScanner:
         return self
 
     def _run(self) -> None:
+        capped = False
         while not self._stop.is_set():
+            with self._lock:
+                n = len(self._reads)
+            # Enough reads in hand — stop triggering rather than keep
+            # hammering the reader (idle, not exit: a SPACE pause lifts the
+            # cap). result() still applies the agreement check over what we
+            # collected.
+            if n >= cfg.BCR_MAX_READS and not self._unlimited:
+                if not capped:
+                    logger.info("[BCR] reached {} reads — stopping scan", n)
+                    capped = True
+                self._stop.wait(0.05)
+                continue
+            capped = False
             _touch_scan_lock()  # keep the lock fresh so the image feed stays backed off
             code = scan_once(self._host, self._port)
             if code is not None:
@@ -125,12 +144,8 @@ class BackgroundScanner:
                     self._reads.append(code)
                     n = len(self._reads)
                 logger.info("[BCR] read: {!r}  (total reads: {})", code, n)
-                # Enough reads in hand — stop triggering rather than keep
-                # hammering the reader. result() still applies the agreement
-                # check over what we collected.
-                if n >= cfg.BCR_MAX_READS:
-                    logger.info("[BCR] reached {} reads — stopping scan", n)
-                    break
+            elif self._unlimited:
+                logger.info("[BCR] no read")
             # Small breather so we don't hammer the reader (and so stop() is
             # responsive between triggers).
             self._stop.wait(0.05)

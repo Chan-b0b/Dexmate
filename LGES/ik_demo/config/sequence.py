@@ -27,7 +27,7 @@ LAYER_PITCH_M: float = 0.0138
 # Empty target-box floor height (base_link z, no layers). Mirrors case_detection's
 # measured FLOOR_Z_BASE_M (case_detection/config.py) — that copy is the source of
 # truth (measured by measure_floor_z.py); keep this one in sync with it by hand.
-FLOOR_Z_BASE_M: float = 0.60
+FLOOR_Z_BASE_M: float = 0.67
 
 # A measured seat deviating from the predicted z by more than this fraction of the
 # pitch is logged as a probable misalignment.

@@ -49,6 +49,7 @@ class BoxPickResult:
                                    # gripper dropped off the RS485 bus)
     yaw_used: "float | None" = None  # EE yaw flown (rad) — the finger-closing direction
     box: "BoxPose | None" = None     # the box the attempt was planned for (run_box_pick fills it)
+    carry_extra_m: float = 0.0       # "carry": how far above the hover the box ended (set-down adds it)
 
 
 class GripperMover(ArmMover):
@@ -174,7 +175,8 @@ class GripperMover(ArmMover):
 
         ``dry``: plan and log only, no motion (works headless). ``mode`` says
         what happens after the fingers close on the wall:
-          "carry"     keep holding and lift to the hover (the caller carries)
+          "carry"     keep holding, lift to the hover and on straight up as
+                      high as the arm reaches (_carry_top; the caller carries)
           "lift_test" raise the box BOX_LIFT_TEST_M, hold BOX_GRIP_HOLD_S, set
                       it back down at the grasp height (wrench re-tared with the
                       box's weight, so an early touchdown stops the lowering),
@@ -302,7 +304,8 @@ class GripperMover(ArmMover):
                         (z_grip - z_grasp) * 1000.0,
                         (float(cfg.BOX_GRASP_DEPTH_M) + (z_grasp - z_grip)) * 1000.0,
                         float(cfg.BOX_GRASP_DEPTH_M) * 1000.0)
-        closed = self.gripper.close()           # blocks until the Robotiq reports done
+        # the box's own (softer) grip force, not ROBOTIQ_FORCE — see BOX_GRIP_FORCE
+        closed = self.gripper.goto(cfg.ROBOTIQ_CLOSE_POS, force=int(cfg.BOX_GRIP_FORCE))
         grasped = self.gripper.is_object_grasped()
         logger.info("[gripper] close -> {}", "GRASPED" if grasped else "no object")
         if not closed and not grasped:
@@ -346,7 +349,40 @@ class GripperMover(ArmMover):
         if self.move_ee_vertical(z_hover, rpy) is None:
             logger.error("[gripper] lift stalled below the hover")
             return BoxPickResult(grasped, "lift_failed", rpy[2])
-        return BoxPickResult(grasped, "grasped" if grasped else "no_object", rpy[2])
+        extra = 0.0
+        if grasped and mode == "carry":
+            # 1012: carry the box as HIGH as the arm reaches from here, wrist
+            # unchanged — the reach top is searched at this xy each pick (it
+            # moves a lot with the box position: +7..+27cm over the hover
+            # within 4cm of BOX_CENTER_REF_XY, offline)
+            z_top = self._carry_top(x, y, rpy, z_hover, z_grip)
+            if z_top > z_hover + 1e-3:
+                logger.info("[gripper] carry lift: {:.0f}mm more, to EE z={:.3f} (reach top "
+                            "minus {:.0f}mm)", (z_top - z_hover) * 1000.0, z_top,
+                            float(cfg.BOX_CARRY_TOP_MARGIN_M) * 1000.0)
+                if self.move_ee_vertical(z_top, rpy) is None:
+                    logger.error("[gripper] carry lift stalled — holding the box where it stopped")
+            extra = max(0.0, float(self.fk(self._q_cmd)[0][2]) - z_hover)
+        return BoxPickResult(grasped, "grasped" if grasped else "no_object", rpy[2],
+                             carry_extra_m=extra)
+
+    def _carry_top(self, x: float, y: float, rpy, z_hover: float, z_grip: float) -> float:
+        """Highest EE z, at most BOX_CARRY_MAX_LIFT_M over ``z_grip``, that a
+        straight-up climb from the hover reaches at (x, y) holding ``rpy`` —
+        stepped up 1cm at a time from the commanded joints (the same warm chain
+        the lift stream follows), minus BOX_CARRY_TOP_MARGIN_M. ``z_hover`` when
+        nothing above it solves."""
+        z_cap = z_grip + float(cfg.BOX_CARRY_MAX_LIFT_M)
+        q = self._q_cmd
+        z = z_hover
+        while z + 0.01 <= z_cap + 1e-9:
+            sol = self.solve_pose((x, y, z + 0.01), rpy, seed=q, min_motion=True)
+            if not (sol.pos_err_m <= cfg.REACH_TOL_M and sol.in_limits and not sol.in_collision):
+                break
+            q, z = sol.q, z + 0.01
+        if z >= z_cap - 1e-9:
+            return z_cap                  # stopped by the cap, not the reach: no margin needed
+        return max(z_hover, z - float(cfg.BOX_CARRY_TOP_MARGIN_M))
 
     def _wall_outward(self, box_yaw: float) -> np.ndarray:
         """Unit base-frame xy pointing OUT of the box across the grabbed wall.

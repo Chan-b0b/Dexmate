@@ -16,6 +16,7 @@ projected onto base-vertical via the EE rotation — no external read_force.
 
 from __future__ import annotations
 
+import faulthandler
 import threading
 import time
 from collections import deque
@@ -23,17 +24,20 @@ from dataclasses import dataclass
 
 import numpy as np
 from loguru import logger
+from scipy.spatial.transform import Rotation
 
 try:
     from . import config as cfg
     from .arm import ArmMover, TickPacer
     from .drivers import suction_io
     from .drivers.bcr import BackgroundScanner
+    from .space_pause import SpacePause
 except ImportError:  # allow `python suction.py` from inside ik_demo/
     import config as cfg
     from arm import ArmMover, TickPacer
     from drivers import suction_io
     from drivers.bcr import BackgroundScanner
+    from space_pause import SpacePause
 
 
 def _axis_steps(step: float, max_v: float) -> list[float]:
@@ -62,6 +66,17 @@ class PickResult:
     auto_release: bool = False        # failed place that should release WITHOUT the operator gate
 
 
+_HANG_DUMP = []
+
+
+def _hang_dump_file():
+    """Append-mode file for faulthandler stack dumps — kept open for the whole
+    session (faulthandler holds only the fd and writes from its own C thread)."""
+    if not _HANG_DUMP:
+        _HANG_DUMP.append(open(f"{cfg.RUN_LOG_DIR}/hang_dump.txt", "a"))
+    return _HANG_DUMP[0]
+
+
 class SuctionMover(ArmMover):
     """Suction pick/place on the suction arm (cfg.ARM_SIDE)."""
 
@@ -80,6 +95,10 @@ class SuctionMover(ArmMover):
         self._ref_dt = 1.0 / float(cfg.CONTROL_HZ)
         self._ref_t: "float | None" = None
         self._ref_frozen = False
+        # Called in a thread while a to_clear_only lift runs its per-tick
+        # vertical (joined before the lift returns) — the caller's work for
+        # the chassis leg that follows (1013: wheel pre-steer, task 3)
+        self.clear_lift_hook = None
 
     def __enter__(self) -> "SuctionMover":
         return self
@@ -398,11 +417,12 @@ class SuctionMover(ArmMover):
         branch right at the reach boundary — observed 4 mm under LIFT_CLEAR at
         the place column) hands off to _best_effort_ascent.
 
-        ``to_clear_only``: return right after the wall-clear vertical and skip
-        the joint-space ascent — the caller overlaps the remaining rise with a
-        chassis leg. Used for BOTH chassis legs: the empty-cup place return,
-        and (user-verified 0806: a held part's bottom clears the box walls at
-        LIFT_CLEAR height) the loaded pick->target leg."""
+        ``to_clear_only``: return right after the per-tick vertical (at
+        LIFT_VERTICAL_TO_Z since 1013) and skip both planned moves — the caller
+        overlaps the remaining rise with a chassis leg. Used for BOTH chassis
+        legs: the empty-cup place return, and the loaded pick->target leg
+        (user-verified 0806 at LIFT_CLEAR height; 1013 starts the leg 120mm
+        lower, at LIFT_VERTICAL_TO_Z — not yet verified on the robot)."""
         pos, _ = self.current_ee_pose()
         z_clear = min(max(float(pos[2]), cfg.LIFT_CLEAR_EE_Z), cfg.SAFE_TRANSPORT_Z)
         # ``creep_out_m``: leave the slot the way the descent entered it, creeping
@@ -411,10 +431,29 @@ class SuctionMover(ArmMover):
         # part is actually boxed in on the way out. Not needed after a PLACE (the
         # cup is empty) nor after a battery pick; the case pick, which lifts out
         # of the source bin, opts in.
-        q = self.move_ee_vertical(z_clear, rpy, creep_out_m=creep_out_m)
+        # 1012 (pick_place): the per-tick vertical only up to LIFT_VERTICAL_TO_Z
+        # (a held case clears the bin rim there), the rest of the wall-clear
+        # rise one planned move — the per-tick stream lags at cruise (see config)
+        z_vert = min(z_clear, max(float(pos[2]), float(cfg.LIFT_VERTICAL_TO_Z)))
+        hook = self.clear_lift_hook if to_clear_only else None
+        hook_t = threading.Thread(target=hook, daemon=True) if hook is not None else None
+        if hook_t is not None:
+            hook_t.start()
+        q = self.move_ee_vertical(z_vert, rpy, creep_out_m=creep_out_m)
+        if hook_t is not None:
+            hook_t.join()
         if q is None:
             self._best_effort_ascent(rpy)
             return
+        if to_clear_only:
+            # 1013: the chassis leg starts at LIFT_VERTICAL_TO_Z (rim-clear);
+            # the parallel _view_park flies the planned rise to LIFT_CLEAR_EE_Z
+            return
+        if z_vert < z_clear - 1e-3:
+            x, y = self.fk(q)[0][:2]
+            if self.move_ee([float(x), float(y), z_clear], rpy, quiet=True) is None:
+                self._best_effort_ascent(rpy)
+                return
         if to_clear_only or z_clear >= cfg.SAFE_TRANSPORT_Z:
             return
         x, y = self.fk(q)[0][:2]
@@ -603,8 +642,13 @@ class SuctionMover(ArmMover):
              force_limit: "float | None" = None,
              retry_offset_m: "float | None" = None,
              lift_creep_out_m: float = 0.0,
-             retry_dir: "tuple[float, float] | None" = None) -> PickResult:
-        """Approach from transport to the hover as one blended stream (suction
+             retry_dir: "tuple[float, float] | None" = None,
+             planned: bool = False) -> PickResult:
+        """``planned`` (chassis_sequence case/battery picks, 1012): see
+        _pick_planned — the approach is planned all the way to the creep line.
+        The default below is unchanged for every other caller.
+
+        Approach from transport to the hover as one blended stream (suction
         OFF) and settle there, then descend per-tick — cruise, the long
         DESCENT_DECEL_BAND_M slowdown, creep — through the creep line WITHOUT
         stopping; suction ON (async) at the creep line and creep to contact +
@@ -618,7 +662,12 @@ class SuctionMover(ArmMover):
         contact z (layer stacking: the orchestrator passes the measured z).
         ``retry_dir``: base-frame (dx, dy) direction for the seal-retry nudge —
         see _seal_with_retry."""
+        if planned:
+            return self._pick_planned(pose, expected_z, lift_to_clear, creep_gap,
+                                      contact_n, force_limit, retry_offset_m,
+                                      lift_creep_out_m, retry_dir)
         ee_pos, rpy = self.taught_target(pose)
+        self._pick_aim_xy = (float(ee_pos[0]), float(ee_pos[1]))
         ez = float(ee_pos[2]) if expected_z is None else float(expected_z)
         logger.info("[suction] pick: approach@transport -> hover -> per-tick "
                     "descent -> suction on at creep line -> creep-seal")
@@ -651,6 +700,39 @@ class SuctionMover(ArmMover):
                                    force_limit=force_limit,
                                    retry_offset_m=retry_offset_m,
                                    start_elapsed=cfg.DESCENT_RAMP_S)
+
+    def _pick_planned(self, pose, expected_z, lift_to_clear, creep_gap, contact_n,
+                      force_limit, retry_offset_m, lift_creep_out_m,
+                      retry_dir) -> PickResult:
+        """pick(planned=True), from pick_place (1012, where it sealed within
+        0.2-0.6mm of the aim on every run): the fast descent PLANNED instead of
+        streamed — transport -> hover -> creep line is one ruckig stream that
+        ends at rest (_approach_and_hover to_creep_z) and _settle_at confirms
+        the arrival before the creep starts. The per-tick fast descent led the
+        commanded path by 30-45mm / 7 deg at the creep handoff, and _start_q
+        then restarted the creep from the LIVE (leading) config, so the cup
+        sealed ~28mm forward of the taught pose (0.707 -> 0.7356). Long creep
+        gap: expected_z is a guess, the planned leg is not force-stopped by
+        contact the way the per-tick descent is (only the hard limit guards it)."""
+        ee_pos, rpy = self.taught_target(pose)
+        self._pick_aim_xy = (float(ee_pos[0]), float(ee_pos[1]))
+        ez = float(ee_pos[2]) if expected_z is None else float(expected_z)
+        logger.info("[suction] pick: approach@transport -> hover -> creep line planned "
+                    "as one stream -> settle -> suction on -> creep-seal")
+        if suction_io.is_suction_commanded_on():
+            suction_io.suction_off()
+        hard = float(cfg.FORCE_HARD_LIMIT_N if force_limit is None else force_limit)
+        q = self._approach_and_hover(
+            ee_pos, rpy, ez, to_creep_z=True, tick_cb=self._approach_force_guard(hard),
+            creep_gap=float(cfg.DESCENT_CREEP_GAP_M if creep_gap is None else creep_gap))
+        if q is None:
+            return PickResult(False, "unreachable")
+        suction_io.suction_on_async()
+        return self._seal_and_lift(rpy, lift_to_clear,
+                                   lift_creep_out_m=lift_creep_out_m,
+                                   retry_dir=retry_dir, contact_n=contact_n,
+                                   force_limit=force_limit,
+                                   retry_offset_m=retry_offset_m)
 
     def _seal_with_retry(self, rpy, retry_dir=None,
                          contact_n: "float | None" = None,
@@ -726,6 +808,8 @@ class SuctionMover(ArmMover):
                                     retry_offset_m=retry_offset_m,
                                     start_elapsed=start_elapsed)
         if res.success:
+            if getattr(self, "_pick_aim_xy", None) is not None:
+                self._tip_snapshot("pick seal", self._pick_aim_xy, rpy)
             # Relieve the creep-contact press before lifting (mirrors place()'s
             # RELEASE_PRELIFT_M) — otherwise the lift's first motion has to break
             # the residual seat press while already carrying the part.
@@ -816,8 +900,23 @@ class SuctionMover(ArmMover):
               corner_touch_first: bool = False,
               approach_z: "float | None" = None,
               lift_z: "float | None" = None,
-              creep_gap: "float | None" = None) -> PickResult:
+              creep_gap: "float | None" = None,
+              straight: bool = False,
+              hover_m: "float | None" = None,
+              release_above_m: "float | None" = None,
+              descent_speed: "float | None" = None,
+              lift_speed: "float | None" = None) -> PickResult:
         """Hover above the seat, descend to contact within buffer, release.
+        ``straight`` (with corner_seat=None; chassis_sequence case / battery /
+        bin places, 1012 from pick_place): end the planned stream at the hover
+        (``hover_m`` overrides HOVER_HEIGHT_M) and go straight down per tick
+        onto the aim, no lateral drive (_descend_straight). ``release_above_m``
+        (straight only): stop that far above the expected z and release there,
+        no force stop, no prelift; a contact before it is held for the operator.
+        ``descent_speed`` (straight only) overrides the CORNER_DESCENT_SPEED_M_S
+        cruise; ``lift_speed`` (with ``lift_z``) the LIFT_SPEED_M_S of the empty
+        cup's lift after the release (task 1's lid, 1013).
+        Without ``straight`` the plain place is unchanged.
         On a failed descent the part is HELD (suction on) until the operator
         confirms the release — unreachable/max_descent can end mid-air, where
         an automatic blow-off drops the battery from height.
@@ -901,13 +1000,13 @@ class SuctionMover(ArmMover):
         #             blends fast->creep over DESCENT_DECEL_BAND_M and guards
         #             force every tick — the same profile the case has used
         #             since 0905 and the case PICK since 0909.
-        to_creep = corner_seat is None
+        to_creep = corner_seat is None and not straight
         q_hover = self._approach_and_hover(
             ee_pos, rpy, ez, to_creep_z=to_creep,
             tick_cb=(self._approach_force_guard(cfg.FORCE_HARD_LIMIT_PLACE_N)
                      if to_creep else None),
             approach_z=approach_z, creep_gap=creep_gap,
-            hover_m=(cfg.BATTERY_PLACE_HOVER_M if corner_seat == "battery" else None))
+            hover_m=(cfg.BATTERY_PLACE_HOVER_M if corner_seat == "battery" else hover_m))
         if q_hover is None:
             return PickResult(False, "unreachable")
         if corner_seat:
@@ -936,6 +1035,11 @@ class SuctionMover(ArmMover):
                                                 if backoff_m is None else backoff_m),
                                             misseat_tol_m=misseat_tol_m,
                                             tick_cb=tick_cb)
+        elif straight:
+            res = self._descend_straight(
+                ez, rpy, q_hover, tick_cb=tick_cb,
+                stop_z=None if release_above_m is None else ez + float(release_above_m),
+                fast=descent_speed)
         else:
             # loaded-cup tare happens IN-STREAM during the descent
             res = self._descend_to_contact(ez, rpy, cfg.FORCE_HARD_LIMIT_PLACE_N,
@@ -959,7 +1063,7 @@ class SuctionMover(ArmMover):
             # recovery re-oriented the wrist — release/prelift/lift at THAT yaw,
             # not the original one (rotating back while pressed would drag the part)
             rpy = (rpy[0], rpy[1], res.final_yaw_rad)
-        if res.reason != "contact":
+        if res.reason not in ("contact", "at_height"):
             if res.auto_release:
                 logger.warning("[suction] place descent failed ({}) — auto "
                                "blow-off release, NO operator gate (run continues)",
@@ -977,20 +1081,21 @@ class SuctionMover(ArmMover):
             # Set it DOWN to a light touch first and release with NO prelift.
             # (_creep_to_force can't do this: a held part reads as sealed.)
             self._set_down(rpy)
-        else:
+        elif res.reason != "at_height":    # at_height: release right where it stopped
             pos, _ = self.current_ee_pose()
             if cfg.RELEASE_PRELIFT_M > 0.0:
                 self.move_ee_vertical(pos[2] + cfg.RELEASE_PRELIFT_M, rpy)
+        self._tip_snapshot("place release", ee_pos, rpy)
         suction_io.release()
         if lift_z is not None:
             # low column: straight back up to where the approach came in
-            self.move_ee_vertical(float(lift_z), rpy)
+            self.move_ee_vertical(float(lift_z), rpy, fast=lift_speed)
         else:
             # lift_to_clear: stop at the wall-clear height (cup EMPTY here) — the
             # caller starts the return chassis leg immediately and folds the
             # remaining rise into the parallel view park (both target z=1.10)
             self._lift_to_transport(rpy, to_clear_only=lift_to_clear)
-        res.success = res.reason in ("contact",)
+        res.success = res.reason in ("contact", "at_height")
         return res
 
     def _column_reachable(self, x: float, y: float, rpy, z_top: float, z_bottom: float) -> bool:
@@ -1772,16 +1877,19 @@ class SuctionMover(ArmMover):
 
         creep_z = ez + cfg.DESCENT_CREEP_GAP_M
         scanner = BackgroundScanner().start()
+        pause = SpacePause(scanner).start()   # SPACE: hold the arm, BCR keeps reading
         code = None
         try:
-            last_q, z, reason = self._descend_open(creep_z, rpy, q_hover, cfg.FORCE_HARD_LIMIT_N)
+            last_q, z, reason = self._descend_open(creep_z, rpy, q_hover, cfg.FORCE_HARD_LIMIT_N,
+                                                   pause=pause)
             if reason != "at_floor":
                 return PickResult(False, reason, z)
             code = scanner.result()
             if code is None:
                 logger.info("[suction] no read by creep_z — sweeping")
-                code = self._sweep_scan(ee_pos, rpy, scanner, case_center)
+                code = self._sweep_scan(ee_pos, rpy, scanner, case_center, pause=pause)
         finally:
+            pause.stop()
             scanner.stop()
         logger.info("[suction] barcode: {!r}", code)
 
@@ -1799,13 +1907,15 @@ class SuctionMover(ArmMover):
         return res
 
     def _descend_open(self, z_floor, rpy, start_q, force_limit,
-                      halt_at_floor: bool = True):
+                      halt_at_floor: bool = True, pause=None):
         """Descend (suction unchanged) straight down to z_floor — no soft-contact
         stop (the goal is the floor). Ramp speed in and decelerate to creep speed
         into z_floor (so the halt / creep-seal handoff isn't a velocity step);
         abort on force>force_limit. The rolling wrench reference warms up in
         stream (cfg.WRENCH_REF_WARMUP_S, ~0.1s) — no tare, no stationary hover
         pause; the force check is off only for that warm-up.
+        ``pause`` (space_pause.SpacePause, pick_gated only): on SPACE the arm
+        halts in place until SPACE again, then ramps back in from rest.
         Returns (last_q, z, reason) with reason in
         {at_floor, force_limit, unreachable}."""
         dt = 1.0 / float(cfg.CONTROL_HZ)
@@ -1822,6 +1932,12 @@ class SuctionMover(ArmMover):
 
         pace = TickPacer(dt)
         while z > z_floor + 1e-4:
+            if pause is not None and pause.paused():
+                _halt(prev_q)
+                pause.hold()
+                elapsed = 0.0                  # ramp back in from rest
+                self.freeze_reference(False)   # re-warm: the arm may have been touched
+                t_tick = time.perf_counter()
             speed = self._descent_speed(z, z_floor, elapsed)
             z_next = max(z_floor, z - speed * dt)
             sol, p = self.solve_step(prev_q, (x, y, z), (x, y, z_next), rpy, dt)
@@ -1936,6 +2052,134 @@ class SuctionMover(ArmMover):
             # (the post-seal dwell visible in every collected take).
             threading.Thread(target=vac.stop, daemon=True).start()
 
+    def _tip_snapshot(self, tag: str, aim_xy, aim_rpy) -> None:
+        """1012 diagnosis — the place lands -x even when the case goes back on the
+        spot it was picked from, so the camera's view is the same at both ends
+        and the arm is the suspect: where the CUP TIP is vs the aim xy at the
+        moment that fixes the part (pick seal / place release), from the
+        commanded and the live joints. The tip, not the EE: a live tilt swings
+        it by SUCTION_LENGTH_M * sin(tilt). Also the EE tilt itself (cmd / live
+        rpy minus the aim rpy): only what the JOINT ENCODERS see — link flex or
+        gear backlash under the load is invisible to FK. Never raises."""
+        try:
+            L = float(cfg.SUCTION_LENGTH_M)
+
+            def tip(q):
+                p, rpy = self.fk(np.asarray(q, dtype=float))
+                return p + Rotation.from_euler("xyz", rpy).as_matrix()[:, 2] * L
+
+            t_cmd, t_live = tip(self._q_cmd), tip(self._live_arm_q())
+            ax, ay = float(aim_xy[0]), float(aim_xy[1])
+
+            def tilt(q):   # deg, wrapped to [-180, 180)
+                r = np.asarray(self.fk(np.asarray(q, dtype=float))[1])
+                return np.rad2deg((r - np.asarray(aim_rpy, dtype=float) + np.pi)
+                                  % (2.0 * np.pi) - np.pi)
+
+            r_cmd, r_live = tilt(self._q_cmd), tilt(self._live_arm_q())
+            logger.info("[{}] cup tip - aim ({:.4f},{:+.4f}): cmd ({:+.1f},{:+.1f})mm, "
+                        "LIVE ({:+.1f},{:+.1f})mm, tip z live {:.4f} | EE rpy - aim: "
+                        "cmd ({:+.2f},{:+.2f},{:+.2f})deg, LIVE ({:+.2f},{:+.2f},{:+.2f})deg",
+                        tag, ax, ay,
+                        (t_cmd[0] - ax) * 1000.0, (t_cmd[1] - ay) * 1000.0,
+                        (t_live[0] - ax) * 1000.0, (t_live[1] - ay) * 1000.0,
+                        float(t_live[2]), *r_cmd, *r_live)
+        except Exception as e:  # noqa: BLE001 — a diagnostic must not stop a place
+            logger.warning("[{}] cup tip snapshot failed ({})", tag, e)
+
+    def _descend_straight(self, target_ee_z: float, rpy, start_q: np.ndarray,
+                          tick_cb=None, stop_z: "float | None" = None,
+                          fast: "float | None" = None) -> PickResult:
+        """The straight place descent (place(straight=True); from pick_place, 1012): the corner seat's VERTICAL profile —
+        per-tick from the hover, CORNER_DESCENT_SPEED_M_S cruise, decelerating
+        into ``target_ee_z`` (touch taper) — with no lateral drive: x,y,rpy held
+        every tick, stop at the first FORCE_CONTACT_THRESHOLD_N. As in
+        _descend_corner_seat, a first touch that the creep's tracking lag carries
+        past the hard limit is still the contact, not an abort. unreachable /
+        max_descent / monitor_abort mirror _descend_to_contact.
+
+        ``stop_z``: descend to this height instead (decelerating into it), hold
+        cfg.PLACE_RELEASE_SETTLE_S for the arm to catch up and return "at_height";
+        a force contact on the way is "early_contact" (failure).
+        ``fast``: cruise override (default CORNER_DESCENT_SPEED_M_S)."""
+        if stop_z is not None:
+            target_ee_z = float(stop_z)
+        dt = 1.0 / float(cfg.CONTROL_HZ)
+        prev_q = np.asarray(start_q, dtype=float)
+        pos, _ = self.fk(prev_q)
+        x, y, z = float(pos[0]), float(pos[1]), float(pos[2])
+        creep_z = target_ee_z + cfg.DESCENT_CREEP_GAP_M
+        descended = 0.0
+        elapsed = 0.0
+        self.freeze_reference(False)      # fresh rolling reference per descent
+        trace_s = float(cfg.DESCENT_TRACE_S)
+        trace_t, tick_acc, tick_n, t_tick = 0.0, 0.0, 0, time.perf_counter()
+
+        def _halt(q):
+            self._send(np.asarray(q), np.zeros(len(q)))
+
+        pace = TickPacer(dt)
+        while descended < cfg.DESCENT_MAX_M:
+            speed = self._descent_speed(z, creep_z, elapsed,
+                                        fast=(cfg.CORNER_DESCENT_SPEED_M_S
+                                              if fast is None else fast),
+                                        touch_z=target_ee_z)
+            z_cmd = z - speed * dt
+            if stop_z is not None:
+                z_cmd = max(z_cmd, target_ee_z)
+            sol, p = self.solve_step(prev_q, (x, y, z), (x, y, z_cmd), rpy, dt)
+            if sol.pos_err_m > cfg.REACH_TOL_M:
+                _halt(prev_q)
+                return PickResult(False, "unreachable", z)
+            z_next = float(p[2])
+            self._send(sol.q, (sol.q - prev_q) / dt)
+
+            f = self.vertical_force()
+            if f is not None and f > cfg.FORCE_CONTACT_THRESHOLD_N:
+                _halt(sol.q); self.freeze_reference()
+                if stop_z is not None:
+                    logger.warning("[suction] straight place: contact {:.1f}N at ee_z={:.4f}, "
+                                   "{:+.1f}mm above the release height — part NOT released",
+                                   f, z_next, (z_next - target_ee_z) * 1000.0)
+                    return PickResult(False, "early_contact", z_next,
+                                      contact_info=self._contact_snapshot(sol.q))
+                logger.info("[suction] straight place: contact {:.1f}N at ee_z={:.4f} "
+                            "({:+.1f}mm vs expected)", f, z_next,
+                            (z_next - target_ee_z) * 1000.0)
+                return PickResult(True, "contact", z_next,
+                                  contact_info=self._contact_snapshot(sol.q))
+            if stop_z is not None and z_cmd <= target_ee_z:   # commanded, not the IK's p
+                _halt(sol.q)
+                time.sleep(float(cfg.PLACE_RELEASE_SETTLE_S))
+                live = float(self.current_ee_pose()[0][2])
+                logger.info("[suction] straight place: at the release height ee_z={:.4f} "
+                            "(live {:.4f}, {:+.1f}mm)", z_next, live,
+                            (live - z_next) * 1000.0)
+                return PickResult(True, "at_height", z_next)
+            if tick_cb is not None and tick_cb(z_next, f):
+                _halt(sol.q)
+                logger.warning("[suction] descent halted by the supervisor at ee_z={:.4f}", z_next)
+                return PickResult(False, "monitor_abort", z_next,
+                                  contact_info=self._contact_snapshot(sol.q))
+
+            descended += (z - z_next)
+            z, prev_q = z_next, sol.q
+            elapsed += dt
+            pace.wait()
+            now = time.perf_counter()
+            tick_acc += now - t_tick; tick_n += 1; trace_t += now - t_tick
+            t_tick = now
+            if trace_s and trace_t >= trace_s:
+                self._track_trace("place straight", [x, y, z], prev_q,
+                                  tick_acc / tick_n * 1000.0,
+                                  extra=" f={}".format("-" if f is None
+                                                       else format(f, "+.1f")))
+                trace_t, tick_acc, tick_n = 0.0, 0.0, 0
+
+        _halt(prev_q)
+        logger.warning("[suction] max descent ({:.2f}m) without contact", cfg.DESCENT_MAX_M)
+        return PickResult(False, "max_descent", z)
+
     def _set_down(self, rpy, touch_n: float = 3.0, max_drop_m: float = 0.05) -> None:
         """Lower a HELD part straight down to a light touch before a release
         (auto-release path: the press servo may have lifted the part while
@@ -2047,7 +2291,7 @@ class SuctionMover(ArmMover):
         finally:
             threading.Thread(target=vac.stop, daemon=True).start()  # see _creep_seal
 
-    def _sweep_line(self, start_q, target_xyz, rpy, scanner):
+    def _sweep_line(self, start_q, target_xyz, rpy, scanner, pause=None):
         """Straight-line lateral stream to target_xyz (per-tick IK, smoothstep
         ramp-in to BCR_SWEEP_SPEED_M_S), polling the scanner EVERY tick — a
         read halts the sweep mid-line. Returns the code, or None at the end
@@ -2070,6 +2314,10 @@ class SuctionMover(ArmMover):
         traveled = elapsed = 0.0
         pace = TickPacer(dt)
         while traveled < dist:
+            if pause is not None and pause.paused():
+                _halt(prev_q)
+                pause.hold()
+                elapsed = 0.0                  # ramp back in from rest
             r = min(1.0, elapsed / max(float(cfg.DESCENT_RAMP_S), 1e-6))
             speed = float(cfg.BCR_SWEEP_SPEED_M_S) * (r * r * (3.0 - 2.0 * r))
             step = min(speed * dt, dist - traveled)
@@ -2095,7 +2343,7 @@ class SuctionMover(ArmMover):
         _halt(prev_q)
         return scanner.result()
 
-    def _sweep_scan(self, ee_pos, rpy, scanner, case_center):
+    def _sweep_scan(self, ee_pos, rpy, scanner, case_center, pause=None):
         """Raised a bit above the creep z — no tilt — Y-FIRST sweep for a read:
         the barcode sits CENTERED in case-local x, so one CONTINUOUS case-local
         y pass (scanner polled per tick) runs at dx=0 first; only if it reads
@@ -2130,7 +2378,13 @@ class SuctionMover(ArmMover):
                 wy1 = float(ee_pos[1]) + s * dx + c * b
                 logger.info("[suction] barcode sweep: dx={:+.0f}mm, y {:+.0f}->{:+.0f}mm",
                             dx * 1000, a * 1000, b * 1000)
-                code = self._sweep_line(q0, (wx1, wy1, z), rpy, scanner)
+                # 1014 diag: a pass froze silently (10/12 14:37, 10/14 12:21/12:23)
+                # — if one runs past 10 s, dump every thread's stack to a file
+                faulthandler.dump_traceback_later(10.0, file=_hang_dump_file())
+                try:
+                    code = self._sweep_line(q0, (wx1, wy1, z), rpy, scanner, pause=pause)
+                finally:
+                    faulthandler.cancel_dump_traceback_later()
             if code is not None:
                 break
             forward = not forward

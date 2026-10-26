@@ -61,7 +61,7 @@ LID_CLS_ID: int = 1
 LID_PLANE_Z_M: float = 0.798
 # Cup grab point as an offset from the detected LID center, in the LID's own
 # frame (rotated by its yaw, exactly like CASE_GRAB_OFFSET).
-LID_GRAB_OFFSET_M: tuple[float, float] = (-0.05, 0.020)
+LID_GRAB_OFFSET_M: tuple[float, float] = (-0.0355, 0.0423)  # 1001 intrinsics fix (old-K bias kept physical, see geometry.py); was (-0.05, 0.020)
 
 
 def canonical_lid_yaw(yaw_deg: float) -> float:
@@ -110,14 +110,14 @@ def canonical_lid_yaw(yaw_deg: float) -> float:
 # x[0.86,0.88]). x=0.85 sits mid-window for all of them. The operator cannot
 # park to that accuracy by eye, and being 10cm off in the wrong direction here
 # is the difference between a comfortable pick and no solution at all.
-LID_CENTER_XY_M: tuple[float, float] = (0.85, 0.05)
+LID_CENTER_XY_M: tuple[float, float] = (0.8355, 0.0277)  # 1001 intrinsics fix (old-K bias kept physical, see geometry.py); was (0.85, 0.05)
 # Hard floor on how close the alignment may bring the cup point in x at the
 # PICK — the counterpart of LID_PLACE_MIN_X_M, 10mm under the reference above so
 # an open-loop leg that overshoots forward cannot close on the box. The pick
 # column is wide open here (x[0.70,1.06] at y=+0.05 for every wrist yaw), so
 # the floor costs no reach; it exists because the box is what the robot would
 # hit, not because IK runs out.
-LID_CENTER_MIN_X_M: float = 0.84
+LID_CENTER_MIN_X_M: float = 0.8255  # 1001 intrinsics fix (old-K bias kept physical, see geometry.py); was 0.84
 # Where the lid waits at the UNLOAD station: sent as JOINT ANGLES, not a
 # Cartesian pose, and moved to WHILE the torso leans (see run_lid). Joints
 # because the pose is only meaningful at LID_PLACE_TORSO_DEG and only on the
@@ -270,6 +270,61 @@ LID_FLOOR_PLANE_Z_M: float = 0.295 - SUCTION_LENGTH_M
 # 290-500), and the BEV mapper is built from the LIVE head joints either way,
 # so this only has to keep the lid comfortably framed.
 LID_PLACE_HEAD_PITCH_DEG: float = 24.0
+# SAME-TABLE place (1012): the lid to stack onto now lies on the same table, so
+# --lid runs at the demo stance (no lean) and the place height comes from the
+# depth INSIDE the detected lid's OBB, as the case place does
+# (_detect_place_lid): the OBB_DEPTH_PCT percentile of the inner
+# OBB_DEPTH_INNER_FRAC, minus LID_TOP_PCT_BIAS_M, is the lid top; it is
+# re-detected on for the xy (a jump past OBB_DEPTH_MAX_SHIFT_M -> operator) and
+# + cup is the expected contact. LID_PLACE_PLANE_Z_M is only the SEED warp
+# plane and the gate's reference; a top more than LID_TOP_GATE_M off it ->
+# operator. 1012 15:28 MEASURED 0.7363 / 0.7308 against the first guess of
+# 0.77 (table + ~10cm), 34-39mm low — at the gate's edge — so it now sits there.
+LID_PLACE_PLANE_Z_M: float = 0.735
+LID_TOP_PCT_BIAS_M: float = 0.003   # = BATTERY_TOP_PCT_BIAS_M; NOT calibrated on a lid
+LID_TOP_GATE_M: float = 0.04        # wide: "~10cm" is a rough number
+# Carrying the held lid (1012): the lid is big, so it must stay LEVEL. The
+# planned joint-space legs (view park, place approach) tilted it up to 27.9 deg
+# of pitch on 1012 15:28 — ~5 deg from the joint path itself, the rest the arm
+# lagging the fast plan by up to 307mm. Both carry legs (pick -> park, park ->
+# place start) instead fly move_ee_line: straight, orientation held every
+# tick, at LID_CARRY_SPEED_M_S. Its own park, further left / -x than the case's
+# ARM_VIEW_PARK_EE_POS and lower so that solves at the lid's wrist yaw (offline:
+# z 1.17 runs out of reach past x 0.75 / y 0.45); the held lid's bottom sits
+# ~6cm over the lid it came off (1012 pick contact ee 1.04). 1012 later: raised
+# to z 1.15 at the user's call (lid bottom ~11cm over it), x free, as far LEFT
+# as reaches — offline the edge is y 0.545 at x 0.79-0.80 (held yaw +-8deg),
+# 15mm of margin kept. Was (0.75, 0.50, 1.10).
+LID_VIEW_PARK_EE_POS: tuple[float, float, float] = (0.80, 0.53, 1.15)
+LID_CARRY_SPEED_M_S: float = 0.15
+# Task 1 only (1013, the user's call: faster --lid): both carries (pick -> view
+# park, park -> hover), the straight place descent cruise (the touch taper into
+# the contact is unchanged) and the empty cup's lift after the release. Task 6
+# keeps LID_CARRY_SPEED_M_S and the shared CORNER_DESCENT_SPEED_M_S /
+# LIFT_SPEED_M_S. Unverified on the robot.
+LID_TASK1_CARRY_SPEED_M_S: float = 0.35
+LID_TASK1_DESCENT_SPEED_M_S: float = 0.25
+LID_TASK1_LIFT_SPEED_M_S: float = 0.30
+# Place window (1012, case-style place): the detected LID CENTRE is driven into
+# (centre, half-width) by one diagonal chassis move, as cfg.WINDOW_X_M /
+# WINDOW_Y_M do for the case. Centre = the middle of the cup points whose
+# column solves from the hover (LID_VIEW_PARK_EE_POS z) down at the lid wrist
+# yaw +-8deg (offline: cup x <= 0.80 for every y; cup (0.78,+0.02)), moved by
+# the grab offset onto the lid centre. The whole window then solves.
+LID_WINDOW_X_M: tuple[float, float] = (0.815, 0.02)
+LID_WINDOW_Y_M: tuple[float, float] = (-0.022, 0.03)
+# Task 6 (1012): the lid task 1 left on the table goes BACK onto the bin.
+# Expected contact of the re-cover = where task 1's pick touched that lid lying
+# on the bin: median of the nine 1012 --lid picks (contact ee_z 1.0358-1.0422).
+# The descent stops on force, so this only sets where the slow approach starts.
+LID_REPLACE_CONTACT_EE_Z: float = 1.0377
+# Added to the DETECTED bin center (base frame) before the lid offset. 1012
+# 16:58 / 17:00: the lid landed ~20mm too FAR (+x), sideways fine, and touched
+# 9-12mm above the expected contact (on the rim, not seated). Likely the bin
+# warp plane (DIVERT_BIN_PLANE_Z_M) sitting below this bin's labeled face,
+# which reads the bin too far; corrected here as a bias, not by re-calibrating
+# the plane (the divert places use that plane too).
+LID_REPLACE_BIN_OFFSET_M: tuple[float, float] = (-0.020, 0.0)
 # Where --lid writes its DIAGNOSTIC IMAGES: the frame + BEV a committed place
 # was decided from, and the depth-sampling markers. Its own folder, not
 # RUN_LOG_DIR — that one is text a run appends to and greps through, and
@@ -315,7 +370,7 @@ BOX_LID_CLS_ID: int = 1
 # viewer (case_detection/live_detect_bev.py) draws the EE target it reads from
 # this package, and with no constant to read it drew box_top with the BIN lid's
 # -50,+20mm offset — a marker 54mm from where the arm actually goes.
-BOX_LID_GRAB_OFFSET_M: tuple[float, float] = (0.0, -0.02)
+BOX_LID_GRAB_OFFSET_M: tuple[float, float] = (0.0171, 0.0043)  # 1001 intrinsics fix (old-K bias kept physical, see geometry.py); was (0.0, -0.02)
 # Warp plane for that detection. SEED ONLY: cfg.LID_DEPTH_REFINE measures the
 # real surface per frame and reprojects the centre onto it, so this just has to
 # put the lid at a scale the model knows (its frames were warped near

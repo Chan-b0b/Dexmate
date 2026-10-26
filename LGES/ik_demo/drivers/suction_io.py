@@ -97,7 +97,7 @@ def blow_off() -> None:
 def release() -> None:
     """Release a held object: suction off, then a short blow pulse.
 
-    The sleep IS the detach time: nothing calls blow_off(), and the caller
+    The sleep (cfg.RELEASE_BLOW_WAIT_S) IS the detach time: nothing calls blow_off(), and the caller
     lifts the moment this returns (suction.place -> move_ee_vertical). Cutting
     it to 0.7 on 0914 started lifting parts that were still stuck to the cup —
     killing the vacuum does not free the part on its own, the residual vacuum
@@ -107,7 +107,7 @@ def release() -> None:
     until cup releases") instead of guessing a duration."""
     suction_off()
     blow_on()
-    time.sleep(2.0)
+    time.sleep(float(cfg.RELEASE_BLOW_WAIT_S))
     # logger.info("[Suction] released")
 
 

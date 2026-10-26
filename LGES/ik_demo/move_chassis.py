@@ -55,6 +55,41 @@ def _stop(bot) -> None:
         0.0, wait_time=_LIB_CMD_CLAMP_S + cfg.CHASSIS_STOP_STREAM_S)
 
 
+def _drive(bot, signed_speed: np.ndarray, wait_time: float) -> None:
+    """Drive the pre-steered wheels at ``signed_speed`` for the distance that
+    ``set_wheel_velocity(signed_speed, wait_time)`` would cover — the library
+    streams that for wait_time - _LIB_CMD_CLAMP_S — but ramped: S-shaped
+    (cosine) ramps up from 0 and down to 0 at cfg.CHASSIS_ACCEL_MS2 average
+    acceleration, streamed at 50 Hz with the steering held. A cosine ramp
+    averages half the peak speed, so one extra ramp time keeps the distance;
+    a move too short to reach full speed peaks lower (same distance)."""
+    accel = float(cfg.CHASSIS_ACCEL_MS2)
+    cruise_s = max(float(wait_time) - _LIB_CMD_CLAMP_S, 0.0)
+    v = float(np.max(np.abs(signed_speed)))
+    if accel <= 0.0 or v <= 0.0 or cruise_s <= 0.0:
+        bot.chassis.set_wheel_velocity(signed_speed, wait_time=wait_time)
+        return
+    ramp_s = v / accel
+    peak = 1.0
+    if cruise_s < ramp_s:                    # no room to reach full speed
+        peak = float(np.sqrt(cruise_s / ramp_s))
+        ramp_s *= peak
+    total_s = cruise_s / peak + ramp_s
+    logger.info("drive: peak {:.3f} m/s (wheel), ramp {:.2f} s each way, {:.2f} s total",
+                v * peak, ramp_s, total_s)
+    steer = np.asarray(bot.chassis.steering_angle, dtype=float)
+    dt = 1.0 / 50.0
+    t0 = time.monotonic()
+    while True:
+        t = time.monotonic() - t0
+        if t >= total_s:
+            break
+        edge = min(t, total_s - t)          # time from the nearer end
+        s = 1.0 if edge >= ramp_s else 0.5 * (1.0 - np.cos(np.pi * edge / ramp_s))
+        bot.chassis.set_motion_state(steer, np.asarray(signed_speed) * (peak * s))
+        time.sleep(max(dt - (time.monotonic() - t0 - t), 0.0))
+
+
 def _pre_steer(bot, vx: float, vy: float, wz: float = 0.0) -> np.ndarray | None:
     """Point both wheels at the leg's steering angles BEFORE the timed drive,
     and return the per-wheel signed speed that matches the angle we picked.
@@ -133,6 +168,15 @@ def _pre_steer(bot, vx: float, vy: float, wz: float = 0.0) -> np.ndarray | None:
         time.sleep(0.05)
 
 
+def presteer_sideways(bot) -> None:
+    """Point both wheels at the strafe axis WITHOUT driving (1013: run while
+    the arm lifts). Left and right strafes share it — _pre_steer picks
+    whichever of +-pi/2 is nearer, the wheel-speed sign sets the direction —
+    so the next strafe_left/right finds the wheels in place and skips its own
+    ~0.5 s pivot."""
+    _pre_steer(bot, 0.0, 1.0)
+
+
 def strafe_left(bot, distance_m: float = None, speed: float = None) -> None:
     """Move chassis to the left (positive sideways velocity).
 
@@ -151,7 +195,7 @@ def strafe_left(bot, distance_m: float = None, speed: float = None) -> None:
                     distance_m, speed, wait_time, cfg.CHASSIS_CMD_DEAD_TIME_S)
         signed_speed = _pre_steer(bot, 0.0, speed)
         if signed_speed is not None:
-            bot.chassis.set_wheel_velocity(signed_speed, wait_time=wait_time)
+            _drive(bot, signed_speed, wait_time)
         else:
             bot.chassis.move_sideways(speed, wait_time=wait_time)
         _stop(bot)   # streamed stop, steering kept
@@ -182,7 +226,7 @@ def strafe_right(bot, distance_m: float = None, speed: float = None) -> None:
                     distance_m, speed, wait_time, cfg.CHASSIS_CMD_DEAD_TIME_S)
         signed_speed = _pre_steer(bot, 0.0, -speed)
         if signed_speed is not None:
-            bot.chassis.set_wheel_velocity(signed_speed, wait_time=wait_time)
+            _drive(bot, signed_speed, wait_time)
         else:
             bot.chassis.move_sideways(-speed, wait_time=wait_time)
         _stop(bot)   # streamed stop, steering kept
@@ -213,7 +257,7 @@ def move_forward(bot, distance_m: float = None, speed: float = None) -> None:
                     distance_m, speed, wait_time, cfg.CHASSIS_CMD_DEAD_TIME_S)
         signed_speed = _pre_steer(bot, speed, 0.0)
         if signed_speed is not None:
-            bot.chassis.set_wheel_velocity(signed_speed, wait_time=wait_time)
+            _drive(bot, signed_speed, wait_time)
         else:
             bot.chassis.move_straight(speed, wait_time=wait_time)
         _stop(bot)   # streamed stop, steering kept
@@ -244,7 +288,7 @@ def move_backward(bot, distance_m: float = None, speed: float = None) -> None:
                     distance_m, speed, wait_time, cfg.CHASSIS_CMD_DEAD_TIME_S)
         signed_speed = _pre_steer(bot, -speed, 0.0)
         if signed_speed is not None:
-            bot.chassis.set_wheel_velocity(signed_speed, wait_time=wait_time)
+            _drive(bot, signed_speed, wait_time)
         else:
             bot.chassis.move_straight(-speed, wait_time=wait_time)
         _stop(bot)   # streamed stop, steering kept
@@ -253,6 +297,33 @@ def move_backward(bot, distance_m: float = None, speed: float = None) -> None:
         distance_m = speed * wait_time
         logger.info("Move BACKWARD: {:.3f} m/s x {:.1f} s = {} m", speed, wait_time, distance_m)
         bot.chassis.move_straight(-speed, wait_time=wait_time)
+    time.sleep(cfg.CHASSIS_SETTLE_S)
+    logger.info("Settle complete")
+
+
+def move_diagonal(bot, dx_m: float, dy_m: float, speed: float = None) -> None:
+    """Drive dx_m forward (+) / back (-) and dy_m left (+) / right (-) at the
+    SAME time, in a straight line: pre-steer the wheels along the (dx, dy)
+    direction, then one timed drive of |(dx, dy)| / speed. ``speed`` is the
+    speed along that line (default cfg.CHASSIS_STRAFE_SPEED_MS). Falls back to
+    two successive legs if pre-steering is unavailable."""
+    dist = float(np.hypot(dx_m, dy_m))
+    if dist < 1e-6:
+        return
+    if speed is None:
+        speed = cfg.CHASSIS_STRAFE_SPEED_MS
+    vx, vy = speed * dx_m / dist, speed * dy_m / dist
+    wait_time = dist / speed + cfg.CHASSIS_CMD_DEAD_TIME_S
+    logger.info("Move DIAGONAL: dx {:+.3f} m, dy {:+.3f} m @ {:.3f} m/s = {:.1f} s "
+                "(incl. {:.1f} s cmd dead time)", dx_m, dy_m, speed, wait_time,
+                cfg.CHASSIS_CMD_DEAD_TIME_S)
+    signed_speed = _pre_steer(bot, vx, vy)
+    if signed_speed is None:
+        (move_forward if dx_m > 0 else move_backward)(bot, distance_m=abs(dx_m), speed=speed)
+        (strafe_left if dy_m > 0 else strafe_right)(bot, distance_m=abs(dy_m), speed=speed)
+        return
+    _drive(bot, signed_speed, wait_time)
+    _stop(bot)
     time.sleep(cfg.CHASSIS_SETTLE_S)
     logger.info("Settle complete")
 
@@ -273,7 +344,7 @@ def turn_ccw(bot, angle_deg: float = None, speed: float = None) -> None:
                     angle_deg, speed, wait_time, cfg.CHASSIS_CMD_DEAD_TIME_S)
         signed_speed = _pre_steer(bot, 0.0, 0.0, wz=speed)
         if signed_speed is not None:
-            bot.chassis.set_wheel_velocity(signed_speed, wait_time=wait_time)
+            _drive(bot, signed_speed, wait_time)
         else:
             bot.chassis.turn(speed, wait_time=wait_time)
         _stop(bot)   # streamed stop, steering kept
@@ -296,7 +367,7 @@ def turn_cw(bot, angle_deg: float = None, speed: float = None) -> None:
                     angle_deg, speed, wait_time, cfg.CHASSIS_CMD_DEAD_TIME_S)
         signed_speed = _pre_steer(bot, 0.0, 0.0, wz=-speed)
         if signed_speed is not None:
-            bot.chassis.set_wheel_velocity(signed_speed, wait_time=wait_time)
+            _drive(bot, signed_speed, wait_time)
         else:
             bot.chassis.turn(-speed, wait_time=wait_time)
         _stop(bot)   # streamed stop, steering kept

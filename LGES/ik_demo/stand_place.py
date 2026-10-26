@@ -578,7 +578,8 @@ def detect_scene(bot, save: bool = True):
     # changes, so every detection after the first was paying the full 5 s on a
     # head that did not move. _head_rgb below still waits for two fresh frames,
     # so the settle is not lost.
-    set_head_pitch(bot, angle=float(cfg.STAND_HEAD_ANGLE_DEG), tol_deg=2.0)
+    # 0.3 deg, not 2: detected xy shifts with head angle (~0.3-0.5 mm/deg in x).
+    set_head_pitch(bot, angle=float(cfg.STAND_HEAD_ANGLE_DEG), tol_deg=0.3)
     rgb = _head_rgb(bot)
     if rgb is None:
         logger.error("[detect] no head-camera frame")

@@ -2,7 +2,7 @@ task: obb
 mode: train
 model: yolov8n-obb.pt
 data: /home/dexmate/LGES/Dexmate/LGES/case_detection/dataset_case/data.yaml
-epochs: 100
+epochs: 150
 time: null
 patience: 100
 batch: 16

@@ -249,8 +249,8 @@ STAND_CYL_DET_Z_M: float = STAND_DESK_Z_M + 0.5 * STAND_OBJECTS["cylinder"]["hei
 # fingers closed deep (207) at the nominal pinch and clean (154) 2.8 cm back
 # -> the detector reads the standing cylinder ~3 cm too far. One sample; watch
 # whether the first close lands in band on the next runs.
-STAND_CYL_DET_OFFSET_XY: tuple[float, float] = (-0.04, 0.0)
-STAND_BIN_DET_OFFSET_XY: tuple[float, float] = (0.0, 0.0)
+STAND_CYL_DET_OFFSET_XY: tuple[float, float] = (-0.0217, 0.0252)  # 1001 intrinsics fix (old-K bias kept physical, see geometry.py); was (-0.04, 0.0)
+STAND_BIN_DET_OFFSET_XY: tuple[float, float] = (0.0183, 0.0252)  # 1001 intrinsics fix (old-K bias kept physical, see geometry.py); was (0.0, 0.0)
 # Where the bin is asked to sit in base_link before placing: the spot every
 # 0906 place ran at, and the fallback when the bin has not been seen yet.
 STAND_BIN_PLACE_XY: tuple[float, float] = STAND_BIN_TARGET_BASE_XY   # (0.925, -0.125), user's call 0906
