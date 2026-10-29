@@ -5,7 +5,7 @@ hover_check.py for the no-contact version). Same start as chassis_sequence
 (both arms safe-home, head 24 deg, camera-info intrinsics), then task 3's
 source flow for a case sitting ON BATTERIES (chassis_sequence.run_item, no
 chassis moves): model-plane detect -> battery-top depth plane re-detect ->
-median-of-N -> descent pre-check -> pick(planned, lift_to_clear) -> view park,
+median-of-N -> descent pre-check -> pick(lift_to_clear) -> view park,
 then the target place's flow back on the SAME pose (straight, release
 PLACE_RELEASE_ABOVE_M above the measured seal height), safe home.
 
@@ -80,7 +80,7 @@ def main() -> None:
                 safe_home(m)
                 return
             res = m.pick(pose, expected_z=exp_z, lift_to_clear=True,
-                         lift_creep_out_m=cfg.DESCENT_CREEP_GAP_M, planned=True)
+                         lift_creep_out_m=cfg.DESCENT_CREEP_GAP_M)
             logger.info("pick: success={} reason={} contact_ee_z={}", res.success, res.reason,
                         None if res.contact_ee_z is None else round(res.contact_ee_z, 4))
             if res.success:

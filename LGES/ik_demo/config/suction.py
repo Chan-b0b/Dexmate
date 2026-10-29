@@ -86,6 +86,20 @@ WRENCH_REF_WARMUP_S: float = 0.10      # force decisions stay OFF until the wind
 # only) and still could not express the swap.
 WRENCH_AXIS_SIGN: tuple[float, float, float] = (1.0, 1.0, -1.0)
 DESCENT_APPROACH_SPEED_M_S: float = 0.25    # fast free-air descent (cup-tip)
+# Cruise of the PICK descent (_descend_open: pick / pick_retreat / pick_gated).
+# In the pick stance a vertical descent is mostly the SHOULDER: j1 turns ~1.2 deg
+# per cm (42 deg over 1.25 -> 0.90, offline), so 0.25 m/s asks j1 for ~31 deg/s —
+# just over the ~30 deg/s the real left j1 reaches (cfg.JOINT_VEL_CAP_LEFT). 1027:
+# 0.25 ran 29mm / 5 deg behind; 0.15 ran 7.9mm / 1.35 deg on the robot. Back to
+# 0.25 with the j1 cap in place: solve_step now holds j1 to 26 deg/s and slows
+# only that stretch (offline 1.39 s vs 1.84 s at 0.15, hand peak 0.237 m/s).
+# UNVERIFIED on the robot — if the descent swings again, 0.15 was verified.
+PICK_DESCENT_SPEED_M_S: float = 0.25
+# Cruise of the STRAIGHT place descent (_descend_straight; the corner seats keep
+# CORNER_DESCENT_SPEED_M_S). 1027: 0.15 -> 0.25 on the pick's evidence — the j1
+# cap (cfg.JOINT_VEL_CAP_LEFT) holds the shoulder under its real speed, so the
+# cruise only runs fast where j1 is not the limit. UNVERIFIED for the place.
+PLACE_DESCENT_SPEED_M_S: float = 0.25
 # Cruise of the per-tick vertical LIFT (arm.move_ee_vertical going up), separate
 # from the descent's since 1012: at 0.35 the arm could not keep up going up —
 # chassis_sequence battery lifts trailed the (exactly vertical) command by
@@ -201,6 +215,10 @@ DESCENT_MAX_M: float = 0.40                 # safety: max descent distance
 # CONSTRUCTION and a visibly slanted descent has to be either IK residual
 # (silent up to REACH_TOL_M) or tracking. 0.0 disables the whole trace.
 DESCENT_TRACE_S: float = 0.25
+# 1027, LOG ONLY (changes no motion): ArmMover.joint_trace records commanded vs
+# live joints on every tick of the wrapped picks / places (chassis_sequence
+# run_item) -> one summary line + RUN_LOG_DIR/joint_trace/<stamp>/*.npz.
+JOINT_TRACE_SAVE: bool = True
 # Show the per-tick traces in the TERMINAL too, or only in the run log file.
 # They fire 4x/s per stream and drown the lines an operator actually watches
 # (contacts, wall latches, failures), while being the thing every 0903
@@ -237,7 +255,7 @@ PICK_SEAL_RETRIES: int = 2                  # on vacuum_timeout: lift DESCENT_CR
 PICK_SEAL_RETRY_OFFSET_M: float = 0.005
 SEAL_PRELIFT_M: float = 0.005               # relieve contact press before suction on
 RELEASE_PRELIFT_M: float = 0.015            # lift before the blow-off release (1001: back to 15mm, was 0.025 — part dropped from too high)
-RELEASE_BLOW_WAIT_S: float = 1.0            # suction_io.release(): wait after suction off + blow on before the caller lifts (0914: 0.7 lifted parts still stuck to the cup)
+RELEASE_BLOW_WAIT_S: float = 1.0            # suction_io.release(): wait after suction off + blow on before the caller lifts (0914: 0.7 lifted parts still stuck to the cup; 1027: waiting for DI0 to drop + 0.3 s also left parts stuck — DI0 drops before the part is free)
 PLACE_Z_BUFFER_M: float = 0.10              # accept a seat within this of the taught z
 PLACE_MISSEAT_TOL_M: float = 0.005          # place contact this far ABOVE the expected
                                             # seat z = rim-landing (misseat): hold, don't

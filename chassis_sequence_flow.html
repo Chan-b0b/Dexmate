@@ -1,0 +1,206 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>chassis_sequence 흐름도</title>
+<meta name="claude:viewport-fit-sides" content="cover">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans+KR:wght@400;600;700&family=IBM+Plex+Mono:wght@400;500&display=swap">
+<style>
+/* Layout: one reading column; station strip on top, then three flowcharts zooming in (session -> task 3 -> one item) */
+:root {
+  --bg: #f5f6f7;
+  --surface: #ffffff;
+  --fg: #1d2329;
+  --muted: #5b6672;
+  --line: #d5dadf;
+  --accent: #c76a12;
+  --accent-soft: #fbeedd;
+  --ok: #2f6f4f;
+  --font-body: "IBM Plex Sans KR", "Apple SD Gothic Neo", "Malgun Gothic", system-ui, sans-serif;
+  --font-mono: "IBM Plex Mono", ui-monospace, "SFMono-Regular", Menlo, monospace;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --bg: #15191d; --surface: #1d2329; --fg: #e6e9ec; --muted: #9aa5b1;
+    --line: #333c45; --accent: #f0a24a; --accent-soft: #3a2a17; --ok: #7cc49d;
+    color-scheme: dark;
+  }
+}
+:root[data-theme="dark"] {
+  --bg: #15191d; --surface: #1d2329; --fg: #e6e9ec; --muted: #9aa5b1;
+  --line: #333c45; --accent: #f0a24a; --accent-soft: #3a2a17; --ok: #7cc49d;
+  color-scheme: dark;
+}
+body {
+  background: var(--bg); color: var(--fg); font-family: var(--font-body);
+  font-size: 15px; line-height: 1.6;
+}
+.wrap {
+  max-width: 980px; margin: 0 auto;
+  padding-block: 32px 64px;
+  padding-left: max(16px, env(safe-area-inset-left, 0px));
+  padding-right: max(16px, env(safe-area-inset-right, 0px));
+  display: grid; gap: 40px;
+}
+header { display: grid; gap: 8px; }
+h1 { font-size: 1.7rem; line-height: 1.25; margin: 0; text-wrap: balance; }
+h2 { font-size: 1.2rem; margin: 0; text-wrap: balance; }
+p { margin: 0; max-width: 68ch; }
+.lead { color: var(--muted); }
+code, .mono { font-family: var(--font-mono); font-size: 0.86em; }
+.eyebrow { font-family: var(--font-mono); font-size: 0.75rem; letter-spacing: 0.08em; text-transform: uppercase; color: var(--accent); }
+section { display: grid; gap: 14px; }
+
+/* station strip */
+.stations { display: grid; grid-template-columns: 1fr auto 1.15fr auto 1fr; align-items: stretch; gap: 0; }
+.st { background: var(--surface); border: 1px solid var(--line); border-radius: 6px; padding: 14px 16px; display: grid; gap: 4px; align-content: start; min-width: 0; }
+.st.home { border-color: var(--accent); box-shadow: inset 0 3px 0 var(--accent); }
+.st b { font-size: 1rem; }
+.st small { color: var(--muted); font-size: 0.85rem; line-height: 1.45; }
+.gap { display: grid; place-items: center; padding: 0 10px; color: var(--muted); font-family: var(--font-mono); font-size: 0.8rem; text-align: center; }
+.gap span { display: block; border-top: 2px dashed var(--line); width: 100%; min-width: 56px; padding-top: 4px; }
+@media (max-width: 640px) {
+  .stations { grid-template-columns: 1fr; }
+  .gap { padding: 6px 0; }
+  .gap span { border-top: 0; border-left: 2px dashed var(--line); width: auto; min-width: 0; padding: 2px 0 2px 10px; }
+}
+
+.chart { background: var(--surface); border: 1px solid var(--line); border-radius: 6px; padding: 16px; overflow-x: auto; }
+.chart pre.mermaid { margin: 0; background: transparent; }
+
+.notes { display: grid; gap: 8px; padding: 0; margin: 0; list-style: none; }
+.notes li { padding-left: 14px; border-left: 2px solid var(--line); color: var(--muted); max-width: 72ch; }
+.notes li b { color: var(--fg); font-weight: 600; }
+.src { color: var(--muted); font-size: 0.85rem; }
+</style>
+</head>
+<body>
+
+<div class="wrap">
+  <header>
+    <div class="eyebrow">LGES · ik_demo · 2026-10-29 코드 기준</div>
+    <h1>chassis_sequence 흐름도</h1>
+    <p class="lead">로봇 한 세션에서 작업 메뉴를 여러 번 돕니다. 아래는 세 단계로 확대해 봅니다: 세션 전체, 작업 3(case + 배터리 이송)의 층 반복, 그리고 아이템 하나의 왕복.</p>
+  </header>
+
+  <section>
+    <h2>작업 3의 자리 배치</h2>
+    <p class="lead">바퀴는 옆으로만 움직입니다(거리는 설정값, 실행 중에 도착 오차로 보정됨). 매 아이템은 SOURCE에서 시작해 SOURCE로 돌아옵니다.</p>
+    <div class="stations">
+      <div class="st">
+        <b>왼쪽 bin</b>
+        <small>이번 실행의 첫 case가 들어가는 빈 bin. 타겟 바코드 배터리도 이 쪽 case로 갑니다(왼쪽 칸 먼저, 그다음 오른쪽 칸).</small>
+      </div>
+      <div class="gap"><span>0.5 m<br>TARGET_STRAFE_DIST_M</span></div>
+      <div class="st home">
+        <b>SOURCE 스택</b>
+        <small>시작 위치. 작업자가 한 번 맞추고 <code>d</code>. 층마다 case → 배터리 2개를 꺼냅니다.</small>
+      </div>
+      <div class="gap"><span>0.6 m<br>BUFFER_STRAFE_DIST_M</span></div>
+      <div class="st">
+        <b>TARGET 스택</b>
+        <small>이미 case가 하나 있어야 합니다(작업 2가 놓아 둔 것). 배터리와 이후 case가 여기에 쌓입니다.</small>
+      </div>
+    </div>
+  </section>
+
+  <section>
+    <h2>1. 세션 전체</h2>
+    <div class="chart">
+<pre class="mermaid">
+flowchart TD
+  A["실행<br/>python -m LGES.ik_demo.chassis_sequence"] --> B{"양팔 연결 + 홈? y/N"}
+  B -- N --> Z(["종료"])
+  B -- y --> C["로봇 연결<br/>머리 카메라 켜기 · 바퀴 감시 시작"]
+  C --> D["왼팔 준비<br/>소프트 E-stop이면 해제 확인"]
+  D --> E["동시에: 인식 모델 미리 올리기<br/>+ 오른팔·그리퍼 준비"]
+  E --> F["양팔 홈"]
+  F --> M{"작업 메뉴"}
+  M -- 1 --> T1["Bin 뚜껑 폐기<br/>--lid · 손운전 2구간"]
+  M -- 2 --> T2["case 1개 → bin<br/>--case-bin · d로 pick, d로 place"]
+  M -- 3 --> T3["case + 배터리 층별 이송<br/>(아래 2, 3번 그림)"]
+  M -- 4 --> T4["Box 폐기<br/>--box · 오른팔 그리퍼"]
+  M -- 5 --> T5["원통 → 검은 bin<br/>--cylinders · 오른팔 그리퍼"]
+  M -- 6 --> T6["테이블 뚜껑 → bin에 다시 덮기<br/>손운전 2구간"]
+  T1 & T2 & T3 & T4 & T5 & T6 --> H["양팔 홈"]
+  H --> M
+  M -- q --> Z
+</pre>
+    </div>
+    <p class="src">명령줄 플래그(<code>--lid</code>, <code>--box</code>, <code>--case-bin</code>, <code>--cylinders</code>, <code>--box-lid</code>)를 주면 메뉴 없이 그 작업부터 시작합니다. <code>--box-lid</code>(종이 박스 뚜껑을 오른손에 넘기기)는 메뉴에는 없고 플래그로만 실행됩니다.</p>
+  </section>
+
+  <section>
+    <h2>2. 작업 3: 층 반복</h2>
+    <div class="chart">
+<pre class="mermaid">
+flowchart TD
+  S["층 수 입력<br/>source 층 · target 층 · 마지막 case 보낼지"] --> P["작업자가 바퀴를 SOURCE 앞에 맞춤 → d"]
+  P --> L{"source에 case+배터리 층이<br/>1개 이상 남았나?"}
+  L -- 예 --> I1["case"]
+  I1 --> I2["battery_2 (왼쪽 칸)"]
+  I2 --> I3["battery_1 (오른쪽 칸)"]
+  I3 --> ST["source −1층 · target +1층<br/>(인식 높이도 따라 바뀜)"]
+  ST --> L
+  L -- 아니오 --> FB{"마지막 case 보내기?"}
+  FB -- 예 --> LC["바닥에 남은 빈 case<br/>→ TARGET (같은 아이템 왕복, 배터리 없음)"]
+  FB -- 아니오 --> E(["끝 · 학습된 이동 거리 저장"])
+  LC --> E
+  I1 -. 실패 .-> X["그 자리에서 멈춤<br/>재개할 층 수를 로그에 남김"]
+  I2 -. 실패 .-> X
+  I3 -. 실패 .-> X
+</pre>
+    </div>
+    <p class="src">기본값: source 2층, target 1층, 마지막 case 보냄. 각 아이템이 아래 3번 그림의 왕복을 한 번씩 합니다.</p>
+  </section>
+
+  <section>
+    <h2>3. 아이템 하나의 왕복</h2>
+    <div class="chart">
+<pre class="mermaid">
+flowchart TD
+  A(["SOURCE에 있음"]) --> TG{"태그 기준점이 보이나?"}
+  TG -- 예 --> TA["태그로 위치 계산<br/>깊이로 높이 측정"]
+  TG -- 아니오 --> DT["머리 카메라로 case 인식<br/>(case면 아래 배터리 윗면 깊이로 높이)"]
+  DT --> WN["case 중심이 작업 창 밖이면<br/>바퀴 대각선 1회 이동 후 다시 인식"]
+  TA --> RC{"팔이 닿나?<br/>(사전 점검)"}
+  WN --> RC
+  RC -- 아니오 --> OP["작업자 조정<br/>f/b/l/r 후 d"]
+  OP --> TG
+  RC -- 예 --> KD{"무엇을 집나?"}
+  KD -- 배터리 --> PB["흡착 pick<br/>내려가면서 바코드 읽기"]
+  KD -- case --> PC["흡착 pick"]
+  PB --> BC{"타겟 바코드이고<br/>빈 칸이 남았나?"}
+  BC -- 예 --> DV["왼쪽 0.5 m → 왼쪽 case 인식<br/>→ 남은 칸에 놓기 → 오른쪽 복귀"]
+  DV --> DONE(["다음 아이템"])
+  DV -. 놓기 포기 .-> GO
+  BC -- 아니오 --> GO
+  PC --> FC{"이번 실행의 첫 case?"}
+  FC -- 예 --> SB["왼쪽 0.5 m → 빈 bin 인식<br/>→ bin 방향 맞춰 넣기 → 오른쪽 복귀"]
+  SB --> DONE
+  FC -- 아니오 --> GO["오른쪽 0.6 m → TARGET<br/>이동하는 동안 팔은 카메라 시야 밖으로"]
+  GO --> TT["태그 또는 target case 인식<br/>높이 측정 · 작업 창 맞추기 · 닿나 점검"]
+  TT --> PL["똑바로 내려 놓기"]
+  PL --> BK["왼쪽 0.6 m → SOURCE 복귀<br/>이동하는 동안 팔 정리"]
+  BK --> DONE
+  PB -. 실패 .-> FX["팔 홈 → 오른쪽 이동 → 멈춤"]
+  PC -. 실패 .-> FX
+  PL -. 들고 있는 채 실패 .-> HX["그 자리에서 멈춤<br/>(부품 들고 있음)"]
+</pre>
+    </div>
+    <ul class="notes">
+      <li><b>첫 case는 TARGET으로 가지 않습니다.</b> target 층이 1 이하일 때의 case가 왼쪽 bin으로 갑니다. 이번 층의 배터리는 TARGET에 이미 있는 case(작업 2가 놓은 것)에 들어갑니다.</li>
+      <li><b>타겟 바코드</b>는 <code>config/gripper.py</code>의 <code>TARGET_BARCODES</code>입니다(현재 3개). 최대 2개까지 왼쪽 case로 가고, 칸이 다 차면 TARGET에 그대로 놓습니다.</li>
+      <li><b>바퀴와 팔이 겹쳐 움직입니다.</b> 옆 이동을 하는 동안 팔은 카메라 시야를 비키는 자리로 옮기고, 카메라가 필요해지기 직전에 둘을 맞춥니다.</li>
+      <li><b>태그 경로</b>는 <code>STATION_TAG_ARRIVE = True</code>일 때 쓰입니다. 태그 한 쌍이 안 보이면 카메라 인식 경로로 갑니다.</li>
+      <li><b>놓은 뒤 확인 인식</b>(<code>PLACE_VERIFY_DETECT</code>)은 현재 꺼져 있어서 그림에서 뺐습니다.</li>
+    </ul>
+  </section>
+</div>
+<script src="https://cdn.jsdelivr.net/npm/mermaid@10.9.1/dist/mermaid.min.js"></script>
+<script>
+mermaid.initialize({ startOnLoad: true, theme: window.matchMedia("(prefers-color-scheme: dark)").matches ? "dark" : "default" });
+</script>
+</body>
+</html>

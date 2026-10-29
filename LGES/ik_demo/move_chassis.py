@@ -40,6 +40,15 @@ try:
 except ImportError:
     import config as cfg
 
+# direction of the last strafe_left / strafe_right ("left" / "right") — the
+# station-tag arrival creeps on in the direction the chassis came from
+_LAST_STRAFE: list[str] = ["left"]
+
+
+def last_strafe() -> str:
+    return _LAST_STRAFE[0]
+
+
 # dexcontrol clips every timed command's streaming window by this FIXED amount
 # (chassis.py _execute_timed_command: duration = max(wait_time - 1.0, 0)).
 _LIB_CMD_CLAMP_S = 1.0
@@ -188,6 +197,7 @@ def strafe_left(bot, distance_m: float = None, speed: float = None) -> None:
     """
     if speed is None:
         speed = cfg.CHASSIS_STRAFE_SPEED_MS
+    _LAST_STRAFE[0] = "left"
 
     if distance_m is not None:
         wait_time = distance_m / speed + cfg.CHASSIS_CMD_DEAD_TIME_S
@@ -219,6 +229,7 @@ def strafe_right(bot, distance_m: float = None, speed: float = None) -> None:
     """
     if speed is None:
         speed = cfg.CHASSIS_STRAFE_SPEED_MS
+    _LAST_STRAFE[0] = "right"
 
     if distance_m is not None:
         wait_time = distance_m / speed + cfg.CHASSIS_CMD_DEAD_TIME_S
@@ -237,6 +248,54 @@ def strafe_right(bot, distance_m: float = None, speed: float = None) -> None:
         bot.chassis.move_sideways(-speed, wait_time=wait_time)
     time.sleep(cfg.CHASSIS_SETTLE_S)
     logger.info("Settle complete")
+
+
+def _creep(bot, vx: float, vy: float, max_m: float, stop_fn, what: str) -> float:
+    """Slow straight-line drive at (vx, vy) m/s that ends as soon as
+    ``stop_fn()`` returns True (polled every 50 Hz tick) or after ``max_m``:
+    pre-steered and streamed like _drive (no ramp — at a few cm/s the chassis
+    is at speed within a tick), braked with the streamed _stop. Returns the
+    distance driven, speed x time (open loop, >= 0)."""
+    speed = float(np.hypot(vx, vy))
+    signed_speed = _pre_steer(bot, vx, vy)
+    if signed_speed is None:
+        logger.warning("creep skipped (no pre-steer)")
+        return 0.0
+    steer = np.asarray(bot.chassis.steering_angle, dtype=float)
+    limit_s = float(max_m) / speed
+    dt = 1.0 / 50.0
+    t0 = time.monotonic()
+    stopped_by = "max distance"
+    try:
+        while True:
+            t = time.monotonic() - t0
+            if t >= limit_s:
+                break
+            if stop_fn():
+                stopped_by = "stop condition"
+                break
+            bot.chassis.set_motion_state(steer, signed_speed)
+            time.sleep(dt)
+    finally:
+        moved = speed * min(time.monotonic() - t0, limit_s)
+        _stop(bot)
+    logger.info("creep {}: {:.3f} m @ {:.3f} m/s, ended by {}", what, moved, speed, stopped_by)
+    return moved
+
+
+def creep_sideways(bot, direction: str, speed: float, max_m: float, stop_fn) -> float:
+    """_creep ``direction`` "left" / "right"; returns the signed distance (+ = left)."""
+    left = direction == "left"
+    moved = _creep(bot, 0.0, speed if left else -speed, max_m, stop_fn, direction.upper())
+    return moved if left else -moved
+
+
+def creep_straight(bot, direction: str, speed: float, max_m: float, stop_fn) -> float:
+    """_creep ``direction`` "forward" / "backward"; returns the signed distance
+    (+ = forward)."""
+    fwd = direction == "forward"
+    moved = _creep(bot, speed if fwd else -speed, 0.0, max_m, stop_fn, direction.upper())
+    return moved if fwd else -moved
 
 
 def move_forward(bot, distance_m: float = None, speed: float = None) -> None:

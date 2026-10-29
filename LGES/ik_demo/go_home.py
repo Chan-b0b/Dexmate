@@ -44,19 +44,25 @@ def safe_home(arm: ArmMover, lift: bool = True) -> None:
 
 
 def both_arms_home(bot, left: ArmMover | None = None,
-                   right: ArmMover | None = None) -> None:
+                   right: ArmMover | None = None, right_first: bool = False) -> None:
     """Safe-home BOTH arms (left first — it's the one usually low over the box).
     Pass existing movers to reuse them (a model build is ~3 s each); a missing
-    one gets a fresh ArmMover."""
-    try:
+    one gets a fresh ArmMover. ``right_first``: the session start-up order
+    (1026: the arms start far from home, the right one goes first)."""
+    def _left():
         safe_home(left if left is not None else ArmMover(robot=bot, side="left"))
-    except Exception as e:
-        logger.warning("left arm home failed: {}", e)
-    try:
+
+    def _right():
         safe_home(right if right is not None
                   else ArmMover(robot=bot, side="right", ee_frame="R_gripper_base"))
-    except Exception as e:
-        logger.warning("right arm home failed: {}", e)
+
+    order = (("right", _right), ("left", _left)) if right_first else \
+            (("left", _left), ("right", _right))
+    for side, fn in order:
+        try:
+            fn()
+        except Exception as e:
+            logger.warning("{} arm home failed: {}", side, e)
 
 
 def _main() -> None:

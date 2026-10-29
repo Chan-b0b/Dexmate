@@ -651,8 +651,8 @@ class SuctionMover(ArmMover):
         Approach from transport to the hover as one blended stream (suction
         OFF) and settle there, then descend per-tick — cruise, the long
         DESCENT_DECEL_BAND_M slowdown, creep — through the creep line WITHOUT
-        stopping; suction ON (async) at the creep line and creep to contact +
-        seal, sealing on contact (same seal strategy as the gated pick, minus
+        stopping; suction ON (async) at the hover (1027; was the creep line) and
+        creep to contact + seal, sealing on contact (same seal strategy as the gated pick, minus
         the scan). Same descent path as pick_retreat. The 0903-0909 variant
         ended the planned stream AT the creep line instead: that leg ran up to
         0.48 m/s and swung the cup 65mm / 12.7 deg in flight (0907 logs), and
@@ -669,8 +669,8 @@ class SuctionMover(ArmMover):
         ee_pos, rpy = self.taught_target(pose)
         self._pick_aim_xy = (float(ee_pos[0]), float(ee_pos[1]))
         ez = float(ee_pos[2]) if expected_z is None else float(expected_z)
-        logger.info("[suction] pick: approach@transport -> hover -> per-tick "
-                    "descent -> suction on at creep line -> creep-seal")
+        logger.info("[suction] pick: approach@transport -> hover -> suction on -> "
+                    "per-tick descent -> creep-seal")
         if suction_io.is_suction_commanded_on():
             # BEFORE the stream, not after: suction_off is blocking (two HTTP
             # round-trips + a 0.5s settle) and at the creep line it would put
@@ -683,6 +683,10 @@ class SuctionMover(ArmMover):
                                            tick_cb=self._approach_force_guard(hard))
         if q_hover is None:
             return PickResult(False, "unreachable")
+        # 1027: pump ON at the hover (async), not at the creep line — DI0 latches
+        # ~2 s after the command, so the vacuum now builds during the descent
+        # instead of with the cup already pressed on the part
+        on = suction_io.suction_on_async()
         # Creep gap: the LONG one by default. The 20mm settled gap was sized for
         # a stream that stops and settles on the creep line; this descent runs
         # through it, so the gap must also absorb the fast-stretch lag.
@@ -690,8 +694,8 @@ class SuctionMover(ArmMover):
         _last_q, z, reason = self._descend_open(creep_z, rpy, q_hover, hard,
                                                 halt_at_floor=False)
         if reason != "at_floor":
+            on.join(); suction_io.suction_off()
             return PickResult(False, reason, z)
-        suction_io.suction_on_async()   # off the critical path — creep continues
         # start_elapsed=DESCENT_RAMP_S: _descend_open did NOT halt, see
         # _creep_to_force's start_elapsed docstring.
         return self._seal_and_lift(rpy, lift_to_clear,
@@ -1856,8 +1860,8 @@ class SuctionMover(ArmMover):
     # ------------------------------------------------------------------
     def pick_gated(self, pose, case_center=None, expected_z=None,
                    lift_to_clear: bool = False) -> PickResult:
-        """Battery pick with a barcode gate. Suction OFF, fast-descend to creep_z
-        while scanning; then suction ON and creep to contact + seal. If nothing
+        """Battery pick with a barcode gate. Suction ON at the hover (1027), fast-
+        descend to creep_z while scanning; then creep to contact + seal. If nothing
         read by creep_z, sweep x/y at creep_z (battery's side of the case center,
         no lift/tilt) until it reads first. Exhausted -> grab anyway (no divert).
         ``expected_z`` overrides the taught contact z (layer stacking).
@@ -1869,10 +1873,9 @@ class SuctionMover(ArmMover):
         q_hover = self._approach_and_hover(ee_pos, rpy, ez)
         if q_hover is None:
             return PickResult(False, "unreachable")
-        if suction_io.is_suction_commanded_on():
-            # re-assert only when needed (two HTTP calls + 0.5s settle) — the
-            # cup is already OFF on a normal pick
-            suction_io.suction_off()
+        # 1027: pump ON at the hover (async), as pick() — was a BLOCKING
+        # suction_on after the scan (~0.47 s) with the vacuum only starting then
+        on = suction_io.suction_on_async()
         # empty-cup tare happens IN-STREAM during the scan-descent (_descend_open)
 
         creep_z = ez + cfg.DESCENT_CREEP_GAP_M
@@ -1883,6 +1886,7 @@ class SuctionMover(ArmMover):
             last_q, z, reason = self._descend_open(creep_z, rpy, q_hover, cfg.FORCE_HARD_LIMIT_N,
                                                    pause=pause)
             if reason != "at_floor":
+                on.join(); suction_io.suction_off()
                 return PickResult(False, reason, z)
             code = scanner.result()
             if code is None:
@@ -1893,7 +1897,6 @@ class SuctionMover(ArmMover):
             scanner.stop()
         logger.info("[suction] barcode: {!r}", code)
 
-        suction_io.suction_on()
         res = self._seal_with_retry(rpy)
         res.barcode = code
         if res.success:
@@ -1938,7 +1941,8 @@ class SuctionMover(ArmMover):
                 elapsed = 0.0                  # ramp back in from rest
                 self.freeze_reference(False)   # re-warm: the arm may have been touched
                 t_tick = time.perf_counter()
-            speed = self._descent_speed(z, z_floor, elapsed)
+            speed = self._descent_speed(z, z_floor, elapsed,
+                                        fast=cfg.PICK_DESCENT_SPEED_M_S)
             z_next = max(z_floor, z - speed * dt)
             sol, p = self.solve_step(prev_q, (x, y, z), (x, y, z_next), rpy, dt)
             if sol.pos_err_m > cfg.REACH_TOL_M:
@@ -2091,7 +2095,7 @@ class SuctionMover(ArmMover):
                           tick_cb=None, stop_z: "float | None" = None,
                           fast: "float | None" = None) -> PickResult:
         """The straight place descent (place(straight=True); from pick_place, 1012): the corner seat's VERTICAL profile —
-        per-tick from the hover, CORNER_DESCENT_SPEED_M_S cruise, decelerating
+        per-tick from the hover, PLACE_DESCENT_SPEED_M_S cruise, decelerating
         into ``target_ee_z`` (touch taper) — with no lateral drive: x,y,rpy held
         every tick, stop at the first FORCE_CONTACT_THRESHOLD_N. As in
         _descend_corner_seat, a first touch that the creep's tracking lag carries
@@ -2101,7 +2105,7 @@ class SuctionMover(ArmMover):
         ``stop_z``: descend to this height instead (decelerating into it), hold
         cfg.PLACE_RELEASE_SETTLE_S for the arm to catch up and return "at_height";
         a force contact on the way is "early_contact" (failure).
-        ``fast``: cruise override (default CORNER_DESCENT_SPEED_M_S)."""
+        ``fast``: cruise override (default PLACE_DESCENT_SPEED_M_S)."""
         if stop_z is not None:
             target_ee_z = float(stop_z)
         dt = 1.0 / float(cfg.CONTROL_HZ)
@@ -2121,7 +2125,7 @@ class SuctionMover(ArmMover):
         pace = TickPacer(dt)
         while descended < cfg.DESCENT_MAX_M:
             speed = self._descent_speed(z, creep_z, elapsed,
-                                        fast=(cfg.CORNER_DESCENT_SPEED_M_S
+                                        fast=(cfg.PLACE_DESCENT_SPEED_M_S
                                               if fast is None else fast),
                                         touch_z=target_ee_z)
             z_cmd = z - speed * dt
@@ -2313,7 +2317,10 @@ class SuctionMover(ArmMover):
 
         traveled = elapsed = 0.0
         pace = TickPacer(dt)
-        while traveled < dist:
+        # not `traveled < dist`: near the end the leftover can drop below the
+        # float resolution of a ~0.7m coordinate, p + u*step == p, traveled
+        # stops growing and the pass never ends (the 10/12-10/27 silent freezes)
+        while dist - traveled > 1e-6:
             if pause is not None and pause.paused():
                 _halt(prev_q)
                 pause.hold()
@@ -2367,6 +2374,13 @@ class SuctionMover(ArmMover):
         forward = True
         for dx in _axis_steps(cfg.BCR_SEARCH_X_STEP_M, cfg.BCR_SEARCH_MAX_X_M):
             a, b = (y_lo, y_hi) if forward else (y_hi, y_lo)
+            span = self._reachable_span(ee_pos, dx, a, b, z, rpy, c, s)
+            if span is None:
+                logger.info("[suction] barcode sweep: dx={:+.0f}mm pass unreachable — skipped",
+                            dx * 1000)
+                forward = not forward
+                continue
+            a, b = span
             wx0 = float(ee_pos[0]) + c * dx - s * a
             wy0 = float(ee_pos[1]) + s * dx + c * a
             q0 = self.move_ee([wx0, wy0, z], rpy)   # to this pass's start
@@ -2391,6 +2405,43 @@ class SuctionMover(ArmMover):
         # back over the real pick point before the seal descent
         self.move_ee([float(ee_pos[0]), float(ee_pos[1]), z - cfg.BCR_SWEEP_LIFT_M], rpy)
         return code if code is not None else scanner.result()
+
+    def _reachable_span(self, ee_pos, dx, a, b, z, rpy, c, s):
+        """IK pre-check of one sweep pass (case-local y a -> b at offset dx,
+        plane z) in BCR_SWEEP_CHECK_STEP_M samples, warm-chained from the live
+        config: each must reach (REACH_TOL_M), sit in the joint band and be
+        collision free. Returns the longest contiguous solvable stretch as
+        (a', b') in the pass direction, or None if no two neighbouring samples
+        solve. Command-side only, like column_reachable."""
+        n = max(1, int(np.ceil(abs(b - a) / float(cfg.BCR_SWEEP_CHECK_STEP_M))))
+        ys = np.linspace(a, b, n + 1)
+        q = self._start_q()
+        ok = []
+        for ly in ys:
+            wx = float(ee_pos[0]) + c * dx - s * float(ly)
+            wy = float(ee_pos[1]) + s * dx + c * float(ly)
+            sol = self.solve_pose((wx, wy, z), rpy, seed=q, min_motion=True)
+            good = (sol.pos_err_m <= cfg.REACH_TOL_M and sol.in_limits
+                    and not sol.in_collision)
+            ok.append(good)
+            if good:
+                q = sol.q
+        best, start = (0, 0), None
+        for i, g in enumerate(ok + [False]):
+            if g and start is None:
+                start = i
+            elif not g and start is not None:
+                if i - start > best[1] - best[0]:
+                    best = (start, i)
+                start = None
+        if best[1] - best[0] < 2:
+            return None
+        a2, b2 = float(ys[best[0]]), float(ys[best[1] - 1])
+        if best != (0, len(ys)):
+            logger.info("[suction] barcode sweep: dx={:+.0f}mm pass clipped to the IK-solvable "
+                        "y {:+.0f}->{:+.0f}mm (asked {:+.0f}->{:+.0f}mm)",
+                        dx * 1000, a2 * 1000, b2 * 1000, a * 1000, b * 1000)
+        return a2, b2
 
 
 # ---------------------------------------------------------------------------

@@ -64,7 +64,7 @@ ROBOTIQ_GRIP_MIN_GAP: int = 5
 # ---------------------------------------------------------------------------
 # TARGET_BARCODES: list[str] = ["UDCG7B0289", "UDCG7B0291"]
 
-TARGET_BARCODES: list[str] = ['UDCG7B0289', 'UDCG7B0294']
+TARGET_BARCODES: list[str] = ['UDCG7B0294', 'UDCG7B0292']
 # Barcode-gated battery pick: scan during the fast (suction-off) descent down to
 # creep_z. If read there -> suction ON, creep to contact, seal. If NOT read ->
 # sweep AT the raised plane (no tilt), bounded to the battery's side of the
@@ -80,6 +80,8 @@ BCR_SWEEP_SPEED_M_S: float = 0.05        # continuous y-pass EE speed (reads in 
 BCR_SEARCH_MAX_Y_M: float = 0.05         # +/- extent of the continuous y pass
 BCR_SEARCH_X_STEP_M: float = 0.02        # x-offset step of the fallback columns
 BCR_SEARCH_MAX_X_M: float = 0.05         # +/- extent of the x fallback offsets
+BCR_SWEEP_CHECK_STEP_M: float = 0.01     # IK pre-check sample spacing along a pass;
+                                         # each pass is clipped to its solvable stretch
 
 # ---------------------------------------------------------------------------
 # Right arm (gripper.py). The divert handoff choreography (HANDOFF_* geometry,

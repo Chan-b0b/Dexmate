@@ -22,8 +22,11 @@ seeded from the current config) is confined to the sensing legs.
 from __future__ import annotations
 
 import os
+import threading
 import time
+from contextlib import contextmanager
 from dataclasses import dataclass
+from pathlib import Path
 
 import numpy as np
 import pinocchio as pin
@@ -243,6 +246,8 @@ class ArmMover:
         self._q_cmd: np.ndarray | None = None   # last joints sent (see _send / _start_q)
         self._step_log_t = 0.0                   # solve_step slowdown log rate limit
         self._clamp_streak = 0                   # consecutive solve_step ticks spent re-configuring
+        self._jtrace: list | None = None         # joint_trace samples while a trace block is open
+        self._jtrace_stamp = time.strftime("%Y%m%d_%H%M%S")
         self._setup_model(torso_q)
         self._setup_ik()
         self._setup_collision()
@@ -421,6 +426,12 @@ class ArmMover:
         s = float(cfg.SPEED_SCALE_RIGHT if self._side == "right" else cfg.SPEED_SCALE_LEFT)
         # Clamp the configured velocity cap to the arm's real per-joint limit.
         self._ruckig_vmax = np.minimum(self._v_max, cfg.MAX_JOINT_VEL) * s
+        if self._side == "left":
+            # what the joints can really do (cfg.JOINT_VEL_CAP_LEFT) — a hard
+            # ceiling, so it is applied after the scale, not multiplied by it
+            caps = np.array([np.inf if c is None else float(c)
+                             for c in cfg.JOINT_VEL_CAP_LEFT])
+            self._ruckig_vmax = np.minimum(self._ruckig_vmax, caps)
         self._ruckig_amax = np.full(_ARM_DOF, cfg.MAX_JOINT_ACCEL * s)
         self._ruckig_jmax = np.full(_ARM_DOF, cfg.MAX_JOINT_JERK * s)
 
@@ -453,6 +464,62 @@ class ArmMover:
         q = np.asarray(q, dtype=float)
         self._arm.set_joint_pos_vel(q, np.asarray(v, dtype=float))
         self._q_cmd = q
+        if self._jtrace is not None:
+            try:
+                self._jtrace.append((time.perf_counter(), q, np.asarray(v, dtype=float),
+                                     self._live_arm_q()))
+            except Exception:  # noqa: BLE001 — a diagnostic must never stop a stream
+                pass
+
+    @contextmanager
+    def joint_trace(self, label: str):
+        """LOG ONLY (cfg.JOINT_TRACE_SAVE, changes no motion): every _send inside
+        the block records (time, commanded q, commanded dq, live q). On exit one
+        line logs, per joint, the largest |commanded - live| and the peak
+        commanded speed, and the arrays go to
+        RUN_LOG_DIR/joint_trace/<mover stamp>/<HHMMSS>_<label>.npz (written on a
+        thread). Answers WHICH joint trails — the track/tilt traces only see the
+        EE. Never raises."""
+        if not cfg.JOINT_TRACE_SAVE or cfg.RUN_LOG_DIR is None or self._robot is None:
+            yield
+            return
+        self._jtrace = []
+        try:
+            torso = np.asarray(self._robot.torso.get_joint_pos(), dtype=float)
+        except Exception:  # noqa: BLE001
+            torso = np.full(3, np.nan)
+        try:
+            yield
+        finally:
+            samples, self._jtrace = self._jtrace, None
+            self._save_joint_trace(label, samples, torso)
+
+    def _save_joint_trace(self, label: str, samples: list, torso: np.ndarray) -> None:
+        if len(samples) < 2:
+            return
+        try:
+            t = np.array([s[0] for s in samples]); t -= t[0]
+            q_cmd = np.array([s[1] for s in samples])
+            v_cmd = np.array([s[2] for s in samples])
+            q_live = np.array([s[3] for s in samples])
+            lag = np.rad2deg(np.max(np.abs(q_cmd - q_live), axis=0))
+            vpk = np.rad2deg(np.max(np.abs(v_cmd), axis=0))
+            logger.info("[arm] joint trace {} ({:.1f}s, {} ticks): max |cmd-live| deg "
+                        "j1..j7 = {} | peak cmd deg/s = {}", label, float(t[-1]), len(t),
+                        " ".join(f"{x:.1f}" for x in lag), " ".join(f"{x:.0f}" for x in vpk))
+            out = Path(cfg.RUN_LOG_DIR) / "joint_trace" / self._jtrace_stamp
+            f = out / f"{time.strftime('%H%M%S')}_{label}.npz"
+
+            def write():
+                try:
+                    out.mkdir(parents=True, exist_ok=True)
+                    np.savez_compressed(f, t=t, q_cmd=q_cmd, v_cmd=v_cmd, q_live=q_live,
+                                        q_torso=torso, side=self._side, label=label)
+                except Exception as e:  # noqa: BLE001
+                    logger.warning("[arm] joint trace save failed ({})", e)
+            threading.Thread(target=write, daemon=True).start()
+        except Exception as e:  # noqa: BLE001 — a diagnostic must never stop a run
+            logger.warning("[arm] joint trace {} failed ({})", label, e)
 
     def _start_q(self) -> np.ndarray:
         """Start config for the next primitive: the last COMMANDED joints while

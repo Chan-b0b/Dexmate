@@ -13,11 +13,20 @@ destination, part held) is swapped: instead of parking the arm during the leg,
   3. each --heights z (UP only, part held, straight vertical): capture "carry_z<z>";
   4. the normal view park (same as every run), capture "parked" — the clean
      reference from the SAME chassis pose, for both cameras;
-  5. run_item continues as normal (detect + place, return leg with park).
+  5. run_item continues as normal (detect + place).
+
+The RETURN leg (cup empty, 1026 AprilTag study) is swapped the same way:
+
+  6. right after the place the arm only rises to SAFE_TRANSPORT_Z: capture
+     "placed" (the just-placed part under the empty arm, chassis still);
+  7. the leg runs with the arm left there: capture "return" at the next station;
+  8. the normal view park, capture "return_parked".
+
+Plus "start": once at the source after the positioning `d`, arms at home.
 
 The right arm never moves here beyond the start-up home: its home
 (cfg.HOME_JOINTS_RIGHT, 1015) IS the wrist-camera view pose, aimed at the bin in
-front of the robot. The return leg (cup empty) keeps the normal parallel view park.
+front of the robot.
 Chassis legs use the learned distances but do NOT write chassis_legs.json.
 
 Run from LGES/ (E-stop in reach — moves arms, suction, chassis):
@@ -170,19 +179,29 @@ def main() -> None:
         with SuctionMover(bot) as m:
             if m.software_estop_active() or not m.ensure_ready(release_estop=False):
                 raise SystemExit("arm not ready (software E-Stop?)")
-            both_arms_home(bot, left=m)
+            both_arms_home(bot, left=m, right_first=True)
             cs.set_head_pitch(bot, angle=24.0, tol_deg=0.3)
             cap = Capture(bot, m, out, args.frames, args.src, args.tgt)
             cap.save_camera_info()
 
-            # outbound leg of each item = its FIRST _park_during_legs call
+            # outbound leg of each item = its FIRST _park_during_legs call, the
+            # return leg = its SECOND (scan=False: no divert excursion in between)
             orig_park_during_legs = cs._park_during_legs
-            state = {"outbound_done": True, "label": ""}
+            state = {"calls": 2}
 
             def park_during_legs(label, arm_moves, chassis_legs):
-                if state["outbound_done"]:
+                state["calls"] += 1
+                if state["calls"] == 2:       # return leg, cup empty
+                    _rise_to_transport(m)
+                    cap(label, "placed")
+                    orig_park_during_legs(label, [], chassis_legs)
+                    cap(label, "return")
+                    for fn in arm_moves:      # the normal view park, chassis still
+                        fn()
+                    cap(label, "return_parked")
+                    return
+                if state["calls"] > 2:
                     return orig_park_during_legs(label, arm_moves, chassis_legs)
-                state["outbound_done"] = True
                 orig_park_during_legs(label, [lambda: _rise_to_transport(m)], chassis_legs)
                 cap(label, "carry")
                 for z in args.heights:
@@ -208,8 +227,9 @@ def main() -> None:
                 logger.info("position the chassis at the SOURCE station (case in front), then `d`")
                 if not cs._manual_strafe(bot, "start"):
                     return
+                cap("start", "start")
                 for label in args.items:
-                    state["outbound_done"] = False
+                    state["calls"] = 0
                     ok = cs.run_item(bot, m, label, LABEL_KEY[label], args.src, args.tgt,
                                      scan=False, auto=True, leg=leg, divert_leg=divert_leg)
                     logger.info("[capture] item {} {}", label, "OK" if ok else "FAILED")

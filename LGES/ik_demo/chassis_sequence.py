@@ -92,6 +92,7 @@ from .barcode import is_target
 from .config import resolve_poses
 from .box_pick import run_box_pick
 from .chassis_watch import ChassisWatch
+from .station_tags import TagShadow
 from .gripper import GripperMover
 from .arm import ArmMover, connect_robot, move_torso
 from .suction import SuctionMover
@@ -694,6 +695,295 @@ def _save_wrist_visit(bot, station: str, label: str) -> None:
         logger.info("[{}] wrist watch: {} arrival -> {}", label, station, f.name)
     except Exception as e:  # noqa: BLE001 — a diagnostic save must not stop a run
         logger.warning("[{}] wrist watch save failed ({})", label, e)
+
+
+def _tag_check(shadow: "TagShadow | None", bot, station: str, label: str, center,
+               pose_key: "str | None" = None) -> None:
+    """cfg.STATION_TAG_SHADOW, LOG ONLY: tag + remembered case pose vs the
+    `center` this pick / place is about to use (station_tags.TagShadow.check)."""
+    if shadow is None:
+        return
+    rgb = _head_rgb(bot)
+    if rgb is not None:
+        shadow.check(rgb, *_joints(bot), station, label, center, pose_key)
+
+
+def _tag_record(shadow: "TagShadow | None", bot, mover: SuctionMover, station: str,
+                label: str, aimed) -> None:
+    """LOG ONLY: after a CASE place, the case pose from the arm's joint readings
+    becomes the station's remembered pose (station_tags.TagShadow.record)."""
+    if shadow is None:
+        return
+    rgb = _head_rgb(bot)
+    if rgb is not None:
+        pos, rpy = mover.current_ee_pose()
+        shadow.record(rgb, *_joints(bot), station, label, pos, rpy, aimed)
+
+
+def _tags_now(bot, shadow: TagShadow) -> dict:
+    """Tags in a fresh still frame ({} on no frame)."""
+    rgb = _head_rgb(bot)
+    return {} if rgb is None else shadow.tags(np.array(rgb, copy=True), *_joints(bot))
+
+
+def _tag_creep(bot, shadow: TagShadow, label: str, direction: str, max_m: float) -> float:
+    """Creep `direction` ("left"/"right"/"forward"/"backward") while a thread
+    reads tags on every new frame; stops at the first complete pair
+    (move_chassis.creep_sideways / creep_straight). Returns the signed distance
+    driven (+ = left / forward)."""
+    from .move_chassis import creep_sideways, creep_straight
+    creep = creep_sideways if direction in ("left", "right") else creep_straight
+    found, done = threading.Event(), threading.Event()
+
+    def watch():
+        while not done.is_set():
+            rgb = _head_rgb(bot, fresh=False)
+            if rgb is not None and shadow.has_pair(
+                    shadow.tags(np.array(rgb, copy=True), *_joints(bot))):
+                found.set()
+                return
+            done.wait(0.01)
+    th = threading.Thread(target=watch, name="tag-creep", daemon=True)
+    th.start()
+    try:
+        return creep(bot, direction, cfg.STATION_TAG_CREEP_SPEED_MS, max_m, found.is_set)
+    finally:
+        done.set()
+        th.join(timeout=1.0)
+
+
+def _tag_wiggle(bot, shadow: TagShadow, label: str) -> dict:
+    """A new view angle on a tag pair whose partner is hidden (tape glare): creep
+    BACK STATION_TAG_WIGGLE_M, then forward to as far past the start, reading
+    tags all the way, stopping at the first pair. Returns the tags seen at the
+    end (still frame)."""
+    wiggle = float(cfg.STATION_TAG_WIGGLE_M)
+    logger.info("[tagarrive] {}: looking from {:.0f} cm back / forward", label, wiggle * 100)
+    back = _tag_creep(bot, shadow, label, "backward", wiggle)
+    seen = _tags_now(bot, shadow)
+    if not shadow.has_pair(seen):
+        _tag_creep(bot, shadow, label, "forward", abs(back) + wiggle)
+        seen = _tags_now(bot, shadow)
+    return seen
+
+
+def _tag_arrive(bot, shadow: "TagShadow | None", station: str, label: str,
+                nav: "ChassisNav | None", at: str) -> "tuple[bool, bool]":
+    """cfg.STATION_TAG_ARRIVE (MOVES THE CHASSIS): the station arrival by tags,
+    before the detection. Chassis still, a tag PAIR in view? If not:
+
+      - some tag in view (its partner hidden — tape glare, the arm): creep BACK
+        STATION_TAG_WIGGLE_M, then forward to as far past the start, reading
+        tags all the way — a new view angle; stops at the first pair. Not arrival
+        residual, so it teaches nothing.
+      - no tag at all (the pair is out of view): creep on in the last strafe's
+        direction (<= STATION_TAG_CREEP_MAX_M). A creep that FOUND the pair is
+        arrival residual and teaches `nav` like the window does, unless
+        nav.skip_next_learn says this arrival is not the leg's.
+
+    Then the station's remembered case goes in the WINDOW from the tags
+    (_into_window, re-looking after each move): from a pair, else from a single
+    tag with a memory (fine for the +-5 cm window, not for an aim). Nothing to
+    go on -> return and the caller's detection window runs as before. Returns
+    (taught, tag_ok): taught = `nav` was already handed to _into_window (the
+    caller must not teach it again); tag_ok = the case is in the window by a
+    tag PAIR — the caller skips its detection window and aims from the tags
+    (_tag_aim)."""
+    if shadow is None or not cfg.STATION_TAG_ARRIVE:
+        return False, False
+    from .move_chassis import last_strafe
+    taught = False
+    try:
+        seen = _tags_now(bot, shadow)
+        if not shadow.has_pair(seen) and seen:
+            logger.info("[tagarrive] {} {}: tags {} but no pair", station, label, sorted(seen))
+            seen = _tag_wiggle(bot, shadow, label)
+        if not shadow.has_pair(seen) and not seen:
+            direction = last_strafe()
+            logger.info("[tagarrive] {} {}: no tag in view — creeping {}", station, label,
+                        direction.upper())
+            dy = _tag_creep(bot, shadow, label, direction, cfg.STATION_TAG_CREEP_MAX_M)
+            seen = _tags_now(bot, shadow)
+            # only a creep that FOUND the pair measured the arrival residual
+            if (dy and shadow.has_pair(seen) and nav is not None
+                    and not nav.skip_next_learn):
+                nav.learn(dy, at)
+        moves = 0
+        while True:
+            hit = shadow.predict(station, seen, allow_single=True)
+            if hit is None:
+                logger.info("[tagarrive] {} {}: {} — detection window", station, label,
+                            "no remembered case yet" if seen else "no tag in view")
+                return taught, False
+            key, case = hit
+            win = _into_window(bot, label, case[:2], moves,
+                               nav=None if taught else nav, at=at)
+            taught = taught or nav is not None
+            if win != "moved":
+                logger.info("[tagarrive] {} {}: tag window {} after {} move(s) by {}, case "
+                            "({:.3f},{:+.3f})", station, label, win, moves, key, case[0],
+                            case[1])
+                return taught, win == "ok" and key.startswith("pair")
+            moves += 1
+            seen = _tags_now(bot, shadow)
+    except Exception as e:  # noqa: BLE001 — fall back to the detection window
+        logger.warning("[tagarrive] {} {} failed ({}) — detection window", station, label, e)
+        return taught, False
+
+
+def _tag_aim(bot, shadow: "TagShadow | None", station: str, label: str, z_ee: float):
+    """cfg.STATION_TAG_AIM: the (x, y, z_ee, yaw) case centre a pick / place
+    aims at — x, y, yaw from the tag PAIR in view + the station's remembered
+    case (yaw folded into _center_from_det's [-90, 90)), z_ee as given. None
+    (off / no pair with a memory in view) -> the caller falls back."""
+    if shadow is None or not cfg.STATION_TAG_AIM:
+        return None
+    hit = shadow.predict(station, _tags_now(bot, shadow))
+    if hit is None:
+        logger.warning("[tagaim] {} {}: no tag pair with a memory in view", station, label)
+        return None
+    key, (x, y, yaw) = hit
+    yaw = float(np.radians((np.degrees(yaw) + 90.0) % 180.0 - 90.0))
+    logger.info("[tagaim] {} {}: aiming at the tags ({}) ({:.4f},{:+.4f}) yaw {:+.1f}deg",
+                station, label, key, x, y, np.degrees(yaw))
+    return (float(x), float(y), float(z_ee), yaw)
+
+
+# measured battery-top z per station: (z, layers) — the next tag-only read's
+# expected height (run() clears it)
+_CASE_TOPS: dict = {}
+
+
+def _expected_top(station: str, layers: int, fallback: float) -> float:
+    """Battery top expected at `station` with `layers`: the last measured one
+    there, shifted by LAYER_PITCH_M per layer of difference, else `fallback`."""
+    prev = _CASE_TOPS.get(station)
+    if prev is None:
+        return float(fallback)
+    return float(prev[0] - (prev[1] - layers) * cfg.LAYER_PITCH_M)
+
+
+def _tag_hover_top(bot, shadow: "TagShadow | None", station: str, label: str, center,
+                   expected_top: float) -> "float | None":
+    """The battery-top z from the head depth with NO detection (and the arm /
+    held part possibly over the case): the inner OBB_DEPTH_INNER_FRAC box of a
+    CASE_BEV_SIZE_M case at the tag-aimed `center`, projected into the depth
+    image; only pixels within STATION_TAG_DEPTH_WINDOW_M of `expected_top` (the
+    held part and the arm sit 25 cm+ above); their OBB_DEPTH_PCT percentile -
+    BATTERY_TOP_PCT_BIAS_M, as _battery_top_plane. Saves the frame (head RGB +
+    depth + joints + result) as tag_shadow/<stamp>/*_hover.npz. None on too
+    few pixels."""
+    import cv2
+    try:
+        rgb = _head_rgb(bot)
+        depth = bot.sensors.head_camera.get_depth()
+        if rgb is None or depth is None:
+            logger.warning("[taghover] {} {}: no frame", station, label)
+            return None
+        rgb, depth = np.array(rgb, copy=True), np.array(depth, copy=True)
+        q_torso, q_head = _joints(bot)
+        bev = dcb.bev
+        K = bev.intrinsic_matrix()
+        T = bev.cg.zed_left_camera_pose_from_joints(q_torso, q_head)    # base <- cam
+        long_m, short_m = dcb.cfg.CASE_BEV_SIZE_M
+        f = float(cfg.OBB_DEPTH_INNER_FRAC)
+        c, sn = np.cos(center[3]), np.sin(center[3])
+        pts = []
+        for sl, ss in ((1, 1), (1, -1), (-1, -1), (-1, 1)):
+            dx, dy = sl * f * long_m / 2.0, ss * f * short_m / 2.0
+            pb = np.array([center[0] + c * dx - sn * dy, center[1] + sn * dx + c * dy,
+                           expected_top, 1.0])
+            pc = np.linalg.inv(T) @ pb
+            pts.append((K @ (pc[:3] / pc[2]))[:2])
+        dh, dw = depth.shape[:2]
+        rh, rw = rgb.shape[0], rgb.shape[1]
+        mask = np.zeros((dh, dw), np.uint8)
+        cv2.fillPoly(mask, [np.round(np.array(pts) * [dw / rw, dh / rh]).astype(np.int32)], 1)
+        vs, us = np.nonzero(mask)
+        d = depth[vs, us].astype(np.float64)
+        ok = np.isfinite(d) & (d > 0.05)
+        u, v, d = us[ok] * (rw / dw), vs[ok] * (rh / dh), d[ok]
+        z = T[2, :3] @ np.stack([(u - K[0, 2]) / K[0, 0] * d,
+                                 (v - K[1, 2]) / K[1, 1] * d, d]) + T[2, 3]
+        win = np.abs(z - expected_top) <= float(cfg.STATION_TAG_DEPTH_WINDOW_M)
+        n_held = int((z > expected_top + float(cfg.STATION_TAG_DEPTH_WINDOW_M)).sum())
+        top = None
+        if int(win.sum()) >= cfg.OBB_DEPTH_MIN_PX:
+            top = float(np.percentile(z[win], float(cfg.OBB_DEPTH_PCT))
+                        - float(cfg.BATTERY_TOP_PCT_BIAS_M))
+        logger.info("[taghover] {} {}: battery top {} (expected {:.4f}; {} px in the "
+                    "window, {} above it = arm / held part, {} valid)", station, label,
+                    "-" if top is None else "{:.4f} ({:+.1f}mm)".format(
+                        top, (top - expected_top) * 1000.0),
+                    expected_top, int(win.sum()), n_held, int(ok.sum()))
+        if shadow is not None and shadow.out_dir is not None:
+            shadow.out_dir.mkdir(parents=True, exist_ok=True)
+            out = shadow.out_dir / "{}_{}_{}_hover.npz".format(
+                time.strftime("%H%M%S"), station, label)
+            threading.Thread(target=np.savez_compressed, args=(out,), daemon=True,
+                             kwargs=dict(head_rgb=rgb, head_depth=depth, q_torso=q_torso,
+                                         q_head=q_head, center=np.asarray(center, float),
+                                         expected_top=expected_top,
+                                         top=np.nan if top is None else top,
+                                         n_window=int(win.sum()))).start()
+        return top
+    except Exception as e:  # noqa: BLE001 — the caller falls back to the record
+        logger.warning("[taghover] {} {} failed ({})", station, label, e)
+        return None
+
+
+# [(bot, TagShadow)] while task 3 runs with cfg.STATION_TAG_LEG_WATCH (run() sets it)
+_LEG_WATCH: list = []
+
+
+class _LegTagWatch:
+    """cfg.STATION_TAG_LEG_WATCH, LOG ONLY: read tags on every frame (~10 Hz)
+    while a station leg drives and log one summary line — the frames read at
+    speed (wheel > 0.2 m/s), how many saw a tag / a pair, when a pair first
+    showed, and every change in the visible set."""
+
+    def __init__(self, label: str) -> None:
+        self.bot, self.shadow = _LEG_WATCH[0]
+        self.label, self.rows = label, []
+        self.t0 = time.monotonic()
+        self._done = threading.Event()
+        self._th = threading.Thread(target=self._run, name="leg-tag-watch", daemon=True)
+        self._th.start()
+
+    def _run(self) -> None:
+        while not self._done.is_set():
+            try:
+                rgb = _head_rgb(self.bot, fresh=False)
+                if rgb is not None:
+                    t = time.monotonic() - self.t0
+                    v = float(np.max(np.abs(np.asarray(self.bot.chassis.wheel_velocity,
+                                                       dtype=float))))
+                    seen = self.shadow.tags(np.array(rgb, copy=True), *_joints(self.bot))
+                    self.rows.append((t, v, sorted(seen), self.shadow.has_pair(seen)))
+            except Exception as e:  # noqa: BLE001
+                logger.warning("[legwatch] {} stopped ({})", self.label, e)
+                return
+            self._done.wait(0.05)
+
+    def stop(self) -> None:
+        self._done.set()
+        self._th.join(timeout=1.0)
+        r = self.rows
+        if not r:
+            return
+        fast = [x for x in r if x[1] > 0.2]
+        first_pair = next((x[0] for x in r if x[3]), None)
+        changes, last = [], None
+        for t, v, ids, _ in r:
+            if ids != last:
+                changes.append("{:.1f}s@{:.2f}:{}".format(t, v, ids))
+                last = ids
+        logger.info("[legwatch] {}: {} frames in {:.1f}s; at speed (>0.2 m/s) {} frames, "
+                    "{} with a tag, {} with a pair; first pair at {}; {}", self.label,
+                    len(r), r[-1][0], len(fast), sum(1 for x in fast if x[2]),
+                    sum(1 for x in fast if x[3]),
+                    "-" if first_pair is None else "{:.1f}s".format(first_pair),
+                    " ".join(changes))
 
 
 def _redetect_on_battery_depth(bot, label: str, station: str, layers: int, det,
@@ -1303,14 +1593,7 @@ def _view_park(mover: SuctionMover, label: str) -> None:
     rise _lift_to_transport used to do itself (the per-tick stream lags at
     cruise up there — see cfg.LIFT_VERTICAL_TO_Z). Lower starts are unchanged."""
     park = cfg.ARM_VIEW_PARK_EE_POS
-    pos, rpy = mover.current_ee_pose()
-    if cfg.LIFT_VERTICAL_TO_Z - 1e-3 <= pos[2] < cfg.LIFT_CLEAR_EE_Z - 1e-3:
-        if mover.move_ee([float(pos[0]), float(pos[1]), cfg.LIFT_CLEAR_EE_Z],
-                         tuple(rpy), quiet=True) is None:
-            mover._best_effort_ascent(rpy)
-        pos, rpy = mover.current_ee_pose()
-    if pos[2] < cfg.SAFE_TRANSPORT_Z - 0.01:
-        mover.move_ee_vertical(cfg.SAFE_TRANSPORT_Z, rpy)
+    _rise_to_transport(mover)
     parked = False
     if park is not None:
         _, rpy = mover.current_ee_pose()
@@ -1337,6 +1620,47 @@ def _view_park(mover: SuctionMover, label: str) -> None:
         mover.move_joints(np.asarray(cfg.ARM_VIEW_PARK_JOINTS, dtype=np.float64))
 
 
+def _rise_to_transport(mover: SuctionMover) -> None:
+    """The rise half of _view_park: from the lift_to_clear stop up to
+    SAFE_TRANSPORT_Z, straight, xy kept (no-op already up there)."""
+    pos, rpy = mover.current_ee_pose()
+    if cfg.LIFT_VERTICAL_TO_Z - 1e-3 <= pos[2] < cfg.LIFT_CLEAR_EE_Z - 1e-3:
+        if mover.move_ee([float(pos[0]), float(pos[1]), cfg.LIFT_CLEAR_EE_Z],
+                         tuple(rpy), quiet=True) is None:
+            mover._best_effort_ascent(rpy)
+        pos, rpy = mover.current_ee_pose()
+    if pos[2] < cfg.SAFE_TRANSPORT_Z - 0.01:
+        mover.move_ee_vertical(cfg.SAFE_TRANSPORT_Z, rpy)
+
+
+# False while a leg left the arm at transport height over the bin (no view park)
+_ARM_PARKED: list = [True]
+
+
+def _leg_arm(mover: SuctionMover, label: str, shadow: "TagShadow | None", dest: str):
+    """The arm move to run IN PARALLEL with a leg toward `dest`
+    (cfg.STATION_TAG_NO_PARK): only the rise to SAFE_TRANSPORT_Z when `dest`
+    has a case remembered by a tag pair — the pick / place there runs on tags,
+    no camera view of the case needed — else the view park as always. Sets
+    _ARM_PARKED now (before the leg) for _ensure_parked."""
+    if shadow is not None and cfg.STATION_TAG_NO_PARK and shadow.knows(dest):
+        _ARM_PARKED[0] = False
+        logger.info("[{}] leg to {}: no view park (the tags know the case)", label, dest)
+        return lambda: _rise_to_transport(mover)
+    _ARM_PARKED[0] = True
+    return lambda: _view_park(mover, label)
+
+
+def _ensure_parked(mover: SuctionMover, label: str) -> None:
+    """Before any DETECTION: the view park on the spot if the last leg skipped it
+    (tags failed at a station _leg_arm trusted them for)."""
+    if not _ARM_PARKED[0]:
+        logger.warning("[{}] no tags to go on with the arm in view — view park, then "
+                       "the detection", label)
+        _view_park(mover, label)
+        _ARM_PARKED[0] = True
+
+
 def _park_during_legs(label: str, arm_moves, chassis_legs) -> None:
     """Run `arm_moves` (view park / joint home callables) in background threads
     WHILE `chassis_legs()` (one or more chassis moves) runs in the main thread.
@@ -1357,9 +1681,12 @@ def _park_during_legs(label: str, arm_moves, chassis_legs) -> None:
                for fn in arm_moves]
     for t in threads:
         t.start()
+    watch = _LegTagWatch(label) if _LEG_WATCH else None
     try:
         chassis_legs()
     finally:
+        if watch is not None:
+            watch.stop()
         for t in threads:
             t.join()
         for fn in failed:
@@ -2873,7 +3200,8 @@ def _align_to_bin(bot, label: str, target_y: "float | None" = None,
 def _divert_case_place(bot, mover: SuctionMover, label: str, slot_key: str,
                        auto: bool, leg: "ChassisNav | None",
                        divert_leg: "ChassisNav | None",
-                       zt: "ZTracker | None") -> "bool | None":
+                       zt: "ZTracker | None",
+                       shadow: "TagShadow | None" = None) -> "bool | None":
     """Suction-place the held TARGET battery into the DIVERT CASE to the LEFT
     of the source: strafe left (open-loop, view park in parallel) by
     `divert_leg`'s LEARNED distance (own ChassisNav instance, seeded from
@@ -2900,7 +3228,7 @@ def _divert_case_place(bot, mover: SuctionMover, label: str, slot_key: str,
     # CHASSIS_LEG_SPEED_MS like the source<->target legs (strafe()): these are
     # long station legs too, not corrections — the centering / adjust moves at
     # the divert case stay at the slow default
-    _park_during_legs(label, [lambda: _view_park(mover, label)],
+    _park_during_legs(label, [_leg_arm(mover, label, shadow, "left_bin")],
                       lambda: strafe_left(bot, distance_m=dist,
                                           speed=cfg.CHASSIS_LEG_SPEED_MS))
     if leg is not None:
@@ -2915,7 +3243,30 @@ def _divert_case_place(bot, mover: SuctionMover, label: str, slot_key: str,
     redetects = 0
     win_moves = 0
     taught = False      # this visit's arrival has taught divert_leg (see _into_window)
+    taught, tag_ok = _tag_arrive(bot, shadow, "left_bin", label, divert_leg, "divert")
+    div_plane = dcb.bev.top_face_z(cfg.DIVERT_CASE_LAYERS)   # = the detection's plane
     while True:
+        if tag_ok:
+            # 1027: TAGS ONLY — no detection (no view park needed)
+            c = _tag_aim(bot, shadow, "left_bin", label, div_plane + cfg.SUCTION_LENGTH_M)
+            if c is None:
+                _ensure_parked(mover, label)
+                tag_ok = False
+                continue
+            _tag_hover_top(bot, shadow, "left_bin", label, c,      # log + photo only
+                           div_plane + cfg.BATTERY_TOP_ABOVE_FACE_M)
+            pose = resolve_poses(c)[slot_key]
+            if descent_reachable(mover, pose,
+                                 expected_z=div_plane + cfg.SUCTION_LENGTH_M):
+                place_pose = pose
+                break
+            logger.warning("[{}] divert slot pose out of reach — adjust the chassis "
+                           "(f/b/l/r), `d` to re-aim + retry, `q` to give up the divert "
+                           "(the battery goes to the target case)", label)
+            if not (cfg.CHASSIS_MANUAL or auto) or not _manual_strafe(bot, "adjust"):
+                break
+            continue
+        _ensure_parked(mover, label)
         det = detect(bot, cfg.DIVERT_CASE_LAYERS)
         if det is None or not det.found:
             if redetects < 1:
@@ -2958,12 +3309,15 @@ def _divert_case_place(bot, mover: SuctionMover, label: str, slot_key: str,
         if zt is not None:
             zt.log_event("divert_miss", "divert", label, cfg.DIVERT_CASE_LAYERS)
         logger.warning("[{}] divert aborted — strafe back right to the source", label)
-        _park_during_legs(label, [lambda: _view_park(mover, label)],
+        _park_during_legs(label, [_leg_arm(mover, label, shadow, "source")],
                           lambda: strafe_right(bot, distance_m=dist,
                                                speed=cfg.CHASSIS_LEG_SPEED_MS))
         return False
-    # no z anchor for this station — expectation from the detected plane
-    exp_z = det.top_face_z + cfg.SUCTION_LENGTH_M
+    # no z anchor for this station — expectation from the detected plane (the
+    # model plane, the same on tags only)
+    exp_z = (div_plane if det is None else det.top_face_z) + cfg.SUCTION_LENGTH_M
+    if det is not None:
+        _tag_check(shadow, bot, "left_bin", label, _center_from_det(det), slot_key)
     # straight down into the slot, as the target battery place (1012)
     pres = mover.place(place_pose, expected_z=exp_z, lift_to_clear=True,
                        straight=True, hover_m=cfg.BATTERY_PLACE_HOVER_M,
@@ -2981,14 +3335,15 @@ def _divert_case_place(bot, mover: SuctionMover, label: str, slot_key: str,
                        "gate, continuing", label, pres.reason)
     logger.info("[{}] diverted to the case slot {} — strafe back right to the source",
                 label, slot_key)
-    _park_during_legs(label, [lambda: _view_park(mover, label)],
+    _park_during_legs(label, [_leg_arm(mover, label, shadow, "source")],
                       lambda: strafe_right(bot, distance_m=dist,
                                            speed=cfg.CHASSIS_LEG_SPEED_MS))
     return True
 
 
 def _place_case_in_bin(bot, mover: SuctionMover, label: str, source_yaw: float,
-                       layers_in_bin: int, auto: bool):
+                       layers_in_bin: int, auto: bool,
+                       shadow: "TagShadow | None" = None):
     """Place the HELD case into the bin box from a BIN detection — NOT from a
     detection of whatever case may already be in it. Center = _detect_bin_xy
     + SEED_BIN_CENTER_OFFSET; yaw = the bin's long-axis yaw (the case seats
@@ -3017,13 +3372,19 @@ def _place_case_in_bin(bot, mover: SuctionMover, label: str, source_yaw: float,
     release gate goes to the prompt too — the case is still on the cup in all
     three. Returns the PlaceResult once a place ran (it may
     still report a failure that released at the gate), or None if the operator
-    stopped with the case held."""
+    stopped with the case held.
+
+    `shadow` (task 2, 1027): place only with a tag PAIR in view (else look from
+    a few cm back / forward and re-detect, up to STATION_TAG_SEED_PAIR_TRIES),
+    then record the placed case from the arm in the tag frames (station "bin")
+    — task 3 loads it as its target's memory (_save_handoff / _load_handoff)."""
     from .move_chassis import strafe_left, strafe_right
     seat_z = (cfg.FLOOR_Z_BASE_M + (int(layers_in_bin) + 1) * cfg.LAYER_PITCH_M
               + cfg.SUCTION_LENGTH_M)
     search = [float(s) for s in cfg.SEED_BIN_SEARCH_STRAFES_M] if auto else []
     y_moves = 0
     win_moves = 0
+    looks = 0
     while True:
         bxy = _detect_bin_xy(bot, with_yaw=True)
         if bxy is None:
@@ -3086,6 +3447,19 @@ def _place_case_in_bin(bot, mover: SuctionMover, label: str, source_yaw: float,
                 logger.error("[{}] stopping at the bin (case still held)", label)
                 return None
             continue
+        if shadow is not None:
+            # 1027: this place becomes task 3's target memory — only with a pair
+            if (looks < int(cfg.STATION_TAG_SEED_PAIR_TRIES)
+                    and not shadow.has_pair(_tags_now(bot, shadow))):
+                looks += 1
+                logger.info("[tagarrive] bin {}: no tag pair before the place (look {}/{})",
+                            label, looks, int(cfg.STATION_TAG_SEED_PAIR_TRIES))
+                _tag_wiggle(bot, shadow, label)
+                win_moves = 0
+                continue
+            rgb = _head_rgb(bot)
+            if rgb is not None:
+                shadow.observe(rgb, *_joints(bot), "bin", label)
         # straight down onto the bin aim (1012): no corner seat, no misseat gate
         pres = mover.place(place_pose, lift_to_clear=True, straight=True,
                            release_above_m=cfg.PLACE_RELEASE_ABOVE_M)
@@ -3099,7 +3473,44 @@ def _place_case_in_bin(bot, mover: SuctionMover, label: str, source_yaw: float,
                 continue
             logger.error("[{}] stopping at the bin (case still held)", label)
             return None
+        _tag_record(shadow, bot, mover, "bin", label, center)
         return pres
+
+
+def _save_handoff(shadow: "TagShadow | None", station: str) -> None:
+    """Write `station`'s remembered case (tag frames) to STATION_TAG_HANDOFF_FILE
+    for the next task 3 (_load_handoff)."""
+    import json
+    path = cfg.STATION_TAG_HANDOFF_FILE
+    if shadow is None or path is None:
+        return
+    frames = shadow.export(station)
+    if not any(k.startswith("pair") for k in frames):
+        logger.warning("[taghandoff] no tag pair saw the placed case — nothing handed to "
+                       "task 3 (its target will be detected as before)")
+        return
+    Path(path).write_text(json.dumps({"saved": time.strftime("%Y-%m-%d %H:%M:%S"),
+                                      "frames": frames}, indent=1))
+    logger.info("[taghandoff] placed case saved for task 3 ({}) -> {}",
+                ", ".join(sorted(frames)), path)
+
+
+def _load_handoff(shadow: "TagShadow | None", stamp: str) -> None:
+    """Task 3 start: a case placed by task 2 (STATION_TAG_HANDOFF_FILE) becomes the
+    memory of the station whose bin holds it; the file is renamed *_used_<stamp>
+    so it never applies twice."""
+    import json
+    path = cfg.STATION_TAG_HANDOFF_FILE
+    if shadow is None or path is None or not Path(path).exists():
+        return
+    try:
+        data = json.loads(Path(path).read_text())
+        stations = shadow.load(data.get("frames", {}))
+        logger.info("[taghandoff] task 2's case (saved {}) -> memory of {}", data.get("saved"),
+                    ", ".join(stations) or "NO station (no pair with the case left of it)")
+    except Exception as e:  # noqa: BLE001 — task 3 then detects its target as before
+        logger.warning("[taghandoff] {} unreadable ({}) — ignored", path, e)
+    Path(path).rename(Path(path).with_name(f"{Path(path).stem}_used_{stamp}.json"))
 
 
 def run_item(bot, mover: SuctionMover, label: str, pose_key: str,
@@ -3109,7 +3520,8 @@ def run_item(bot, mover: SuctionMover, label: str, pose_key: str,
              divert_leg: "ChassisNav | None" = None,
              zt: "ZTracker | None" = None,
              divert_slots: "list[str] | None" = None,
-             batteries_below: bool = True) -> bool:
+             batteries_below: bool = True,
+             shadow: "TagShadow | None" = None) -> bool:
     """One item's full left->pick->right->place->left cycle. The run's FIRST
     case is the exception: it strafes LEFT to the bin beside the source and
     back RIGHT, the same excursion a diverted target battery makes.
@@ -3144,8 +3556,45 @@ def run_item(bot, mover: SuctionMover, label: str, pose_key: str,
                      src_plane, dcb.bev.top_face_z(src_layers))
     win_moves = 0
     taught = False      # this visit's arrival has taught the leg (see _into_window)
+    taught, tag_ok = _tag_arrive(bot, shadow, "source", label, leg, "source")
+    det = det_center = None
     while True:
         bat_top = None
+        if tag_ok:
+            # 1027: TAGS ONLY — no detection (no view park needed): x, y, yaw from
+            # the pair + the remembered case, the case height from the head depth
+            plane = src_plane if src_plane is not None else dcb.bev.top_face_z(src_layers)
+            center = _tag_aim(bot, shadow, "source", label, plane + cfg.SUCTION_LENGTH_M)
+            if center is None:
+                _ensure_parked(mover, label)
+                tag_ok = False
+                continue
+            is_case = label == "case" and batteries_below
+            top = _tag_hover_top(bot, shadow, "source", label, center, _expected_top(
+                "source", src_layers, dcb.bev.top_face_z(src_layers + 1)) if is_case
+                else plane + cfg.BATTERY_TOP_ABOVE_FACE_M)
+            if is_case:
+                if top is not None:
+                    bat_top = top
+                    _CASE_TOPS["source"] = (top, src_layers)
+                    # the empty case nests one layer above the batteries it sits on
+                    plane = top - cfg.BATTERY_TOP_ABOVE_FACE_M + cfg.LAYER_PITCH_M
+                    center = (center[0], center[1], plane + cfg.SUCTION_LENGTH_M, center[3])
+                else:
+                    logger.warning("[{}] source battery-top depth failed — expected height "
+                                   "from the contact record", label)
+            pick_pose = resolve_poses(center)[pose_key]
+            if descent_reachable(mover, pick_pose):
+                break
+            logger.warning("[{}] pick pose out of reach — adjust the chassis (f/b/l/r), "
+                           "`d` to re-aim + retry, `q` to give up", label)
+            if not (cfg.CHASSIS_MANUAL or auto) or not _manual_strafe(bot, "adjust"):
+                logger.error("[{}] giving up — arms home, then strafe right", label)
+                _arms_home(bot, mover)
+                strafe(bot, "right", auto, leg)
+                return False
+            continue
+        _ensure_parked(mover, label)
         # 1012: the WINDOW below replaces --auto's _center_case and _auto_adjust
         det = detect(bot, src_layers, src_plane)
         if det is None or not det.found:
@@ -3169,6 +3618,7 @@ def run_item(bot, mover: SuctionMover, label: str, pose_key: str,
                     return False
                 continue
             det, plane = fresh, fresh.top_face_z
+            _CASE_TOPS["source"] = (bat_top, src_layers)
         det = _refine_det(bot, src_layers, det, plane)   # median-of-N for the pose
         _log_det(zt, "source", label, src_layers, det)
         # the chassis puts the case in the WINDOW first (every mode)
@@ -3188,7 +3638,7 @@ def run_item(bot, mover: SuctionMover, label: str, pose_key: str,
             continue
         logger.info("[{}] source case @ base xy=({:.3f},{:+.3f}) yaw={:.1f}deg conf={:.2f}",
                     label, det.base_xy[0], det.base_xy[1], det.base_yaw_deg, det.conf)
-        center = _center_from_det(det)
+        center = det_center = _center_from_det(det)
         pick_pose = resolve_poses(center)[pose_key]
         if descent_reachable(mover, pick_pose):
             break
@@ -3201,9 +3651,12 @@ def run_item(bot, mover: SuctionMover, label: str, pose_key: str,
             _arms_home(bot, mover)
             strafe(bot, "right", auto, leg)
             return False
-    _dual_plane_probe(bot, src_layers, src_plane, "source", label, zt)
+    if det is not None:              # the detection path (not tags only)
+        _dual_plane_probe(bot, src_layers, src_plane, "source", label, zt)
+        _tag_check(shadow, bot, "source", label, det_center, pose_key)
     pz = zt.expected_ee_z("source", label, src_layers) if zt is not None else None
-    exp_z = pz if pz is not None else det.top_face_z + cfg.SUCTION_LENGTH_M
+    exp_z = pz if pz is not None else (plane if det is None else det.top_face_z) \
+        + cfg.SUCTION_LENGTH_M
     if bat_top is not None:
         # the empty case rests ON the batteries below: the cup meets it there
         exp_z = bat_top + cfg.SUCTION_LENGTH_M
@@ -3216,17 +3669,20 @@ def run_item(bot, mover: SuctionMover, label: str, pose_key: str,
     if scan and label.startswith("battery"):
         # barcode-gated pick: scan during the descent (sweep bounded by the
         # DETECTED case center, not the taught one)
-        res = mover.pick_gated(pick_pose, case_center=center, expected_z=exp_z,
-                               lift_to_clear=True)
+        with mover.joint_trace(f"{label}_pick"):        # log only
+            res = mover.pick_gated(pick_pose, case_center=center, expected_z=exp_z,
+                                   lift_to_clear=True)
     else:
         # only the CASE creeps out of its lift: it comes up from between the
         # source bin walls. A battery leaves its compartment clear, and a place
         # lifts an empty cup, so both take the fast profile (user, 0903).
-        # planned: transport -> creep line as one planned stream (pick_place, 1012)
-        res = mover.pick(pick_pose, expected_z=exp_z, lift_to_clear=True,
-                         lift_creep_out_m=(cfg.DESCENT_CREEP_GAP_M
-                                           if label == "case" else 0.0),
-                         planned=True)
+        # 1027: per-tick descent from the hover (PICK_DESCENT_SPEED_M_S), no
+        # longer planned=True — that planned hover -> creep leg swung the arm
+        # about the shoulder (case pick: 84-106mm, 16-22 deg behind)
+        with mover.joint_trace(f"{label}_pick"):        # log only
+            res = mover.pick(pick_pose, expected_z=exp_z, lift_to_clear=True,
+                             lift_creep_out_m=(cfg.DESCENT_CREEP_GAP_M
+                                               if label == "case" else 0.0))
     if not res.success:
         logger.error("[{}] pick failed: {} — arms home, then strafe right", label, res.reason)
         if zt is not None:
@@ -3248,7 +3704,7 @@ def run_item(bot, mover: SuctionMover, label: str, pose_key: str,
             logger.info("[{}] TARGET battery {!r} — diverting to the divert case",
                         label, res.barcode)
             diverted = _divert_case_place(bot, mover, label, divert_slots[0],
-                                          auto, leg, divert_leg, zt)
+                                          auto, leg, divert_leg, zt, shadow)
             if diverted is None:
                 # part still on the cup at the divert case — stop here
                 logger.error("[{}] stopping at the divert case (part still held)", label)
@@ -3302,13 +3758,13 @@ def run_item(bot, mover: SuctionMover, label: str, pose_key: str,
         from .move_chassis import strafe_left
         logger.info("[{}] first case -> the bin LEFT of the source: strafe LEFT "
                     "{:.2f} m (divert leg)", label, seed_dist)
-        _park_during_legs(label, [lambda: _view_park(mover, label)],
+        _park_during_legs(label, [_leg_arm(mover, label, shadow, "left_bin")],
                           lambda: strafe_left(bot, distance_m=seed_dist,
                                               speed=cfg.CHASSIS_LEG_SPEED_MS))
         if leg is not None:
             leg.skip_next_learn = True
     else:
-        _park_during_legs(label, [lambda: _view_park(mover, label)],
+        _park_during_legs(label, [_leg_arm(mover, label, shadow, "target")],
                           lambda: strafe(bot, "right", auto, leg))
     _save_wrist_visit(bot, "left_bin" if seed else "target", label)   # log only
     redetects = 0
@@ -3330,11 +3786,15 @@ def run_item(bot, mover: SuctionMover, label: str, pose_key: str,
     # layers, the layer's batteries, and resumed runs (TGT_LAYERS_REMAINING >
     # 1) always detect.
     win_moves = 0
+    seed_looks = 0      # tag-pair looks before the seed place (1027)
     taught = False      # this visit's arrival has taught its leg (see _into_window)
+    taught, tag_ok = (_tag_arrive(bot, shadow, "left_bin", label, divert_leg, "divert")
+                      if seed else _tag_arrive(bot, shadow, "target", label, leg, "target"))
     while True:
         tdet = None
         bat_top = None
-        if not seed:
+        if not seed and not tag_ok:
+            _ensure_parked(mover, label)
             tdet = detect(bot, tgt_layers, tgt_plane)
 
         if seed:
@@ -3391,6 +3851,21 @@ def run_item(bot, mover: SuctionMover, label: str, pose_key: str,
                     return False
                 win_moves = 0
                 continue
+            # 1027: place the seed only with a tag PAIR in view — this place IS the
+            # left bin's memory, and the arm over the bin hides tags right after
+            # (tape glare hides id0 from some poses): no pair -> look from a few
+            # cm back / forward, then re-detect the bin (the chassis moved) and
+            # re-aim; after STATION_TAG_SEED_PAIR_TRIES looks, place anyway
+            if (shadow is not None and cfg.STATION_TAG_ARRIVE
+                    and seed_looks < int(cfg.STATION_TAG_SEED_PAIR_TRIES)
+                    and not shadow.has_pair(_tags_now(bot, shadow))):
+                seed_looks += 1
+                logger.info("[tagarrive] left_bin {}: no tag pair before the seed place "
+                            "(look {}/{})", label, seed_looks,
+                            int(cfg.STATION_TAG_SEED_PAIR_TRIES))
+                _tag_wiggle(bot, shadow, label)
+                win_moves = 0
+                continue
             # Seed at the BIN's long-axis yaw (1012, ported from pick_place: the
             # case seats long side along the bin's). Was the SOURCE's detected
             # yaw (no wrist de-rotation in transit, the stack mirrored the
@@ -3402,6 +3877,38 @@ def run_item(bot, mover: SuctionMover, label: str, pose_key: str,
             place_pose = resolve_poses(seed_center)[pose_key]
             intended = [seed_center[0], seed_center[1], bxy[2]]
             exp_z = None    # place() falls back to the pose (seat) z
+
+        elif tag_ok:
+            # 1027: TAGS ONLY — no detection (no view park needed): x, y, yaw from
+            # the pair + the remembered case; a case's height from the batteries
+            # it lands on, read in the head depth past the held case
+            plane = tgt_plane if tgt_plane is not None else dcb.bev.top_face_z(tgt_layers)
+            tc = _tag_aim(bot, shadow, "target", label, plane + cfg.SUCTION_LENGTH_M)
+            if tc is None:
+                _ensure_parked(mover, label)
+                tag_ok = False
+                continue
+            # LOG + PHOTO only: under a held (transparent) case the depth is garbage —
+            # 1027 read the battery tops 26 / 48 mm high and the case dropped from 4-7 cm
+            _tag_hover_top(bot, shadow, "target", label, tc, _expected_top(
+                "target", tgt_layers, dcb.bev.top_face_z(tgt_layers)) if label == "case"
+                else plane + cfg.BATTERY_TOP_ABOVE_FACE_M)
+            if label == "case":
+                if "target" in _CASE_TOPS:
+                    # the tops measured right after the last battery place here, cup empty
+                    bat_top = _expected_top("target", tgt_layers, 0.0)
+                    logger.info("[{}] target case lands on the battery tops measured after "
+                                "the last battery place: {:.4f}", label, bat_top)
+                    tgt_plane = bat_top - cfg.BATTERY_TOP_ABOVE_FACE_M
+                    tc = (tc[0], tc[1], tgt_plane + cfg.SUCTION_LENGTH_M, tc[3])
+                else:
+                    logger.warning("[{}] no battery tops measured at the target — expected "
+                                   "height from the contact record", label)
+            place_pose = resolve_poses(tc)[pose_key]
+            intended = [tc[0], tc[1], float(np.rad2deg(tc[3]))]
+            exp_z = pz if pz is not None else plane + cfg.SUCTION_LENGTH_M
+            if bat_top is not None:
+                exp_z = bat_top + cfg.SUCTION_LENGTH_M   # the case lands ON the batteries
 
         elif tdet is not None and tdet.found:
             logger.info("[{}] target case found -> aligned place", label)
@@ -3423,6 +3930,7 @@ def run_item(bot, mover: SuctionMover, label: str, pose_key: str,
                         return False
                     continue
                 tgt_plane, tdet = fresh.top_face_z, fresh
+                _CASE_TOPS["target"] = (bat_top, tgt_layers)
             elif tgt_plane is None:
                 # No measured plane for this station yet, so the detection just
                 # above was warped on the MODEL plane — which is not close. Every
@@ -3475,7 +3983,7 @@ def run_item(bot, mover: SuctionMover, label: str, pose_key: str,
                     return False
                 win_moves = 0
                 continue
-            tc = _center_from_det(tdet)
+            tc = det_tc = _center_from_det(tdet)
             place_pose = resolve_poses(tc)[pose_key]
             intended = [tc[0], tc[1], float(np.rad2deg(tc[3]))]
             exp_z = pz if pz is not None else tdet.top_face_z + cfg.SUCTION_LENGTH_M
@@ -3514,7 +4022,14 @@ def run_item(bot, mover: SuctionMover, label: str, pose_key: str,
                 logger.error("[{}] stopping at the place station (item still held)", label)
                 return False
             continue
-        _dual_plane_probe(bot, tgt_layers, tgt_plane, tgt_station, label, zt)
+        if tdet is not None or seed:    # not on tags only
+            _dual_plane_probe(bot, tgt_layers, tgt_plane, tgt_station, label, zt)
+        if tdet is not None:
+            _tag_check(shadow, bot, "target", label, det_tc, pose_key)
+        elif seed and shadow is not None:   # nothing to check yet: tags only, for the record
+            rgb = _head_rgb(bot)
+            if rgb is not None:
+                shadow.observe(rgb, *_joints(bot), "left_bin", label)
         if label.startswith("battery") and exp_z is not None:
             # DIAGNOSIS ONLY — nothing below reads it (see _log_pick_depth)
             _log_pick_depth(bot, label, place_pose, tgt_plane, tgt_layers,
@@ -3525,10 +4040,12 @@ def run_item(bot, mover: SuctionMover, label: str, pose_key: str,
         # straight (1012, pick_place): hover, then straight down per tick onto the
         # aim, stop at contact (or PLACE_RELEASE_ABOVE_M above exp_z) — no corner
         # seat, no misseat recovery
-        pres = mover.place(place_pose, expected_z=exp_z, lift_to_clear=True,
-                           straight=True,
-                           hover_m=(None if label == "case" else cfg.BATTERY_PLACE_HOVER_M),
-                           release_above_m=cfg.PLACE_RELEASE_ABOVE_M)
+        with mover.joint_trace(f"{label}_place"):       # log only
+            pres = mover.place(place_pose, expected_z=exp_z, lift_to_clear=True,
+                               straight=True,
+                               hover_m=(None if label == "case"
+                                        else cfg.BATTERY_PLACE_HOVER_M),
+                               release_above_m=cfg.PLACE_RELEASE_ABOVE_M)
         if (seed and pres is not None and pres.reason == "unreachable"
                 and pres.contact_ee_z is None):
             # seed hover approach failed with the case still ON the cup and
@@ -3585,10 +4102,30 @@ def run_item(bot, mover: SuctionMover, label: str, pose_key: str,
         # keep the run moving; the z anchor stays clean (success-gated below)
         logger.warning("[{}] place failed ({}) — operator resolved it at the "
                        "gate, continuing with the next item", label, pres.reason)
-    if zt is not None and pres is not None:
+    if zt is not None and pres is not None and pres.reason == "at_height":
+        # released in the air PLACE_RELEASE_ABOVE_M above exp_z, nothing
+        # touched: that height is not a seat. Recorded, it fed the chain and
+        # every expectation after it started 20mm higher (1027: L2 battery_2
+        # released 0.9056, ~55mm above the place-point depth)
+        logger.info("[{}] {} released in the air at ee_z={:.4f} — not recorded as a "
+                    "contact", label, tgt_station, pres.contact_ee_z)
+    elif zt is not None and pres is not None:
         # a GATED place still feeds the chain (never the anchor) — see record()
         zt.record(tgt_station, label, tgt_layers, pres.contact_ee_z,
                   seated=getattr(pres, "success", True))
+
+    if label == "case":     # released (a still-held failure returned above)
+        _tag_record(shadow, bot, mover, "left_bin" if seed else "target", label,
+                    seed_center if seed else tc)
+    elif not seed:
+        # 1027: the next CASE here lands on these batteries — read their tops now,
+        # the cup empty above them (the held case would wreck the depth then)
+        top = _tag_hover_top(bot, shadow, "target", label + "_after", tc,
+                             (tgt_plane if tgt_plane is not None
+                              else dcb.bev.top_face_z(tgt_layers))
+                             + cfg.BATTERY_TOP_ABOVE_FACE_M)
+        if top is not None:
+            _CASE_TOPS["target"] = (top, tgt_layers + 1)
 
     # Return leg. Normally the LEFT leg back to the source (1012: no item-ref
     # folding any more — the WINDOW puts every item's case centre at the same
@@ -3628,7 +4165,7 @@ def run_item(bot, mover: SuctionMover, label: str, pose_key: str,
     else:
         # --- park again (clear the head view for the SOURCE detect) IN PARALLEL
         #     with the return leg ---
-        _park_during_legs(label, [lambda: _view_park(mover, label)], _return_leg)
+        _park_during_legs(label, [_leg_arm(mover, label, shadow, "source")], _return_leg)
     return True
 
 
@@ -3673,12 +4210,23 @@ def run(bot, mover: SuctionMover,
     # measured-contact z anchors (expected z + warp plane per column), with the
     # per-run error CSV (contact-vs-predicted, plane measured-vs-model, failures)
     stamp = run_stamp()
+    # station AprilTags: [tagshadow] log lines (cfg.STATION_TAG_SHADOW, + one npz
+    # per check under RUN_LOG_DIR/tag_shadow/<stamp>/), the tag arrival
+    # (cfg.STATION_TAG_ARRIVE, moves the chassis) and the leg watch (log only)
+    shadow = (TagShadow(dcb.bev.cg, out_dir=None if cfg.RUN_LOG_DIR is None else
+                        Path(cfg.RUN_LOG_DIR) / "tag_shadow" / stamp)
+              if cfg.STATION_TAG_SHADOW else None)
     zt = ZTracker(log_path=None if cfg.ZTRACK_LOG_DIR is None else
                   f"{cfg.ZTRACK_LOG_DIR}/ztrack_{stamp}.csv")
     logger.info("position the chassis at the SOURCE station (case in front), then `d`")
     if not _manual_strafe(bot, "start"):
         logger.error("start positioning aborted (`q`) — run cancelled")
         return False
+    _LEG_WATCH[:] = ([(bot, shadow)] if shadow is not None and cfg.STATION_TAG_LEG_WATCH
+                     else [])        # cleared in the finally below
+    _CASE_TOPS.clear()               # battery tops measured this run (tags-only heights)
+    _load_handoff(shadow, stamp)     # task 2's placed case -> the target's memory
+    _ARM_PARKED[0] = True            # the arm starts at home, out of the view
     # remaining divert-case slots, consumed by run_item on each successful
     # divert: first target battery -> LEFT slot, second -> RIGHT slot
     divert_slots = ["BAT_SRC_2", "BAT_SRC_1"]
@@ -3695,7 +4243,7 @@ def run(bot, mover: SuctionMover,
             for label, key in ITEMS:
                 if not run_item(bot, mover, label, key, src, tgt,
                                 scan=scan, auto=auto, leg=leg, divert_leg=divert_leg, zt=zt,
-                                divert_slots=divert_slots):
+                                divert_slots=divert_slots, shadow=shadow):
                     logger.error("stopping at layer {} item {} (robot left where it is) — "
                                  "to resume, set SRC_LAYERS_REMAINING={} TGT_LAYERS_REMAINING={}",
                                  layer, label, src, tgt)
@@ -3715,13 +4263,15 @@ def run(bot, mover: SuctionMover,
             # under it (no batteries) for the battery-top height
             ok = run_item(bot, mover, "case", "CASE_PICK", max(src, 1), tgt,
                           scan=scan, auto=auto, leg=leg, divert_leg=divert_leg,
-                          zt=zt, divert_slots=divert_slots, batteries_below=False)
+                          zt=zt, divert_slots=divert_slots, batteries_below=False,
+                          shadow=shadow)
             if not ok:
                 logger.error("stopping at the last case (robot left where it is) — "
                              "to resume, set SRC_LAYERS_REMAINING={} "
                              "TGT_LAYERS_REMAINING={}", src, tgt)
         return ok
     finally:
+        _LEG_WATCH.clear()
         zt.close()
         base = cfg.BUFFER_STRAFE_DIST_M
         if leg is not None and leg.leg_dist_m != base:
@@ -3892,9 +4442,13 @@ def run_case_to_bin_here(bot, mover: SuctionMover) -> bool:
     if not _manual_strafe(bot, "place"):
         logger.error("place positioning aborted (`q`) — case still HELD, stopping here")
         return False
-    pres = _place_case_in_bin(bot, mover, label, center[3], 0, auto=False)
+    shadow = (TagShadow(dcb.bev.cg, out_dir=None if cfg.RUN_LOG_DIR is None else
+                        Path(cfg.RUN_LOG_DIR) / "tag_shadow" / run_stamp())
+              if cfg.STATION_TAG_SHADOW else None)
+    pres = _place_case_in_bin(bot, mover, label, center[3], 0, auto=False, shadow=shadow)
     if pres is None:
         return False
+    _save_handoff(shadow, "bin")        # task 3's target memory (1027)
     if not getattr(pres, "success", True):
         logger.warning("[{}] bin place failed ({}) — released at the bin anyway",
                        label, pres.reason)
@@ -4222,7 +4776,7 @@ def _main() -> None:
                 # Start clean: BOTH arms safe-homed (lift-if-low first, so an arm
                 # left down in a box by a previous run doesn't sweep the walls).
                 logger.info("-> both arms safe home")
-                both_arms_home(bot, left=m, right=gripper)
+                both_arms_home(bot, left=m, right=gripper, right_first=True)
                 detectors.join()
                 logger.info("preload done in {:.1f}s (right arm + gripper + detectors)",
                             time.monotonic() - t0)

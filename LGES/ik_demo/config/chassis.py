@@ -544,6 +544,76 @@ OBB_DEPTH_SAVE_FRAMES: bool = True
 # score the wrist-photo bin tracking (no-view-park study) against the head depth
 # on real runs. Needs the right arm at home (= its wrist-camera view pose).
 WRIST_WATCH_SAVE_FRAMES: bool = True
+# 1026, LOG ONLY (changes no motion): station AprilTags (36h11 id0..3, flat on
+# the table's front edge, one right of each bin) — task 3 logs, at every pick /
+# place, where the tag + a remembered case pose would have put the case next to
+# where the detection put it ([tagshadow] lines). The remembered pose comes from
+# the first detection at a station, or after a CASE place from the arm's own
+# joint readings at release. Station tag poses use the corner rays cut with the
+# fixed table plane STATION_TAG_PLANE_Z_M (per-frame PnP height of a small
+# oblique tag swung 18mm, and 3-5cm at 50mm tags; 0.682 = median PnP z of the
+# 104mm tags over 1026/1027 runs — NOTE FLOOR_Z_BASE_M says 0.67).
+STATION_TAG_SHADOW: bool = True
+STATION_TAG_PLANE_Z_M: float = 0.682
+# (front, back) tag pairs, 1027: id4..7 lie behind the bins, ~0.59 m behind the
+# front-edge id0..3. A pair's line pins the station yaw ~30x better than one
+# 8cm tag's own edges (same-frame angle between pairs 0-4 / 1-5: 0.07 deg spread
+# over 4 visits, two single tags: 2.24 deg).
+STATION_TAG_PAIRS: tuple = ((0, 4), (1, 5), (2, 6), (3, 7))
+# 1027, MOVES THE CHASSIS (task 3, needs STATION_TAG_SHADOW): at every station
+# arrival, before the detection, look (chassis still) for a tag pair; a tag but
+# no pair -> look again from STATION_TAG_WIGGLE_M back / forward; no tag at all ->
+# creep on in the direction of the last strafe (<= STATION_TAG_CREEP_MAX_M), both
+# at STATION_TAG_CREEP_SPEED_MS reading tags all the way, stopping at the first
+# pair. With a remembered case for the station, put it in the WINDOW from the tags
+# (a pair, else a single tag; same _into_window moves). Nothing -> the detection
+# window as before. Picks / places still aim at the
+# detection (view park unchanged). False = arrival exactly as before.
+STATION_TAG_ARRIVE: bool = True
+STATION_TAG_CREEP_SPEED_MS: float = 0.02
+STATION_TAG_CREEP_MAX_M: float = 0.10
+# some tag in view but no pair (partner hidden: tape glare at the left bin, 1027):
+# look again from this far back, then as far forward of the start (same speed)
+STATION_TAG_WIGGLE_M: float = 0.03
+# 1027, MOVES THE ARM (needs STATION_TAG_ARRIVE): when the arrival put the case in
+# the window by a tag PAIR, the pick / place aims at the pair + the station's
+# remembered case (x, y, yaw) instead of the detection, and the detection window
+# is skipped. z (plane, expected height) still comes from the detection — the
+# view park stays for now. [tagaim] lines log tags vs detection. False = aims at
+# the detection as before.
+STATION_TAG_AIM: bool = True
+# 1027, MOVES THE ARM (needs STATION_TAG_AIM): a leg toward a station with a case
+# remembered by a tag pair only RISES the arm to SAFE_TRANSPORT_Z (no view park);
+# there the pick / place runs on tags alone — no detection. A CASE picked at the
+# source: its height from the head depth inside the tag-aimed case (pixels within
+# STATION_TAG_DEPTH_WINDOW_M of the expected battery top: drops the held part and
+# the arm above; 1027 offline, 8 frame pairs without the park read the battery
+# tops within -3.3..+2.7mm of the parked frames), else from the contact record;
+# a CASE placed at the target: the battery tops read right after the last battery
+# place there (cup empty) — under a HELD case the depth is garbage (1027: +26/+48mm).
+# Every such hover saves head RGB + depth (tag_shadow/<stamp>/*_hover.npz). Tags
+# lost there -> view park on the spot, then the detection. False = view park always.
+STATION_TAG_NO_PARK: bool = True
+STATION_TAG_DEPTH_WINDOW_M: float = 0.06
+# the run's first case goes into the empty left bin only with a tag pair in view
+# (that place is the bin's memory): up to this many back / forward looks first
+STATION_TAG_SEED_PAIR_TRIES: int = 2
+# task 2 -> task 3 handoff (1027): task 2's case place into the bin (normally the
+# target C) is recorded from the arm in the tag frames and saved here; task 3
+# loads it at start (its target needs no first detection — the transparent case
+# detection swung 30 mm in x run to run) and renames the file *_used_<stamp> so
+# it never applies twice. None = no handoff.
+STATION_TAG_HANDOFF_FILE: "str | None" = (None if RUN_LOG_DIR is None
+                                          else f"{RUN_LOG_DIR}/tag_handoff.json")
+# station -> its (front, back) tag pair: the tags lie RIGHT of their bin
+STATION_TAG_STATION_PAIRS: dict = {"left_bin": (0, 4), "source": (1, 5), "target": (2, 6)}
+# a case belongs to a pair's station when it sits this far LEFT of the pair
+# (pair-frame y, m; 1027 all three stations: +0.38..+0.44)
+STATION_TAG_BIN_Y_M: tuple = (0.20, 0.60)
+# 1027, LOG ONLY: read tags on every frame during the station legs (~10 Hz,
+# parallel to the leg) and log one summary line per leg — which tags / pairs a
+# moving robot still reads, and from when (the input for reading tags at speed).
+STATION_TAG_LEG_WATCH: bool = True
 
 # Case / battery places go STRAIGHT down onto the detection (no corner aim bias,
 # no lateral drive, no trims, no misseat recovery): per-tick from the hover at

@@ -84,6 +84,18 @@ CONTROL_HZ: float = 100.0          # motion streaming rate (set_joint_pos_vel)
 
 # Joint-space (move_joints: cached-pose -> cached-pose travel), per joint.
 MAX_JOINT_VEL: float = 2.0          # rad/s
+# Per-joint speed the LEFT arm can really reach, rad/s (None = MAX_JOINT_VEL /
+# URDF). 1027 joint traces (run_20261027_144315): left j1 (shoulder) topped out
+# at 28-32 deg/s in all 8 moves commanded above 35 deg/s, then closed the gap at
+# a constant ~22 deg/s, while j2-j7 reached 72-137 deg/s — the URDF says 2.4. The
+# planner timed every move for a j1 it does not have, so the other joints
+# arrived first and the hand left the path (case pick approach: 198mm high, 23
+# deg tilt, ~1 s of j1 catching up at the hover). Capped under the measured
+# ceiling so ruckig syncs every joint to it. NOT scaled by SPEED_SCALE upward.
+# 0.45 (robot-verified 1027 15:25: approach j1 lag 23 -> 6.6 deg) still let the
+# lag GROW at 26 deg/s commanded — the SUSTAINED j1 speed reads ~22-23 deg/s
+# (the 28-32 above were momentary peaks) -> 0.38 (22 deg/s), unverified.
+JOINT_VEL_CAP_LEFT: tuple = (0.38, None, None, None, None, None, None)
 MAX_JOINT_ACCEL: float = 5.0        # rad/s^2
 MAX_JOINT_JERK: float = 30.0        # rad/s^3
 # Per-tick joint-step guard for the Cartesian streams (arm.solve_step): a
